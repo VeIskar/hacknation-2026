@@ -1,14 +1,25 @@
 # docker compose up --build   ->  web http://localhost:5173, api http://localhost:8000
-# The LLM_* values come from the shell or from a .env file next to this file (see env.example).
+# Settings come from the shell or from a .env file next to this file (see env.example).
+# Every variable in env.example is listed under api.environment as ${NAME:-}: an unset one
+# arrives empty and keeps its default from backend/app/config.py. The explicit form works in
+# both Docker Compose and podman-compose (backend/tests/test_config.py checks the list).
 services:
   api:
     build: ./backend
     ports:
       - "8000:8000"
     environment:
-      - LLM_BASE_URL
-      - LLM_MODEL
-      - LLM_API_KEY
+      MAX_FILE_SIZE_MB: ${MAX_FILE_SIZE_MB:-}
+      JWT_ENABLED: ${JWT_ENABLED:-}
+      JWT_SECRET: ${JWT_SECRET:-}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_TIMEOUT_S: ${LLM_TIMEOUT_S:-}
+      LLM_FIXTURE: ${LLM_FIXTURE:-}
+      OCR_LANG: ${OCR_LANG:-}
+      ADD_VALIDATORS: ${ADD_VALIDATORS:-}
     healthcheck:
       test:
         [

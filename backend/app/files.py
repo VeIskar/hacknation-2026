@@ -6,6 +6,8 @@ Komunikaty błędów: SPEC.md, rozdz. „API contract”.
 """
 
 import io
+import lzma
+import struct
 import zipfile
 import zlib
 from collections.abc import AsyncIterator
@@ -34,24 +36,45 @@ def too_large(max_bytes: int) -> UploadError:
     return UploadError(detail=f"Plik jest za duży. Limit to {max_bytes / MB:g} MB.", status_code=413)
 
 
+# zipfile na uszkodzonych metadanych rzuca nie tylko BadZipFile. Plik od użytkownika, którego
+# nie da się odczytać, to zawsze 415, nigdy 500, więc łapiemy wszystkie znane błędy odczytu.
+# ValueError obejmuje też UnicodeDecodeError (nazwy wpisów), OSError obejmuje EOF i seek.
+ZIP_ERRORS = (
+    zipfile.BadZipFile,
+    zipfile.LargeZipFile,
+    ValueError,
+    NotImplementedError,
+    OSError,
+    EOFError,
+    RuntimeError,
+    OverflowError,
+    KeyError,
+    IndexError,
+    struct.error,
+    zlib.error,
+    lzma.LZMAError,
+)
+
+
 def _zip_names(data: bytes) -> tuple[zipfile.ZipFile, list[str]] | None:
     if not data.startswith(b"PK\x03\x04"):
         return None
     try:
         archive = zipfile.ZipFile(io.BytesIO(data))
         return archive, archive.namelist()
-    except zipfile.BadZipFile:
+    except ZIP_ERRORS:
         return None
 
 
 def _is_ods(data: bytes) -> bool:
+    """Wpis `mimetype` ma treść dokładnie równą typowi ODS (ODF 1.2, rozdz. 3.3), bez dodatków."""
     opened = _zip_names(data)
     if opened is None or "mimetype" not in opened[1]:
         return False
     try:
         with opened[0].open("mimetype") as entry:
-            return entry.read(len(ODS_MIMETYPE) + 1).strip() == ODS_MIMETYPE
-    except (zipfile.BadZipFile, zlib.error, EOFError, OSError, RuntimeError):
+            return entry.read(len(ODS_MIMETYPE) + 1) == ODS_MIMETYPE
+    except ZIP_ERRORS:
         return False
 
 
@@ -114,7 +137,8 @@ async def read_single_file(request: Request, max_bytes: int) -> tuple[str, bytes
 
     Przerywa odczyt z 413, gdy żądanie jest większe niż limit, zanim przyjdzie do końca.
     """
-    if not request.headers.get("content-type", "").startswith("multipart/form-data"):
+    media_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if media_type != "multipart/form-data":  # typ MIME bez względu na wielkość liter (RFC 2045)
         raise UploadError(detail=MSG_NO_FILE, status_code=400)
     limit = max_bytes + MULTIPART_OVERHEAD
     declared = request.headers.get("content-length", "")
