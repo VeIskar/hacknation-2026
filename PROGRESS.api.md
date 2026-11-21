@@ -140,6 +140,16 @@ Krok M1.4 (Marcin): sklejenie `POST /api/forms` (DELEGACJA M1.4; K2 z K2.3 i K3 
   503 z analizy, 500 z lintera, `/health` odpowiada w trakcie analizy; testy warstwy uploadu i JWT podmieniają `process_file`.
 - Bez zmian: `LLM_TIMEOUT_S` i model (czekają na pomiar Qwen3.5-9B i decyzję lidera).
 
+Krok K2.4 (Mikołaj, `mikolaj/k2-reszta` od `65c0259`): tekst komórek XLSX i ODS bez nowej zależności.
+
+- `backend/app/extract/sheets.py` (nowy): `zipfile` + `ElementTree` jak DOCX; arkusz to strona `\f`, wiersz to niepuste komórki `a | b`.
+- XLSX: kolejność skoroszytu, teksty współdzielone, wbudowane i sformatowane, liczby, wartości logiczne, wyniki formuł, Strict OOXML.
+- ODS: akapity, `text:s`, tabulatory, łącza; powtórzenia wierszy i kolumn bez rozwijania pustych komórek; komentarze pominięte.
+- `backend/app/extract/common.py` (nowy): komunikat 400, czyszczenie znaków sterujących i odczyt ZIP ze wspólnym limitem bajtów.
+- Limity: 8 MB rozpakowanych XML na plik, głębokość, elementy w komórce, 1 mln znaków przed rozwinięciem powtórzeń; zły plik → 400.
+- `backend/tests/test_extract.py`: syntetyczne XLSX i ODS, pliki uszkodzone, bomba powtórzeń, próbki COI 1 i 5; ręcznie foldery 2–4, 6–9.
+- Dowód: RED każdego testu, mutacje, `bash scripts/gate.sh api -rs`.
+
 ## Requests
 
 (one line per change you need from another area: who asks, what, why)
@@ -169,6 +179,8 @@ Krok M1.4 (Marcin): sklejenie `POST /api/forms` (DELEGACJA M1.4; K2 z K2.3 i K3 
 - Marcin → lider (`SPEC.md`, „API contract”): jaki kod, gdy wygenerowany JSON nie przechodzi lintera? M1.4 daje tymczasowo 500 „Coś poszło nie tak. Spróbuj ponownie.” z błędami w logu (błąd po naszej stronie, nie użytkownika).
 - Marcin → Mikołaj (K3, `analysis.py`): `Settings.llm_context_tokens` (`LLM_CONTEXT_TOKENS`, domyślnie 32768, min. 8192) jest gotowe; compose podaje tę samą liczbę Ollamie (`OLLAMA_CONTEXT_LENGTH`). Przełącz `CONTEXT_TOKENS` na `settings.llm_context_tokens`.
 - Marcin → lider (`DELEGACJA.md`, rozdz. 5): dopisać `LLM_CONTEXT_TOKENS` | `32768` | kontekst modelu, ten sam dla serwera i budżetu analizy (min. 8192).
+- Mikołaj → Marcin (K2.4, `backend/tests/test_api.py`): docstring `test_format_without_reader_yet_is_400` jest nieaktualny, bo XLSX ma już czytnik. Test dalej przechodzi, bo próbka `XLSX` z `samples.py` nie ma arkusza. Proponuję opis „XLSX bez arkusza → 400” albo prawdziwy XLSX → 200.
+- Mikołaj → lider (`.gitignore`): wzorzec `materialy/` pasuje tylko do katalogu, a w worktree `materialy` to dowiązanie do materiałów COI. „Stage all” w GUI doda je do commita (D5). Proponuję wzorzec `materialy` bez ukośnika.
 
 ## Log
 
@@ -213,3 +225,4 @@ Krok M1.4 (Marcin): sklejenie `POST /api/forms` (DELEGACJA M1.4; K2 z K2.3 i K3 
 - P4: done strażnik w API i P3, kontrole walidatorów i słowników, ochrona źródeł SHOW przy regule Kraje, 5/5 snapshotów identycznych, 6/6 mutacji wykrytych, `bash scripts/gate.sh api -rs` → `767 passed`, 0 pominiętych, `GATE: PASS (api)` / next commit człowieka / blocker brak.
 - M1.6: done README: przepływ, wymagania (x86 bez GPU, dysk), obrazy (api, ollama, web; lustro mirror.gcr.io), uruchomienie (compose, `pull_model.sh`, `--build`, `down` bez `-v`), model lokalny albo otwarty przez API (Eden AI), tabela konfiguracji z `env.example`, REST API z `curl` (z JWT i bez) i wszystkimi kodami błędów z SPEC, `generate_forms.py`, praca lokalna; teksty błędów sprawdzone z kodem / next `LLM_CONTEXT_TOKENS` w README po scaleniu gałęzi / blocker: `ADD_VALIDATORS` z `.env` nie działa (generator czyta stałą `app.generator.form.ADD_VALIDATORS`, Paweł).
 - LLM_CONTEXT_TOKENS: done `Settings.llm_context_tokens` (domyślnie 32768, min. 8192, błąd z nazwą zmiennej), compose: `api` dostaje `LLM_CONTEXT_TOKENS`, `ollama` bierze z niej `OLLAMA_CONTEXT_LENGTH` (osobna zmienna usunięta), `env.example`; pomiar `qwen3.5:4b` 16384 → 32768: 3,7 → 4,2 GB; 9 nowych testów czerwonych przed zmianą, 4/4 mutacje wykryte / next Mikołaj przełącza `CONTEXT_TOKENS` w K3 na ustawienie (Request) / blocker brak.
+- K2.4 (`mikolaj/k2-reszta` od `65c0259`): done XLSX i ODS bez nowej zależności (`extract/sheets.py`, `extract/common.py`); 16/16 plików COI (foldery 1–9) z tekstem, XLSX = ODS w 6/7 folderów (folder 3: różnica w samych plikach), API z `LLM_FIXTURE` 16/16 → 200, linter 0 błędów. Recenzja `reviewer`: FIX, naniesione 1–3 i 5 (kodowanie XML → 400, limity głębokości, elementów komórki i 8 MB XML, komórka zamiast wiersza w pamięci, części OPC bez wielkości liter i z `%`); 4 to Request do lidera. 56/56 mutacji wykrytych, pokrycie `sheets.py` i `common.py` 100% linii i gałęzi; `bash scripts/gate.sh api -rs` → 745 passed, 0 pominiętych / next K2.5 binarny DOC (decyzja: `olefile` BSD-2-Clause przez Request do Marcina) / blocker brak; defekt poza krokiem: DOCX z nieznanym kodowaniem XML → 500 (`LookupError`), do kroku limitów.
