@@ -202,14 +202,18 @@ def _coi_texts(form: dict) -> set[str]:
     return {plain for plain in map(_plain, texts) if len(plain) >= 4}
 
 
-def test_control_set_does_not_leak_into_model_prompt_or_fixture(
+def test_control_set_does_not_leak_into_model_prompt_or_fixtures(
     coi_control_reference: dict, coi_working_reference: dict
 ) -> None:
     control_only = _coi_texts(coi_control_reference) - _coi_texts(coi_working_reference)
     assert control_only, "zbiór kontrolny nie ma własnych tekstów, test nic by nie sprawdzał"
+    fixtures = sorted(FIXTURES.glob("*.json"))
+    assert "fields.json" in [path.name for path in fixtures]
     # Wartości, nie surowy plik: w tekście JSON-a cudzysłowy i znaki nowej linii są escapowane.
-    published = _plain(" ".join(_strings(FormAnalysis.model_json_schema()) + _strings(fields_json())))
-    assert sorted(text for text in control_only if text in published) == []
+    sources = {"schemat FormAnalysis": _strings(FormAnalysis.model_json_schema())}
+    sources |= {path.name: _strings(json.loads(path.read_text(encoding="utf-8"))) for path in fixtures}
+    leaks = {name: sorted(text for text in control_only if text in _plain(" ".join(texts))) for name, texts in sources.items()}
+    assert {name: found for name, found in leaks.items() if found} == {}
 
 
 def test_extracted_document_minimal() -> None:
