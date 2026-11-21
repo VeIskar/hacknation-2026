@@ -287,6 +287,8 @@ def test_separates_k3_budget_from_model_failure_without_a_request(
     _file(materials, 8, "dlugi.docx", _word("Długi fragment. " * 3000))
     _file(materials, 9, "krotki.docx", _word())
     monkeypatch.setenv("LLM_FIXTURE", str(tmp_path / "brak.json"))
+    monkeypatch.setenv("LLM_CONTEXT_TOKENS", "16384")
+    monkeypatch.setenv("LLM_MAX_TOKENS", "4096")
     out = tmp_path / "out"
     assert _run(out, "8,9") == 1
     budget, model = _report(out)

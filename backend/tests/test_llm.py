@@ -2,6 +2,7 @@
 
 import base64
 import json
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import httpx
@@ -48,12 +49,82 @@ def test_request_disables_thinking_and_forces_form_analysis_schema() -> None:
     assert body["model"] == "qwen3.5:4b"
     assert body["messages"] == MESSAGES
     assert body["stream"] is False
+    assert body["max_tokens"] == 4096
+    assert type(body["temperature"]) is int and body["temperature"] == 0
     # Ollama na /v1 ignoruje `think`; myślenie wyłącza reasoning_effort "none".
     assert body["reasoning_effort"] == "none"
     assert "think" not in body
     assert body["response_format"]["type"] == "json_schema"
     assert body["response_format"]["json_schema"]["schema"] == schema
     assert body["response_format"]["json_schema"]["name"] == "FormAnalysis"
+    assert body["response_format"]["json_schema"]["strict"] is True
+
+
+def test_eden_request_omits_disabled_parameters_and_protects_managed_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+    @dataclass(frozen=True)
+    class EdenSettings(Settings):
+        llm_provider: str = "edenai"
+
+    monkeypatch.setenv("LLM_PROVIDER", "edenai")
+    monkeypatch.setenv("LLM_BASE_URL", "https://api.eu.edenai.run/v3")
+    monkeypatch.setenv("LLM_MODEL", "ovhcloud/Qwen3.5-9B")
+    monkeypatch.setenv("LLM_API_KEY", "synthetic-test-key")
+    monkeypatch.setenv("LLM_TEMPERATURE", "off")
+    monkeypatch.setenv("LLM_REASONING_EFFORT", "off")
+    monkeypatch.setenv("LLM_STRICT_SCHEMA", "false")
+    monkeypatch.setenv("LLM_MAX_TOKENS", "")
+    monkeypatch.setenv("LLM_FIXTURE", "")
+    monkeypatch.setenv("LLM_EXTRA_BODY", json.dumps({
+        "chat_template_kwargs": {"enable_thinking": False},
+        "model": "inne",
+        "messages": [],
+        "response_format": {"type": "text"},
+        "stream": True,
+        "max_tokens": 1,
+        "temperature": 1,
+        "reasoning_effort": "high",
+    }))
+    seen: list[httpx.Request] = []
+    schema = FormAnalysis.model_json_schema()
+    transport = _transport(httpx.Response(200, json=_completion()), seen)
+    chat_json(MESSAGES, schema, settings=EdenSettings.from_env(), transport=transport)
+
+    (request,) = seen
+    assert str(request.url) == "https://api.eu.edenai.run/v3/chat/completions"
+    assert json.loads(request.content) == {
+        "chat_template_kwargs": {"enable_thinking": False},
+        "model": "ovhcloud/Qwen3.5-9B",
+        "messages": MESSAGES,
+        "stream": False,
+        "max_tokens": 8192,
+        "response_format": {"type": "json_schema", "json_schema": {
+            "name": "FormAnalysis", "schema": schema, "strict": False,
+        }},
+    }
+
+
+def test_http_error_logs_status_and_redacts_before_limiting_body(caplog: pytest.LogCaptureFixture) -> None:
+    secret = "synthetic-test-key"
+    settings = replace(SETTINGS, llm_api_key=secret)
+    prefix = "Odrzucony parametr ".ljust(294, ".")
+    reply = httpx.Response(400, text=prefix + secret + " koniec", headers={"X-Debug": "synthetic-header"})
+    with pytest.raises(LLMUnavailable) as caught:
+        chat_json(MESSAGES, {}, settings=settings, transport=_transport(reply))
+    assert caught.value.status_code == 503
+    assert caplog.messages == [f"Model AI: HTTP 400, treść odpowiedzi: {prefix}*** ko"]
+    assert secret not in caplog.text and "synthetic-header" not in caplog.text
+
+
+def test_connect_error_is_503_with_a_separate_short_connect_timeout() -> None:
+    assert Settings().llm_connect_timeout_s == 10
+    settings = replace(SETTINGS, llm_connect_timeout_s=0.25)
+    seen: list[httpx.Request] = []
+    with pytest.raises(LLMUnavailable) as caught:
+        chat_json(MESSAGES, {}, settings=settings, transport=_transport(httpx.ConnectError("connection refused"), seen))
+    assert caught.value.status_code == 503
+    (request,) = seen
+    assert request.extensions["timeout"]["connect"] == 0.25
+    assert request.extensions["timeout"]["read"] == settings.llm_timeout_s
 
 
 def test_returns_content_usage_and_empty_reasoning() -> None:

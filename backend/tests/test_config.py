@@ -111,3 +111,62 @@ def test_ollama_gets_the_same_context_as_the_analysis() -> None:
         "LLM_CONTEXT_TOKENS",
         str(Settings().llm_context_tokens),
     )
+
+
+@pytest.mark.parametrize(("name", "default"), [("LLM_TEMPERATURE", 0), ("LLM_REASONING_EFFORT", "none")])
+@pytest.mark.parametrize("value", [None, "", "off"])
+def test_temperature_and_reasoning_use_defaults_unless_switched_off(
+    monkeypatch: pytest.MonkeyPatch, name: str, default: int | str, value: str | None,
+) -> None:
+    if value is None:
+        monkeypatch.delenv(name, raising=False)
+    else:
+        monkeypatch.setenv(name, value)
+    assert getattr(Settings.from_env(), name.lower()) == (None if value == "off" else default)
+
+
+@pytest.mark.parametrize(("name", "value"), [
+    ("LLM_TEMPERATURE", "warm"),
+    ("LLM_TEMPERATURE", "nan"),
+    ("LLM_TEMPERATURE", "2.1"),
+    ("LLM_REASONING_EFFORT", "maybe"),
+    ("LLM_STRICT_SCHEMA", "maybe"),
+    ("LLM_MAX_TOKENS", "0"),
+    ("LLM_MAX_TOKENS", "8.5"),
+    ("LLM_CONNECT_TIMEOUT_S", "0"),
+    ("LLM_CONNECT_TIMEOUT_S", "inf"),
+    ("LLM_EXTRA_BODY", "{"),
+    ("LLM_EXTRA_BODY", "[]"),
+    ("LLM_EXTRA_BODY", '{"bad":NaN}'),
+])
+def test_api_refuses_to_start_with_invalid_llm_configuration(
+    monkeypatch: pytest.MonkeyPatch, name: str, value: str,
+) -> None:
+    monkeypatch.setenv(name, value)
+    with pytest.raises(ValueError, match=name), TestClient(app):
+        pass
+
+
+def test_eden_request_options_are_read_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_MAX_TOKENS", "8192")
+    monkeypatch.setenv("LLM_TEMPERATURE", "0.25")
+    monkeypatch.setenv("LLM_REASONING_EFFORT", "low")
+    monkeypatch.setenv("LLM_STRICT_SCHEMA", "false")
+    monkeypatch.setenv("LLM_CONNECT_TIMEOUT_S", "2.5")
+    monkeypatch.setenv("LLM_EXTRA_BODY", '{"chat_template_kwargs":{"enable_thinking":false}}')
+    settings = Settings.from_env()
+    assert settings.llm_max_tokens == 8192
+    assert settings.llm_temperature == 0.25
+    assert settings.llm_reasoning_effort == "low"
+    assert settings.llm_strict_schema is False
+    assert settings.llm_connect_timeout_s == 2.5
+    assert settings.llm_extra_body == {"chat_template_kwargs": {"enable_thinking": False}}
+
+
+def test_k31_options_match_in_sample_compose_and_settings() -> None:
+    names = {
+        "LLM_MAX_TOKENS", "LLM_TEMPERATURE", "LLM_REASONING_EFFORT",
+        "LLM_STRICT_SCHEMA", "LLM_EXTRA_BODY", "LLM_CONNECT_TIMEOUT_S",
+    }
+    assert names <= _env_example_names() & _compose_api_environment()
+    assert all(hasattr(Settings(), name.lower()) for name in names)
