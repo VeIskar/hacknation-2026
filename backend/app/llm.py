@@ -77,7 +77,8 @@ def chat_json(
     headers = {"Authorization": f"Bearer {settings.llm_api_key}"}
     started = time.perf_counter()
     try:
-        with httpx.Client(timeout=settings.llm_timeout_s, transport=transport) as client:
+        # Model działa lokalnie (SPEC „Model”): proxy z HTTP_PROXY nie może przejąć zapytania z treścią formularza.
+        with httpx.Client(timeout=settings.llm_timeout_s, transport=transport, trust_env=False) as client:
             response = client.post(url, json=body, headers=headers)
             response.raise_for_status()
             payload = response.json()

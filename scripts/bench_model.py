@@ -2,7 +2,7 @@
 
 Mierzy czas, tokeny, poprawność JSON, FormAnalysis.model_validate i zgodność pól przedmiotu
 z backend/tests/fixtures/fields.json (nasz opis wniosku z folderu 5).
-Folder 1 to zbiór kontrolny (DECISIONS.md, D5): skrypt odmawia jego plików.
+Folder 1 to zbiór kontrolny (DECISIONS.md, D5): skrypt odmawia jego plików i ich kopii (sha256).
 Raport zawiera tylko liczby. Surowe odpowiedzi modelu zapisuje wyłącznie --raw-dir,
 i tylko w materialy/ albo poza repozytorium, czyli poza gitem.
 
@@ -13,6 +13,7 @@ Uruchomienie (Ollama na 127.0.0.1:11434):
 """
 
 import argparse
+import hashlib
 import io
 import json
 import os
@@ -77,6 +78,15 @@ def check_input(path: Path) -> None:
         folder = resolved.relative_to(MATERIALS.resolve()).parts[0]
         if folder.startswith("1."):
             raise SystemExit("Folder 1 to zbiór kontrolny (D5): nie wysyłamy go do modelu.")
+    # Materiały COI mają kopie plików z folderu 1 w innych katalogach, więc liczy się treść, nie ścieżka.
+    if resolved.is_file():
+        control = {_sha256(p) for folder in MATERIALS.glob("1.*") for p in folder.rglob("*") if p.is_file()}
+        if _sha256(resolved) in control:
+            raise SystemExit(f"{path.name}: ta sama treść co plik z folderu 1 (zbiór kontrolny, D5). Nie wysyłamy go do modelu.")
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def check_output_dir(path: Path) -> None:
@@ -203,7 +213,7 @@ def evaluate(content: str, reference: dict[str, Any]) -> dict[str, Any]:
 def ollama_version(base_url: str, transport: httpx.BaseTransport | None) -> str | None:
     root = base_url.rstrip("/").removesuffix("/v1")
     try:
-        with httpx.Client(timeout=5, transport=transport) as client:
+        with httpx.Client(timeout=5, transport=transport, trust_env=False) as client:
             return client.get(f"{root}/api/version").json().get("version")
     except (httpx.HTTPError, ValueError, AttributeError):
         return None

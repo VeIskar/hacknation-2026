@@ -9,6 +9,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from env_proxy import record_proxy_use
 
 REPO = Path(__file__).resolve().parents[2]
 _spec = importlib.util.spec_from_file_location("bench_model", REPO / "scripts" / "bench_model.py")
@@ -121,6 +122,52 @@ def test_control_folder_is_refused() -> None:
     with pytest.raises(SystemExit, match="Folder 1"):
         bench.check_input(bench.MATERIALS / "1. zbiór kontrolny" / "wniosek.docx")
     bench.check_input(bench.MATERIALS / "5. zbiór roboczy" / "wniosek.docx")
+
+
+CONTROL_TEXT = "Wniosek kontrolny, którego model nie może zobaczyć."
+
+
+def _control_materials(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """materialy/ w tmp_path z jednym plikiem folderu 1, w podkatalogu, żeby kontrola szła rekurencyjnie."""
+    materials = tmp_path / "materialy"
+    control = materials / "1. zbiór kontrolny" / "załączniki" / "wizualizacja.txt"
+    control.parent.mkdir(parents=True)
+    control.write_text(CONTROL_TEXT, encoding="utf-8")
+    monkeypatch.setattr(bench, "MATERIALS", materials)
+    return materials
+
+
+def test_copy_of_a_control_file_is_refused_wherever_it_lies(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Materiały COI mają taką kopię: plik z folderu 1 leży też w katalogu z materiałami dodatkowymi.
+    materials = _control_materials(tmp_path, monkeypatch)
+    for copy_path in (materials / "Materiały dodatkowe" / "wizualizacja.txt", tmp_path / "poza" / "inna nazwa.txt"):
+        copy_path.parent.mkdir(parents=True)
+        copy_path.write_text(CONTROL_TEXT, encoding="utf-8")
+        with pytest.raises(SystemExit, match="folderu 1"):
+            bench.check_input(copy_path)
+
+    working = materials / "5. zbiór roboczy" / "wniosek.txt"
+    working.parent.mkdir(parents=True)
+    working.write_text("Wniosek roboczy", encoding="utf-8")
+    bench.check_input(working)
+
+
+def test_benchmark_stops_on_a_control_copy_before_any_request(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _control_materials(tmp_path, monkeypatch)
+    copy_path = tmp_path / "kopia.txt"
+    copy_path.write_text(CONTROL_TEXT, encoding="utf-8")
+    sent: list[httpx.Request] = []
+    model = httpx.MockTransport(lambda request: sent.append(request) or httpx.Response(503))
+
+    with pytest.raises(SystemExit, match="folderu 1"):
+        bench.main(["--input", str(copy_path), "--base-url", "http://model.test/v1"], transport=model)
+    assert sent == []
+
+
+def test_version_probe_ignores_proxy_from_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    used = record_proxy_use(monkeypatch, {"version": "0.40.15"})
+    assert bench.ollama_version("http://ollama:11434/v1", None) == "0.40.15"
+    assert used == [None]
 
 
 def test_raw_answers_stay_out_of_git(tmp_path: Path) -> None:

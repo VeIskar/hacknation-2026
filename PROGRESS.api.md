@@ -64,6 +64,15 @@ Krok K1 (Mikołaj, gałąź `mikolaj/k1`): pomiar `qwen3.5:4b` w lokalnej Ollami
 - Dokumenty: wynik pomiaru i httpx w runtime w `DECISIONS.md` (api); log tutaj. Bielik tylko opcjonalnie.
 - Dowód: `bash scripts/gate.sh api -rs`, każdy nowy test widziany na czerwono.
 
+Krok K1-fix2 (zakres zatwierdzony przez lidera 2026-11-21, także `scripts/bench_model.py`): uwagi Codexa #1 i #2.
+
+- `backend/app/llm.py` i `ollama_version` w `scripts/bench_model.py`: `httpx.Client(trust_env=False)`, model zawsze bez proxy z env.
+- `scripts/bench_model.py`: `check_input` odrzuca też plik o tej samej treści (sha256) co plik z folderu 1, w dowolnym miejscu.
+- Testy bez sieci: proxy z env, host `ollama`, podmienione tylko wysyłanie w `httpx.HTTPTransport` (httpx pomija proxy z env przy własnym transporcie, więc atrapa nie wystarczy); kopia pliku kontrolnego w `tmp_path`, także przez `main`, bez materiałów COI.
+- Wymaganie przed kolejnym pomiarem jakości pól (lider, uwaga Codexa #3): `field_quality` ma dawać wynik niezależny od kolejności etykiet. Najpierw dokładne etykiety, potem przydział 1:1 wśród reszty, z testem na zamienioną kolejność wzorców.
+- Wymaganie przed kolejnym pomiarem (kontrakt P1.2a): prompt w `bench_model.py` każe pominąć dane wnioskodawcy i kontakt, a `FormAnalysis` wymaga teraz decyzji `applicant` i `applicant_extra_fields`. Pomiar ma też oceniać te decyzje, nie tylko pola przedmiotu.
+- Dowód: `bash scripts/gate.sh api -rs`, każdy nowy test widziany na czerwono.
+
 ## Requests
 
 (one line per change you need from another area: who asks, what, why)
@@ -78,6 +87,7 @@ Krok K1 (Mikołaj, gałąź `mikolaj/k1`): pomiar `qwen3.5:4b` w lokalnej Ollami
 - Mikołaj → lider (`SPEC.md`, „Model”): zamień `think: false` na `reasoning_effort: "none"`, bo `/v1` ignoruje `think` (pomiar K1 w `DECISIONS.md`).
 - Mikołaj → Marcin (M1.5, `docker-compose.yml`): serwis `ollama/ollama:0.40.15` z `OLLAMA_CONTEXT_LENGTH=16384` i `OLLAMA_NO_CLOUD=1`, bez portu na hoście (API Ollamy nie ma haseł).
 - Mikołaj → Marcin (`config.py`, `env.example`): `LLM_TIMEOUT_S=120` jest za małe na CPU (K1: 238–344 s na formularz); podnieś do 600 albo zmierz na maszynie demo.
+- Mikołaj → web (`frontend/playwright.config.ts`): ustaw `LLM_FIXTURE` dla API, jak mówi SPEC „Real and mocked”. Dziś go nie ma, więc po K3 e2e wołałoby prawdziwy model (recenzja K1-fix2).
 
 ## Log
 
@@ -98,3 +108,4 @@ Krok K1 (Mikołaj, gałąź `mikolaj/k1`): pomiar `qwen3.5:4b` w lokalnej Ollami
 - P1.2a: done kontrakt MVP, 5 fixture’ów, 29 nowych przypadków czerwonych przed wdrożeniem i 25/25 mutacji wykrytych, `bash scripts/gate.sh api -rs` → `397 passed`, 0 pominiętych, 1 ostrzeżenie Starlette, `GATE: PASS (api)` / next commit człowieka i aktualizacja dokumentów przez lidera / blocker brak.
 - K1 (pomiar na `2e7bdba`, gałąź przewinięta na `4e9d228`): done `llm.py` (klient `/v1`, `reasoning_effort: "none"`, `config.Settings`), `scripts/bench_model.py`, testy offline; pomiar `qwen3.5:4b`, folder 5: JSON 3/3, `FormAnalysis` 0/3, DOCX 238–344 s, JPG 575 s (`DECISIONS.md`); `gate.sh api -rs` na `4e9d228` → 259 passed, 0 pominiętych; 35/35 mutacji wykrytych / next K2 (skany przez OCR), K3 z ponowieniem po błędzie walidatora / blocker `LLM_TIMEOUT_S=120` krótszy niż czas na CPU (prośba do Marcina).
 - K1 recenzja (Codex, baza `4e9d228`; P2 weszło potem na `main`): done 1/8 CONFIRMED, `llm.py` zamienia zły typ `usage`, tokenów i `reasoning` na brak wartości (wcześniej `AttributeError` omijał `LLMUnavailable`, czyli 503); 4 nowe przypadki czerwone przed poprawką, 5/5 mutacji wykrytych; `gate.sh api -rs` → 263 passed, 0 pominiętych, `GATE: PASS (api)` / later: 7 ustaleń (proxy w httpx, 6 w `bench_model.py`) w REVIEW.md / next scalenie z `main`: konflikt w PROGRESS.api.md, zostaw oba wpisy / blocker brak.
+- K1-fix2 (zakres lidera; scalony `main` `d0c07fd` z M1.2 JWT i P1.2a): done #1 `trust_env=False` w `llm.py` i w sondzie wersji, #2 odrzucanie kopii folderu 1 po sha256 (na prawdziwych materiałach odrzuca 1 kopię), #3 i rozjazd promptu z P1.2a zapisane jako wymagania przed pomiarem; kolizja z P1.2a (`applicants` bez domyślnej wartości) rozwiązana w scaleniu: `applicants_ok` fałszywe przy braku klucza; 4 nowe testy bez sieci, czerwone przed poprawką, 6/6 mutacji wykrytych także po scaleniu; samo scalenie → 462 passed, całość `gate.sh api -rs` → 466 passed, 0 pominiętych, `GATE: PASS (api)`; recenzje: Codex (nowe zmiany) 8 uwag, w testach naniesione N3–N7, `reviewer` (cały PR do `c7d6cf1`) SHIP, 0 CONFIRMED / later: #4, #5, #7, #8, N1, N2, N8, K3: `chat_json` z ustawieniami z `Depends` i gałąź `LLM_FIXTURE` (REVIEW.md) / next K2 / blocker `LLM_TIMEOUT_S=120` (prośba do Marcina).

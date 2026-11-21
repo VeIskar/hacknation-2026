@@ -5,6 +5,7 @@ import json
 
 import httpx
 import pytest
+from env_proxy import record_proxy_use
 
 from app.config import Settings, get_settings
 from app.errors import LLMUnavailable
@@ -125,6 +126,15 @@ def test_without_settings_the_client_uses_app_config(monkeypatch: pytest.MonkeyP
     assert str(request.url) == "http://env.test/v1/chat/completions"
     assert request.headers["Authorization"] == "Bearer z-env"
     assert json.loads(request.content)["model"] == "SpeakLeash/bielik-4.5b-v3.0-instruct:Q8_0"
+
+
+def test_model_call_ignores_proxy_from_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    used = record_proxy_use(monkeypatch, _completion())
+    # Adres jak w docker compose: nie loopback, więc proxy z env objęłoby go bez trust_env=False.
+    settings = Settings(llm_base_url="http://ollama:11434/v1", llm_timeout_s=5)
+    result = chat_json(MESSAGES, {}, settings=settings)
+    assert result.content == '{"title": "x"}'
+    assert used == [None]
 
 
 def test_image_part_is_a_base64_data_url() -> None:
