@@ -103,7 +103,7 @@ def test_ollama_keeps_models_in_volume_and_is_not_published() -> None:
 def test_ollama_context_fits_prompt_and_answer() -> None:
     """K1: prompt i odpowiedź to do ok. 4100 tokenów, a domyślny kontekst ma 4096."""
     parsed = interpolation(environment("ollama")["OLLAMA_CONTEXT_LENGTH"])
-    assert parsed and parsed[0] == "OLLAMA_CONTEXT_LENGTH" and int(parsed[1]) >= 16384, parsed
+    assert parsed and parsed[0] == "LLM_CONTEXT_TOKENS" and int(parsed[1]) >= 16384, parsed
 
 
 def test_ollama_has_no_root_privileges_or_persistent_writes_outside_volume() -> None:

@@ -89,3 +89,25 @@ def test_env_example_does_not_override_compose_defaults() -> None:
     for name in COMPOSE_DEFAULTS:
         values = re.findall(rf"^{name}=(.*)$", text, flags=re.MULTILINE)
         assert values == [""], f"{name} w env.example ma być pusty, jest {values}"
+
+
+# LLM_CONTEXT_TOKENS: ten sam kontekst dla serwera modelu i budżetu analizy (prośba Mikołaja, K3).
+def test_context_tokens_come_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_CONTEXT_TOKENS", "65536")
+    assert Settings.from_env().llm_context_tokens == 65536
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "abc", "1.5", "4096", "8191"])
+def test_bad_or_too_small_context_is_rejected(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
+    """Odpowiedź modelu ma do 4096 tokenów: kontekst poniżej 8192 nie zostawia miejsca na dokument."""
+    monkeypatch.setenv("LLM_CONTEXT_TOKENS", value)
+    with pytest.raises(ValueError, match="LLM_CONTEXT_TOKENS"):
+        Settings.from_env()
+
+
+def test_ollama_gets_the_same_context_as_the_analysis() -> None:
+    """Serwer z mniejszym kontekstem przycina prompt po cichu (K1), więc obie strony biorą jedną zmienną."""
+    assert interpolation(environment("ollama")["OLLAMA_CONTEXT_LENGTH"]) == (
+        "LLM_CONTEXT_TOKENS",
+        str(Settings().llm_context_tokens),
+    )

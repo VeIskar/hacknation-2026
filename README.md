@@ -96,12 +96,14 @@ Zmienne z `env.example`. Compose przekazuje je do `api`, a pusta wartość daje 
 | `LLM_MODEL` | `qwen3.5:4b` | Nazwa modelu na serwerze |
 | `LLM_API_KEY` | `ollama` | Klucz API. Ollama go nie sprawdza |
 | `LLM_TIMEOUT_S` | `120` | Limit jednego zapytania do modelu w sekundach. Analiza robi do 2 prób. Przekroczenie daje 503 |
+| `LLM_CONTEXT_TOKENS` | `32768` | Kontekst modelu w tokenach, min. `8192`. Compose podaje tę samą liczbę Ollamie. Modele w chmurze pozwalają na więcej (Qwen3.5-9B: 262144). Analiza (K3) liczy budżet jeszcze od stałej 16384 |
 | `LLM_FIXTURE` | pusty | Ścieżka do pliku `FormAnalysis`. Gdy ustawiona, model nie jest wołany (testy) |
 | `OCR_LANG` | `pol` | Język Tesseract dla skanów |
 | `ADD_VALIDATORS` | `true` | Walidatory (PESEL, NIP, REGON, ZIP_CODE, EMAIL) w JSON-ie. **Obecnie bez skutku**: generator używa stałej `app.generator.form.ADD_VALIDATORS` |
 
-Serwis `ollama` ma jeszcze `OLLAMA_CONTEXT_LENGTH` (domyślnie `16384`) i `OLLAMA_KEEP_ALIVE`
-(domyślnie `24h`: model zostaje w pamięci).
+Serwis `ollama` dostaje `OLLAMA_CONTEXT_LENGTH` z `LLM_CONTEXT_TOKENS`, więc serwer i analiza znają
+ten sam kontekst. Ma też `OLLAMA_KEEP_ALIVE` (domyślnie `24h`: model zostaje w pamięci). Kontekst
+32768 kosztuje `qwen3.5:4b` ok. 4,2 GB pamięci (16384: 3,7 GB).
 
 ## REST API
 
