@@ -9,6 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DOCKERFILE = (ROOT / "backend" / "Dockerfile").read_text(encoding="utf-8")
+COMPOSE = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
 
 
 def _instructions(name: str) -> list[str]:
@@ -18,16 +19,16 @@ def _instructions(name: str) -> list[str]:
     return [line.split(None, 1)[1] for line in lines if line.upper().startswith(name + " ")]
 
 
-def _compose_api_block() -> list[str]:
-    """Linie serwisu `api` z docker-compose.yml (bez parsera YAML, który nie jest zależnością)."""
+def _compose_block(service: str) -> str:
+    """Serwis z docker-compose.yml (bez parsera YAML, który nie jest zależnością)."""
     lines = (ROOT / "docker-compose.yml").read_text(encoding="utf-8").splitlines()
-    start = lines.index("  api:")
+    start = lines.index(f"  {service}:")
     block = []
     for line in lines[start + 1 :]:
-        if re.match(r"^  \S", line):  # następny serwis
+        if re.match(r"^\S|^  \S", line):  # następny serwis albo sekcja
             break
         block.append(line)
-    return block
+    return "\n".join(block)
 
 
 def test_base_image_is_python_314_with_explicit_patch_version() -> None:
@@ -66,9 +67,51 @@ def test_ocr_with_polish_data_is_installed() -> None:
 
 
 def test_compose_api_has_no_persistent_writes_and_no_privileges() -> None:
-    block = "\n".join(_compose_api_block())
+    block = _compose_block("api")
     assert re.search(r"^    read_only: true$", block, flags=re.MULTILINE)
     assert re.search(r"^    tmpfs:\n      - /tmp$", block, flags=re.MULTILINE)
     assert re.search(r"^    cap_drop:\n      - ALL$", block, flags=re.MULTILINE)
     assert "no-new-privileges:true" in block
     assert not re.search(r"^    (volumes|privileged|user):", block, flags=re.MULTILINE)
+
+
+# M1.5: model w compose.
+OLLAMA_DOCKERFILE = (ROOT / "ollama" / "Dockerfile").read_text(encoding="utf-8")
+
+
+def test_ollama_image_is_pinned_and_runs_without_root() -> None:
+    (image,) = re.findall(r"^FROM (\S+)", OLLAMA_DOCKERFILE, flags=re.MULTILINE)
+    assert re.fullmatch(r"(docker\.io/)?ollama/ollama:\d+\.\d+\.\d+", image), image
+    users = re.findall(r"^USER (\d+):(\d+)$", OLLAMA_DOCKERFILE, flags=re.MULTILINE)
+    assert users and all(int(n) > 0 for n in users[-1]), users
+    assert f"--uid {users[-1][0]}" in OLLAMA_DOCKERFILE
+
+
+def test_ollama_keeps_models_in_volume_and_is_not_published() -> None:
+    block = _compose_block("ollama")
+    assert "    build: ./ollama" in block
+    assert re.search(r"^      - ollama-models:/home/ollama/\.ollama$", block, flags=re.MULTILINE)
+    assert "OLLAMA_MODELS=/home/ollama/.ollama/models" in OLLAMA_DOCKERFILE
+    assert not re.search(r"^    ports:", block, flags=re.MULTILINE), "model tylko w sieci compose"
+    assert re.search(r"^volumes:\n  ollama-models:", COMPOSE, flags=re.MULTILINE)
+
+
+def test_ollama_context_fits_prompt_and_answer() -> None:
+    """K1: prompt i odpowiedź to do ok. 4100 tokenów, a domyślny kontekst ma 4096."""
+    match = re.search(r"OLLAMA_CONTEXT_LENGTH: \$\{OLLAMA_CONTEXT_LENGTH:-(\d+)\}", COMPOSE)
+    assert match and int(match.group(1)) >= 16384
+
+
+def test_ollama_has_no_root_privileges_or_persistent_writes_outside_volume() -> None:
+    block = _compose_block("ollama")
+    assert re.search(r"^    read_only: true$", block, flags=re.MULTILINE)
+    assert re.search(r"^    cap_drop:\n      - ALL$", block, flags=re.MULTILINE)
+    assert "no-new-privileges:true" in block
+
+
+def test_ollama_cloud_is_off() -> None:
+    assert 'OLLAMA_NO_CLOUD: "1"' in _compose_block("ollama")
+
+
+def test_api_talks_to_ollama_service_by_default() -> None:
+    assert "LLM_BASE_URL: ${LLM_BASE_URL:-http://ollama:11434/v1}" in _compose_block("api")

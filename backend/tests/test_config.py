@@ -9,6 +9,8 @@ from app.config import Settings, get_settings
 from app.main import app
 
 ROOT = Path(__file__).resolve().parents[2]
+# W kontenerze `api` model jest w serwisie `ollama`, nie na localhost (M1.5).
+COMPOSE_DEFAULTS = {"LLM_BASE_URL": "http://ollama:11434/v1"}
 
 
 @pytest.fixture(autouse=True)
@@ -64,7 +66,10 @@ def _compose_api_environment() -> set[str]:
             in_env = line.strip() == "environment:"
             continue
         # Forma `NAZWA: ${NAZWA:-}`: wartość z powłoki albo .env, a gdy brak, pusta (domyślna).
-        match = re.match(r"^      ([A-Z][A-Z0-9_]*): \$\{([A-Z][A-Z0-9_]*):-\}\s*$", line)
+        # Wyjątki z wartością domyślną compose: COMPOSE_DEFAULTS.
+        match = re.match(r"^      ([A-Z][A-Z0-9_]*): \$\{([A-Z][A-Z0-9_]*):-([^}]*)\}\s*$", line)
+        if match and match.group(3) != COMPOSE_DEFAULTS.get(match.group(1), ""):
+            continue
         if in_env and match and match.group(1) == match.group(2):
             names.add(match.group(1))
     return names
@@ -81,3 +86,14 @@ def test_compose_passes_every_setting_to_api() -> None:
     names = _env_example_names()
     assert "MAX_FILE_SIZE_MB" in names
     assert names <= _compose_api_environment()
+
+
+def test_env_example_does_not_override_compose_defaults() -> None:
+    """`cp env.example .env` nie może nadpisać domyślnych wartości compose (M1.5, recenzja #1).
+
+    Pusta wartość w .env daje w compose wartość domyślną (`${NAZWA:-…}`), a lokalnie domyślną z config.py.
+    """
+    text = (ROOT / "env.example").read_text(encoding="utf-8")
+    for name in COMPOSE_DEFAULTS:
+        values = re.findall(rf"^{name}=(.*)$", text, flags=re.MULTILINE)
+        assert values == [""], f"{name} w env.example ma być pusty, jest {values}"
