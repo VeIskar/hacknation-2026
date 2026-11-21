@@ -166,6 +166,25 @@ LLM_CONTEXT_TOKENS (Marcin, prośba Mikołaja do K3):
   Koszt na CPU zmierzony dla `qwen3.5:4b` w kontenerze `ollama`: 3,7 → 4,2 GB (`ollama ps`), kontener 4,28 → 4,84 GB.
   Modele w chmurze mają więcej (Qwen3.5-9B: 262144); wtedy `LLM_CONTEXT_TOKENS` można podnieść w `.env`.
 
+M1.7 (Marcin): `LLM_PROVIDER` według D9 i DELEGACJA rozdz. 3 z gałęzi lidera `lead/mentor-2111`. Bez nowej zależności.
+
+- **Dostawca.** `ollama` (domyślnie) albo `edenai`, wielkość liter bez znaczenia. Inna wartość zatrzymuje start API.
+- **Host przy `edenai`.** Tylko `https://api.edenai.run` i `https://api.eu.edenai.run` (adres z README K3.1-2), port 443,
+  bez użytkownika w adresie. Inny adres zatrzymuje start (D9 pkt 2).
+- **Klucz przy `edenai`.** Wymagany. `ollama` z `env.example` też się nie liczy. Komunikat błędu nie podaje klucza.
+- **Modele przy `edenai`** (D9 pkt 7 i 8): tylko trasy otwartego Qwen3.5-9B z publicznego katalogu Eden AI:
+  `ovhcloud/Qwen3.5-9B`, `ionos/Qwen/Qwen3.5-9B`, `flexai/Qwen3.5-9B`, `flexai/Qwen3.5-9B@eu`,
+  `greenference/qwen3.5-9b`, `tensorx/qwen/qwen3.5-9b`, `deepinfra/Qwen/Qwen3.5-9B`, `together_ai/Qwen/Qwen3.5-9B`.
+  Ostatnie dwie mają w katalogu datę wycofania; są na liście, bo model jest otwarty, ale wybór trasy należy do lidera.
+  Inny model wymaga wpisu tutaj i w `EDENAI_OPEN_MODELS` (`config.py`). Test pilnuje, że oba miejsca się zgadzają.
+- **Adres domyślny.** Pusty `LLM_BASE_URL` daje adres dostawcy: przy `edenai` `https://api.edenai.run/v3`, przy `ollama`
+  `LLM_OLLAMA_URL` albo `http://localhost:11434/v1`. Compose podaje `LLM_OLLAMA_URL: http://ollama:11434/v1` osobno,
+  zamiast domyślnej w `LLM_BASE_URL`. Dzięki temu adres Ollamy nie trafia do dostawcy `edenai` (DELEGACJA, M1.7).
+- **Adres Eden AI przy `ollama`** zatrzymuje start (recenzja M1.7). Inaczej `LLM_PROVIDER=ollama` z adresem Eden AI
+  omijałby listę modeli otwartych. Komunikaty o dostawcy i modelu nie powtarzają wartości: klucz wklejony w złą
+  zmienną trafiłby do logu (D9 pkt 3).
+- **Sieć.** `api` zostaje w zwykłej sieci compose z wyjściem do internetu. Test pilnuje, że jego sieć nie jest `internal`.
+
 K2.4 (Mikołaj): XLSX i ODS bez nowej zależności: `zipfile` i `ElementTree` z biblioteki standardowej,
 jak DOCX w K2.1. `openpyxl` i `odfpy` z DELEGACJA niepotrzebne, więc `requirements.txt` bez zmian.
 

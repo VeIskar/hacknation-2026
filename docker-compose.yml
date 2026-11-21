@@ -3,7 +3,8 @@
 # Every variable in env.example is listed under api.environment as ${NAME:-}: an unset one
 # arrives empty and keeps its default from backend/app/config.py. The explicit form works in
 # both Docker Compose and podman-compose (backend/tests/test_config.py checks the list).
-# LLM_BASE_URL defaults to the `ollama` service. Download the model once: scripts/pull_model.sh
+# LLM_PROVIDER=ollama (default) talks to the `ollama` service via LLM_OLLAMA_URL; edenai to Eden AI.
+# Download the local model once: scripts/pull_model.sh
 # Stała nazwa projektu: wolumen z modelem jest ten sam w każdym katalogu (klon, worktree).
 name: hacknation-2026
 services:
@@ -24,7 +25,12 @@ services:
       JWT_ENABLED: ${JWT_ENABLED:-}
       JWT_SECRET: ${JWT_SECRET:-}
       JWT_ALGORITHM: ${JWT_ALGORITHM:-}
-      LLM_BASE_URL: ${LLM_BASE_URL:-http://ollama:11434/v1}
+      # D9 (M1.7): `ollama` (domyślnie) albo `edenai`. Eden AI wymaga wyjścia do internetu.
+      LLM_PROVIDER: ${LLM_PROVIDER:-}
+      # Pusty adres daje adres dostawcy: Ollama z compose poniżej albo Eden AI.
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      # Adres Ollamy osobno, żeby przy `edenai` nie trafił do LLM_BASE_URL.
+      LLM_OLLAMA_URL: http://ollama:11434/v1
       LLM_MODEL: ${LLM_MODEL:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_TIMEOUT_S: ${LLM_TIMEOUT_S:-}

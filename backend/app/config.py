@@ -10,12 +10,31 @@ import os
 from dataclasses import dataclass
 from functools import cache
 from typing import Any
+from urllib.parse import urlsplit
 
 MB = 1024 * 1024
 # Min. kontekst zostawia miejsce na dokument przy domyślnej odpowiedzi Ollamy (4096 tokenów).
 MIN_CONTEXT_TOKENS = 8192
 _TRUE = {"1", "true", "yes", "on"}
 _REASONING_EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh"}
+
+# D9 (M1.7): Ollama lokalnie albo Eden AI organizatorów. Inny dostawca zatrzymuje start.
+PROVIDERS = ("ollama", "edenai")
+OLLAMA_URL = "http://localhost:11434/v1"
+EDENAI_URL = "https://api.edenai.run/v3"
+EDENAI_HOSTS = frozenset({"api.edenai.run", "api.eu.edenai.run"})
+# D9 pkt 7 i 8: przez Eden AI tylko otwarty Qwen3.5-9B (Apache-2.0, wagi publiczne).
+# Lista tras z publicznego katalogu Eden AI; nowy model wymaga wpisu w DECISIONS.md.
+EDENAI_OPEN_MODELS = frozenset({
+    "ovhcloud/Qwen3.5-9B",
+    "ionos/Qwen/Qwen3.5-9B",
+    "flexai/Qwen3.5-9B",
+    "flexai/Qwen3.5-9B@eu",
+    "greenference/qwen3.5-9b",
+    "tensorx/qwen/qwen3.5-9b",
+    "deepinfra/Qwen/Qwen3.5-9B",
+    "together_ai/Qwen/Qwen3.5-9B",
+})
 
 
 def _env(name: str, default: str) -> str:
@@ -43,6 +62,21 @@ def _env_positive_float(name: str, default: float) -> float:
 def _env_bool(name: str, default: bool) -> bool:
     value = os.environ.get(name, "").strip().lower()
     return value in _TRUE if value else default
+
+
+def _is_eden_url(url: str) -> bool:
+    """Tylko https na hoście Eden AI, bez użytkownika w adresie i bez obcego portu."""
+    try:
+        parts = urlsplit(url)
+        port = parts.port
+    except ValueError:
+        return False
+    return (
+        parts.scheme == "https"
+        and (parts.hostname or "") in EDENAI_HOSTS
+        and "@" not in parts.netloc
+        and port in (None, 443)
+    )
 
 
 def _env_temperature() -> float | None:
@@ -78,7 +112,7 @@ class Settings:
     jwt_enabled: bool = False
     jwt_secret: str | None = None
     jwt_algorithm: str = "HS256"
-    llm_base_url: str = "http://localhost:11434/v1"
+    llm_base_url: str = OLLAMA_URL
     llm_model: str = "qwen3.5:4b"
     llm_api_key: str = "ollama"
     llm_timeout_s: float = 120.0
@@ -95,8 +129,10 @@ class Settings:
     llm_connect_timeout_s: float = 10.0
     llm_analysis_budget_s: float = 170.0
     llm_max_attempts: int = 2
+    llm_provider: str = "ollama"
 
     def __post_init__(self) -> None:
+        self._check_provider()
         # Bez tego 0 albo -1 dawałoby 413 dla każdego poprawnego pliku.
         if isinstance(self.max_file_size_mb, bool) or self.max_file_size_mb <= 0:
             raise ValueError(f"MAX_FILE_SIZE_MB ma być dodatnią liczbą całkowitą, jest {self.max_file_size_mb!r}")
@@ -120,6 +156,26 @@ class Settings:
         if type(self.llm_max_attempts) is not int or not 1 <= self.llm_max_attempts <= 3:
             raise ValueError("LLM_MAX_ATTEMPTS ma być liczbą całkowitą od 1 do 3")
 
+    def _check_provider(self) -> None:
+        """D9: przy `edenai` tylko host Eden AI, klucz i model otwarty.
+
+        Komunikaty nie powtarzają wartości: klucz wklejony w złą zmienną trafiłby do logu (D9 pkt 3).
+        """
+        if self.llm_provider not in PROVIDERS:
+            raise ValueError("LLM_PROVIDER ma być 'ollama' albo 'edenai'")
+        if self.llm_provider != "edenai":
+            # Bez tego `ollama` z adresem Eden AI omijałby listę modeli otwartych (D9 pkt 7).
+            if _is_eden_url(self.llm_base_url):
+                raise ValueError("LLM_BASE_URL wskazuje Eden AI: ustaw LLM_PROVIDER=edenai")
+            return
+        if not _is_eden_url(self.llm_base_url):
+            hosts = ", ".join(f"https://{host}" for host in sorted(EDENAI_HOSTS))
+            raise ValueError(f"LLM_BASE_URL przy LLM_PROVIDER=edenai ma wskazywać Eden AI ({hosts})")
+        if self.llm_api_key.strip().lower() in {"", "ollama"}:
+            raise ValueError("LLM_API_KEY jest wymagany przy LLM_PROVIDER=edenai (klucz Eden AI)")
+        if self.llm_model not in EDENAI_OPEN_MODELS:
+            raise ValueError("LLM_MODEL przy LLM_PROVIDER=edenai ma być modelem otwartym z listy D9 (DECISIONS.md, M1.7)")
+
     @property
     def max_file_bytes(self) -> int:
         return self.max_file_size_mb * MB
@@ -130,14 +186,18 @@ class Settings:
         if strict_schema not in {"true", "false"}:
             raise ValueError("LLM_STRICT_SCHEMA ma być 'true' albo 'false'")
         reasoning_effort = _env("LLM_REASONING_EFFORT", "none").lower()
+        provider = _env("LLM_PROVIDER", "ollama").lower()
+        # Compose podaje adres Ollamy osobno (LLM_OLLAMA_URL), żeby nie trafił do Eden AI.
+        default_url = EDENAI_URL if provider == "edenai" else _env("LLM_OLLAMA_URL", OLLAMA_URL)
         return cls(
+            llm_provider=provider,
             max_file_size_mb=_env_positive_int("MAX_FILE_SIZE_MB", 10),
             jwt_enabled=_env_bool("JWT_ENABLED", False),
             jwt_secret=os.environ.get("JWT_SECRET") or None,
             jwt_algorithm=_env("JWT_ALGORITHM", "HS256"),
-            llm_base_url=_env("LLM_BASE_URL", "http://localhost:11434/v1"),
+            llm_base_url=_env("LLM_BASE_URL", default_url),
             llm_model=_env("LLM_MODEL", "qwen3.5:4b"),
-            llm_api_key=_env("LLM_API_KEY", "ollama"),
+            llm_api_key=_env("LLM_API_KEY", "ollama" if provider == "ollama" else ""),
             llm_timeout_s=_env_positive_float("LLM_TIMEOUT_S", 120.0),
             llm_context_tokens=_env_positive_int("LLM_CONTEXT_TOKENS", 32768),
             llm_fixture=os.environ.get("LLM_FIXTURE") or None,
