@@ -106,6 +106,16 @@ Ten fixture opisuje wniosek, który można złożyć w imieniu innej osoby (`WNI
 Materiały COI (zip z Discorda) leżą w `materialy/`, poza gitem. Foldery 1 i 5 to wzorce,
 foldery 2–4 i 6–9 to formularze do oceny.
 
+## Model
+
+Qwen3.5-4B (`qwen3.5:4b` w Ollamie, Q4_K_M, ok. 3,4 GB, Apache-2.0), uruchomiony lokalnie:
+serwis `ollama` w docker compose z jawną wersją obrazu, model w wolumenie. API woła go tylko
+z `backend/app/llm.py` przez interfejs zgodny z OpenAI: `LLM_BASE_URL=http://ollama:11434/v1`,
+`LLM_MODEL=qwen3.5:4b`. Tryb myślenia wyłączony (`think: false`), odpowiedź jako JSON wymuszony
+schematem `FormAnalysis`. Model czyta też obrazy, więc skany JPG/PNG mogą trafić do niego
+bezpośrednio, z OCR jako zapasem. Bielik-4.5B-v3 to alternatywa: zmiana tylko `LLM_MODEL`.
+Modele dostępne wyłącznie przez API nie są używane w produkcie (Treść pkt 5).
+
 ## Acceptance test
 
 frontend/tests/e2e/acceptance.spec.ts walks the demo flow. It is locked after review.
