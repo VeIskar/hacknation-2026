@@ -2,7 +2,7 @@
 
 Przepływ: lekkie uporządkowanie tekstu, kontrola budżetu kontekstu, llm.chat_json ze schematem
 FormAnalysis, potem FormAnalysis.model_validate_json. Wynik niezgodny z kontraktem wraca do modelu
-z błędami walidatora. Po MAX_ATTEMPTS próbach analiza kończy się LLMUnavailable (503, D4).
+z błędami walidatora, jeśli pozwalają na to limit prób i budżet czasu (D11).
 Folder 1 (zbiór kontrolny, D5) nie może trafić do promptu: pilnuje tego tests/test_analysis.py.
 """
 
@@ -32,8 +32,6 @@ from app.models import ExtractedDocument, FormAnalysis
 
 log = logging.getLogger(__name__)
 
-# Decyzja 2026-11-21: pierwsza próba i jedno ponowienie, bo na CPU jedna próba trwa 240–344 s (K1).
-MAX_ATTEMPTS = 2
 # K1: prompt, schemat i tekst nadpłaty to 7338 znaków i 2034 tokeny promptu, czyli 3,6 znaku na token.
 # Przyjmujemy mniej znaków na token, żeby oszacowanie było ostrożne: polski tekst bez wielokropków
 # dzieli się na tokeny drobniej niż schemat.
@@ -252,13 +250,13 @@ def _retry_messages(
     return [*base, {"role": "user", "content": correction_message(exc, result.finish_reason, SHORT_CORRECTION_INTRO)}]
 
 
-def _log_attempt(level: int, attempt: int, result: ChatResult, outcome: str) -> None:
+def _log_attempt(level: int, attempt: int, max_attempts: int, result: ChatResult, outcome: str) -> None:
     # Bez treści dokumentu i odpowiedzi: tylko liczby i wynik.
     log.log(
         level,
         "Analiza, próba %d/%d: %s, %.1f s, tokeny %s/%s, finish_reason=%s",
         attempt,
-        MAX_ATTEMPTS,
+        max_attempts,
         outcome,
         result.elapsed_s,
         result.prompt_tokens,
@@ -275,18 +273,21 @@ def analyze(
     settings podaje wołający, np. trasa z Depends(get_settings), więc dependency_overrides w testach
     obejmują też model i LLM_FIXTURE. Funkcja jest synchroniczna i na CPU trwa minuty.
     Błędy: ExtractionError (400), gdy dokument nie ma tekstu ani obrazów. LLMUnavailable (503), gdy
-    model nie odpowiada, zapytanie nie mieści się w kontekście, serwer je przyciął albo po
-    MAX_ATTEMPTS próbach wynik nie przechodzi FormAnalysis.model_validate.
+    model nie odpowiada, zapytanie nie mieści się w kontekście, serwer je przyciął albo
+    niepoprawny wynik wyczerpał liczbę prób lub budżet ponowienia.
     """
     base = [{"role": "system", "content": system_message_text()}, user_message(doc)]
     messages = base
     context_tokens = settings.llm_context_tokens
     max_tokens = answer_token_limit(settings)
-    for attempt in range(1, MAX_ATTEMPTS + 1):
+    max_attempts = settings.llm_max_attempts
+    elapsed_s = 0.0
+    for attempt in range(1, max_attempts + 1):
         _ensure_fits(messages, attempt, context_tokens, max_tokens)
         result = chat_json(
             messages, FormAnalysis.model_json_schema(), settings=settings, max_tokens=max_tokens, transport=transport
         )
+        elapsed_s += result.elapsed_s
         if result.reasoning:
             log.warning("Analiza, próba %d: model zwrócił tok rozumowania (%d znaków).", attempt, len(result.reasoning))
         _ensure_not_truncated(messages, result, attempt, settings)
@@ -294,9 +295,19 @@ def analyze(
             analysis = _validate(result.content)
         except ValidationError as exc:
             kinds = ", ".join(sorted({error["type"] for error in exc.errors()}))
-            _log_attempt(logging.WARNING, attempt, result, f"{exc.error_count()} błędów walidacji ({kinds})")
+            _log_attempt(logging.WARNING, attempt, max_attempts, result, f"{exc.error_count()} błędów walidacji ({kinds})")
+            if attempt == max_attempts:
+                break
+            projected_s = elapsed_s + result.elapsed_s * 1.1
+            if projected_s > settings.llm_analysis_budget_s:
+                log.warning(
+                    "Analiza, próba %d/%d: pominięto ponowienie: budżet D11 "
+                    "(próby %.1f s, ostatnia %.1f s, prognoza %.1f s, budżet %.1f s).",
+                    attempt, max_attempts, elapsed_s, result.elapsed_s, projected_s, settings.llm_analysis_budget_s,
+                )
+                raise LLMUnavailable(detail=UNAVAILABLE_DETAIL) from exc
             messages = _retry_messages(base, result, exc, attempt, context_tokens, max_tokens)
             continue
-        _log_attempt(logging.INFO, attempt, result, "poprawna analiza")
+        _log_attempt(logging.INFO, attempt, max_attempts, result, "poprawna analiza")
         return analysis
     raise LLMUnavailable(detail=UNAVAILABLE_DETAIL)
