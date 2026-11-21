@@ -40,91 +40,27 @@ bytes pliku ─► files.validate_upload ─► extract.extract ─► analysis.
               (Marcin)                  (Mikołaj)          (Mikołaj)           (Paweł)                 (Paweł)
 ```
 
-### 2.1 `backend/app/models.py` (Paweł commituje jako **pierwszy krok**, ~15 min; pozostali importują)
+### 2.1 `backend/app/models.py` i `backend/app/errors.py` (P0 – na `main`, wszyscy importują)
 
-```python
-from enum import StrEnum
-from pydantic import BaseModel, Field
+**Źródłem prawdy jest kod** w `backend/app/models.py` – nie przepisuj go, importuj. Skrót:
 
+| Model | Kto tworzy | Pola |
+|---|---|---|
+| `ExtractedDocument` | extract (Mikołaj) | `source_format`, `text` (strony rozdzielone `\f`), `ocr_used`, `images: list[bytes]` (PNG stron skanu – dla Qwen z obrazem), `warnings` |
+| `FormAnalysis` | analysis (Mikołaj) → czyta generator (Paweł) | `title` (≤255), `addressee {type: URZAD/ORGAN, name}`, `applicants: PERSON/ENTITY/BOTH`, `signature`, `subject_pages[] → sections[] → fields[]`, `statements[]` |
+| `SubjectField` | – | `label`, `type` (TEXT_FIELD, TEXTAREA, NUMBER, DATEPICKER, RADIO, CHECKBOX, SELECT, FILE_UPLOADER, TEXT_BLOCK), `required`, `description`, `options[]`, `show_if {field, equals}` |
 
-class ExtractedDocument(BaseModel):
-    """Wynik odczytu pliku. Tworzy extract (Mikołaj)."""
-    source_format: str            # "pdf" | "doc" | "docx" | "ods" | "xlsx" | "jpg" | "png"
-    text: str                     # cały tekst w kolejności czytania, strony rozdzielone "\f"
-    ocr_used: bool = False
-    warnings: list[str] = []
+Opisy pól (`description=`) są po polsku, bo trafiają do schematu JSON, który dostaje model: `FormAnalysis.model_json_schema()`.
 
-
-class AddresseeType(StrEnum):
-    URZAD = "URZAD"
-    ORGAN = "ORGAN"
-
-
-class Applicants(StrEnum):
-    PERSON = "PERSON"   # tylko osoba fizyczna
-    ENTITY = "ENTITY"   # tylko firma / instytucja
-    BOTH = "BOTH"
-
-
-class FieldType(StrEnum):
-    TEXT_FIELD = "TEXT_FIELD"
-    TEXTAREA = "TEXTAREA"
-    NUMBER = "NUMBER"
-    DATEPICKER = "DATEPICKER"
-    RADIO = "RADIO"
-    CHECKBOX = "CHECKBOX"
-    SELECT = "SELECT"
-    FILE_UPLOADER = "FILE_UPLOADER"
-    TEXT_BLOCK = "TEXT_BLOCK"
-
-
-class ShowIf(BaseModel):
-    field: str                    # etykieta pola sterującego (w tej samej stronie)
-    equals: str                   # nazwa opcji
-
-
-class SubjectField(BaseModel):
-    label: str
-    type: FieldType
-    required: bool = True
-    description: str = ""
-    options: list[str] = []
-    show_if: ShowIf | None = None
-
-
-class SubjectSection(BaseModel):
-    title: str
-    description: str = ""
-    fields: list[SubjectField] = Field(min_length=1)
-
-
-class SubjectPage(BaseModel):
-    title: str
-    sections: list[SubjectSection] = Field(min_length=1)
-
-
-class Addressee(BaseModel):
-    type: AddresseeType
-    name: str
-
-
-class FormAnalysis(BaseModel):
-    """Wynik AI. Tworzy analysis (Mikołaj), czyta generator (Paweł)."""
-    title: str = Field(max_length=255)
-    addressee: Addressee
-    applicants: Applicants = Applicants.BOTH
-    signature: bool = True
-    subject_pages: list[SubjectPage] = Field(min_length=1)
-    statements: list[str] = []
-```
+`backend/app/errors.py`: `AppError(detail, status_code)` i podklasy `UploadError` (400; 413/415 przez `status_code`), `ExtractionError` (422), `LLMUnavailable` (503). `main.py` zamienia każdy `AppError` na `{"detail": ...}`.
 
 ### 2.2 Funkcje
 
 | Funkcja | Właściciel | Sygnatura | Błędy |
 |---|---|---|---|
-| walidacja | Marcin | `files.validate_upload(filename: str, data: bytes, max_bytes: int) -> str` (zwraca rozszerzenie małymi literami, `jpeg`/`jpe` → `jpg`) | `UploadError(status: int, detail: str)` – 400 / 413 / 415 |
-| odczyt | Mikołaj | `extract.extract(data: bytes, ext: str) -> ExtractedDocument` | `ExtractionError` → 422 |
-| analiza | Mikołaj | `analysis.analyze(doc: ExtractedDocument) -> FormAnalysis` | `LLMUnavailable` → 503 |
+| walidacja | Marcin | `files.validate_upload(filename: str, data: bytes, max_bytes: int) -> str` (zwraca rozszerzenie małymi literami, `jpeg`/`jpe` → `jpg`) | `errors.UploadError(detail, status_code)` – 400 / 413 / 415 |
+| odczyt | Mikołaj | `extract.extract(data: bytes, ext: str) -> ExtractedDocument` | `errors.ExtractionError` → 422 |
+| analiza | Mikołaj | `analysis.analyze(doc: ExtractedDocument) -> FormAnalysis` | `errors.LLMUnavailable` → 503 |
 | generator | Paweł | `generator.build_form(a: FormAnalysis) -> dict` (gotowy JSON COI) | – (zawsze zwraca poprawny JSON) |
 | linter | Paweł | `lint.check(form: dict) -> list[str]` (pusta lista = OK) | – |
 
@@ -134,6 +70,7 @@ class FormAnalysis(BaseModel):
 
 - `backend/tests/fixtures/fields.json` – `FormAnalysis` dla nadpłaty (pełny przykład w `docs/BRIEF_ZESPOL.md`, pkt 3). To zwraca `llm.py`, gdy ustawione `LLM_FIXTURE`.
 - `backend/tests/fixtures/expected_nadplata.json` – kopia wzorca COI z folderu 5.
+- `backend/tests/fixtures/expected_numer_porzadkowy.json` – kopia wzorca COI z folderu 1 (tylko testy i linter, **nie do promptów**).
 
 ---
 
