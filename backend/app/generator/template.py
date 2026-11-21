@@ -1,7 +1,7 @@
 """Strony standardowe: „Dane”, „Kontakt i zgody”, „Strona końcowa” (SZABLONY_SEKCJI.md, rozdz. 3–4).
 
-Z analizy biorą tylko parametry z rozdz. 1: tytuł, adresata, rodzaj wnioskodawcy, podpis
-i oświadczenia. techName są stałe i mają pierwszeństwo przed nazwami z przedmiotu wniosku.
+Decyzje z ApplicantData wyznaczają sekcje i pola wnioskodawcy. techName szablonu są stałe
+i mają pierwszeństwo przed nazwami z przedmiotu wniosku.
 Walidatory z rozdz. 5 są zawsze wpisane; build_form czyści je, gdy ADD_VALIDATORS = False.
 """
 
@@ -21,7 +21,14 @@ from app.generator.coi import (
     show,
     tab,
 )
-from app.models import AddresseeType, Applicants, FormAnalysis
+from app.models import (
+    AddresseeType,
+    ApplicantData,
+    Applicants,
+    ContactField,
+    EntityId,
+    FormAnalysis,
+)
 
 DATA_PAGE = "Dane"
 CONTACT_PAGE = "Kontakt i zgody"
@@ -31,6 +38,7 @@ TEMPLATE_PAGES = (DATA_PAGE, CONTACT_PAGE, FINISH_PAGE)
 REQUIRED = "REQUIRED"
 
 APPLICANT_SECTION = "podmiot_wniosku"
+POWER_OF_ATTORNEY = "pelnomocnictwo"
 ON_BEHALF = "wybierz_w_czyim_imieniu_wnioskujesz"
 ROLE = "wybierz_jako_kto_wnioskujesz"
 OWN = "Swoim"
@@ -39,12 +47,6 @@ LEGAL_ENTITY = "Osoby prawnej lub jednostki organizacyjnej"
 ATTORNEY = "Pełnomocnik"
 REPRESENTATIVE = "Reprezentant"
 POLAND = "Polska"
-
-# Skróty z SZABLONY, rozdz. 0: [INNA], [PRAWNA], [PEŁN], [REPR].
-FOR_OTHER_PERSON = answer_is(OTHER_PERSON, DATA_PAGE, APPLICANT_SECTION, ON_BEHALF)
-FOR_LEGAL_ENTITY = answer_is(LEGAL_ENTITY, DATA_PAGE, APPLICANT_SECTION, ON_BEHALF)
-AS_ATTORNEY = answer_is(ATTORNEY, DATA_PAGE, APPLICANT_SECTION, ROLE)
-AS_REPRESENTATIVE = answer_is(REPRESENTATIVE, DATA_PAGE, APPLICANT_SECTION, ROLE)
 
 # Adres klauzuli informacyjnej urzędu. Pusty = zgoda bez linku (wzorce COI mają tu zepsuty adres).
 PRIVACY_CLAUSE_URL = ""
@@ -129,19 +131,21 @@ def _addressee(a: FormAnalysis) -> dict:
     return section(tech_name, f"{title}, do którego jest składany wniosek", [name])
 
 
-def _applicant(a: FormAnalysis) -> dict:
-    """S2: radio „w czyim imieniu” z opcjami wg wariantu; radio „jako kto” tylko z osobą prawną.
+def _applicant_answer(option: str, radio: str) -> str:
+    return answer_is(option, DATA_PAGE, APPLICANT_SECTION, radio)
 
-    Czasownik zmienia tylko etykiety. techName zostają stałe, bo od nich zależą warunki SHOW.
-    """
-    verb = applicant_verb(a.title)
-    options = {
-        Applicants.PERSON: [OWN, OTHER_PERSON],
-        Applicants.ENTITY: [LEGAL_ENTITY],
-        Applicants.BOTH: [OWN, OTHER_PERSON, LEGAL_ENTITY],
-    }[a.applicants]
-    fields = [field("RADIO", ON_BEHALF, f"Wybierz, w czyim imieniu {verb}", options=options, validation=[REQUIRED])]
-    if a.applicants is not Applicants.PERSON:
+
+def _and(guard: str, query: str) -> str:
+    return f"{guard} and {query}" if guard else query
+
+
+def _applicant(title: str, options: list[str], *, has_role: bool, when_entity: str) -> dict | None:
+    """S2: radia tylko tam, gdzie podpisujący ma wybór."""
+    verb = applicant_verb(title)
+    fields = []
+    if options:
+        fields.append(field("RADIO", ON_BEHALF, f"Wybierz, w czyim imieniu {verb}", options=options, validation=[REQUIRED]))
+    if has_role:
         fields.append(
             field(
                 "RADIO",
@@ -149,36 +153,35 @@ def _applicant(a: FormAnalysis) -> dict:
                 f"Wybierz, jako kto {verb}",
                 options=[ATTORNEY, REPRESENTATIVE],
                 validation=[REQUIRED],
-                states=show(FOR_LEGAL_ENTITY),
+                states=show(when_entity),
             )
         )
-    return section(APPLICANT_SECTION, "Podmiot wniosku", fields)
+    return section(APPLICANT_SECTION, "Podmiot wniosku", fields) if fields else None
 
 
-def _your_data() -> dict:
-    """S3: dane zalogowanej osoby z rejestru, tylko do odczytu, bez walidatorów (rozdz. 5)."""
-    return section(
-        "twoje_dane",
-        "Twoje dane",
-        [
-            _text("imie", "Imię", read_only=True, **_registry("name")),
-            _text("nazwisko", "Nazwisko", read_only=True, **_registry("surname")),
-            _text("numer_pesel", "Numer PESEL", read_only=True, **_registry("pesel")),
-        ],
-    )
+def _your_data(include_pesel: bool) -> dict:
+    """S3: dane inicjalne do odczytu, z PESEL tylko gdy wymaga go formularz."""
+    fields = [
+        _text("imie", "Imię", read_only=True, **_registry("name")),
+        _text("nazwisko", "Nazwisko", read_only=True, **_registry("surname")),
+    ]
+    if include_pesel:
+        fields.append(_text("numer_pesel", "Numer PESEL", read_only=True, **_registry("pesel")))
+    return section("twoje_dane", "Twoje dane", fields)
 
 
-def _address(tech_name: str, title: str, suffix: str, *, prefilled: bool, states: Iterable[dict] = ()) -> dict:
+def _address_fields(tech_name: str, suffix: str, *, prefilled: bool, when: str = "") -> list[dict]:
     """Szablon adresu (9 pól). Dane inicjalne MLPZ.* tylko w adresie wnioskodawcy."""
     country = f"kraj{suffix}"
-    in_poland = show(answer_is(POLAND, DATA_PAGE, tech_name, country))
-    abroad = show(answer_is_not(POLAND, DATA_PAGE, tech_name, country))
+    visible = show(when)
+    in_poland = show(_and(when, answer_is(POLAND, DATA_PAGE, tech_name, country)))
+    abroad = show(_and(when, answer_is_not(POLAND, DATA_PAGE, tech_name, country)))
 
     def registry(key: str) -> dict:
         return _registry(key) if prefilled else {}
 
-    fields = [
-        field("SELECT", country, "Kraj", dictionaryName="Kraje", defaultValue=[POLAND], searchEnabled=True),
+    return [
+        field("SELECT", country, "Kraj", dictionaryName="Kraje", defaultValue=[POLAND], searchEnabled=True, states=visible),
         _text(f"miejscowosc{suffix}_zagranica", "Miejscowość", states=abroad),
         _text(f"kod_pocztowy{suffix}_zagranica", "Kod pocztowy", states=abroad),
         _text(f"ulica{suffix}_zagranica", "Ulica", states=abroad),
@@ -200,66 +203,74 @@ def _address(tech_name: str, title: str, suffix: str, *, prefilled: bool, states
             **registry("postCode"),
         ),
         _text(f"ulica{suffix}", "Ulica", states=in_poland, **registry("street")),
-        _text(f"numer_budynku{suffix}", "Numer budynku", **registry("building")),
-        _text(f"numer_lokalu{suffix}", "Numer lokalu", **registry("apartment")),
+        _text(f"numer_budynku{suffix}", "Numer budynku", states=visible, **registry("building")),
+        _text(f"numer_lokalu{suffix}", "Numer lokalu", states=visible, **registry("apartment")),
     ]
+
+
+def _address(tech_name: str, title: str, suffix: str, *, prefilled: bool, states: Iterable[dict] = ()) -> dict:
+    fields = _address_fields(tech_name, suffix, prefilled=prefilled)
     return section(tech_name, title, fields, states=states)
 
 
-def _entity_data() -> dict:
-    """S4: pełna wersja (Nazwa, NIP, REGON, KRS) – decyzja w SZABLONY, rozdz. 3."""
-    return section(
-        "dane_podmiotu",
-        "Dane podmiotu",
-        [
-            _text("nazwa", "Nazwa"),
-            _text("nip", "NIP", validation=[REQUIRED, "NIP"]),
-            _text("regon", "REGON", validation=[REQUIRED, "REGON"]),
-            _text("numer_krs", "Numer KRS"),
-        ],
-        states=show(FOR_LEGAL_ENTITY),
+def _correspondence_address() -> dict:
+    tech_name = "adres_do_korespondencji"
+    radio = field(
+        "RADIO", "czy_adres_do_korespondencji_jest_inny", "Czy adres do korespondencji jest inny?",
+        options=["Tak", "Nie"], validation=[REQUIRED],
     )
+    when_different = answer_is("Tak", DATA_PAGE, tech_name, radio["techName"])
+    address = _address_fields(tech_name, "_korespondencyjny", prefilled=False, when=when_different)
+    return section(tech_name, "Adres do korespondencji", [radio, *address])
 
 
-def _representative() -> dict:
+def _entity_data(applicant: ApplicantData, when_entity: str) -> dict:
+    """S4: nazwa i wskazane identyfikatory w kolejności z szablonu."""
+    fields = [_text("nazwa", "Nazwa")]
+    identifiers = [identifier.value for identifier in EntityId if identifier in applicant.entity_ids]
+    for identifier in identifiers:
+        if identifier == "KRS":
+            fields.append(_text("numer_krs", "Numer KRS"))
+        else:
+            validation = [identifier] if applicant.entity_ids_one_of else [REQUIRED, identifier]
+            fields.append(_text(identifier.lower(), identifier, validation=validation))
+    hint = f"Podaj jeden z: {', '.join(identifiers)}." if applicant.entity_ids_one_of else ""
+    return section("dane_podmiotu", "Dane podmiotu", fields, body=paragraphs(hint), states=show(when_entity))
+
+
+def _representative(when_representative: str) -> dict:
     """S8: odpis z rejestru, gdy osoba prawna i reprezentant."""
     return section(
         "potwierdzenie_ze_jestes_reprezentantem",
         "Potwierdzenie, że jesteś reprezentantem",
         [_upload("plik_z_odpisem_danych", "Plik z odpisem danych")],
         body=paragraphs(REPRESENTATIVE_INFO),
-        states=show(f"{FOR_LEGAL_ENTITY} and {AS_REPRESENTATIVE}"),
+        states=show(when_representative),
     )
 
 
-def _other_person() -> dict:
+def _other_person(when_other: str) -> dict:
     """S6: dane osoby, w której imieniu się wnioskuje (oba wzorce: bez PESEL)."""
     return section(
         "dane_innej_osoby",
         "Dane innej osoby",
         [_text("imie_inna_osoba", "Imię"), _text("nazwisko_inna_osoba", "Nazwisko")],
-        states=show(FOR_OTHER_PERSON),
+        states=show(when_other),
     )
 
 
-def _power_of_attorney(applicants: Applicants) -> dict:
-    """S9: przy „Innej osoby” i przy osobie prawnej z pełnomocnikiem – o ile wariant ma te opcje."""
-    entity_attorney = f"{FOR_LEGAL_ENTITY} and {AS_ATTORNEY}"
-    query = {
-        Applicants.PERSON: FOR_OTHER_PERSON,
-        Applicants.ENTITY: entity_attorney,
-        Applicants.BOTH: f"{FOR_OTHER_PERSON} or ({entity_attorney})",
-    }[applicants]
+def _power_of_attorney(when_proxy: str) -> dict:
+    """S9: dokument dla dostępnych ścieżek pełnomocnika."""
     return section(
-        "pelnomocnictwo",
+        POWER_OF_ATTORNEY,
         "Pełnomocnictwo",
         [_upload("plik_dokumentu_z_pelnomocnictwem", "Plik dokumentu z pełnomocnictwem")],
         body=paragraphs(ATTORNEY_INFO),
-        states=show(query),
+        states=show(when_proxy),
     )
 
 
-def _person_fee(title: str) -> dict:
+def _person_fee(title: str, when_other: str) -> dict:
     """S10: opłata za pełnomocnictwo od osoby fizycznej, z pytaniem, czy jest wymagana."""
     tech_name, question = "oplata_skarbowa_pelnomocnictwo_1", "czy_zlozenie_pelnomocnictwa_wymaga_oplaty_skarbowej"
     when_paid = show(answer_is("Tak", DATA_PAGE, tech_name, question))
@@ -279,11 +290,11 @@ def _person_fee(title: str) -> dict:
             _upload("plik_z_potwierdzeniem_przelewu", "Plik z potwierdzeniem przelewu", states=when_paid),
         ],
         body=FEE_EXEMPTION_INFO,
-        states=show(FOR_OTHER_PERSON),
+        states=show(when_other),
     )
 
 
-def _entity_fee(title: str) -> dict:
+def _entity_fee(title: str, when_attorney: str) -> dict:
     """S11: opłata za pełnomocnictwo udzielone przez podmiot (tytuł bez literówki ze wzorców)."""
     more = f"<p>Więcej informacji o opłacie skarbowej za pełnomocnictwo znajdziesz na stronie {link(FEE_DETAILS_URL, 'biznes.gov.pl')}.</p>"
     fee = _fee_info(title, "siedziby podmiotu, który udzielił pełnomocnictwa") + more
@@ -294,36 +305,63 @@ def _entity_fee(title: str) -> dict:
             field("TEXT_BLOCK", "oplata_info", description=html_document(fee)),
             _upload("plik_z_potwierdzeniem_przelewu_2", "Plik z potwierdzeniem przelewu"),
         ],
-        states=show(f"{FOR_LEGAL_ENTITY} and {AS_ATTORNEY}"),
+        states=show(when_attorney),
     )
 
 
 def data_page(a: FormAnalysis) -> dict:
-    """Strona „Dane”: S1, S2, S3, S4a, S4, S5, S8, S6, S7, S9, S10, S11 – bez sekcji spoza wariantu."""
-    person = a.applicants in (Applicants.PERSON, Applicants.BOTH)
+    """Ustala dostępne ścieżki przed zbudowaniem warunków SHOW i sekcji."""
+    applicant = a.applicant
+    own = a.applicants in (Applicants.PERSON, Applicants.BOTH)
+    other = own and applicant.proxy
     entity = a.applicants in (Applicants.ENTITY, Applicants.BOTH)
-    sections = [_addressee(a), _applicant(a), _your_data()]
-    sections.append(_address("adres_zamieszkania", "Adres zamieszkania", "", prefilled=True))
+    paths = [name for name, available in [(OWN, own), (OTHER_PERSON, other), (LEGAL_ENTITY, entity)] if available]
+    on_behalf_options = paths if len(paths) > 1 else []
+    has_role = entity and applicant.proxy
+
+    # Przy jednej opcji ścieżka jest stała. Nie odwołujemy się wtedy do radia ON_BEHALF.
+    when_entity = _applicant_answer(LEGAL_ENTITY, ON_BEHALF) if LEGAL_ENTITY in on_behalf_options else ""
+    when_other = _applicant_answer(OTHER_PERSON, ON_BEHALF) if OTHER_PERSON in on_behalf_options else ""
+    when_representative = when_entity
+    when_attorney = ""
+    if has_role:
+        when_representative = _and(when_entity, _applicant_answer(REPRESENTATIVE, ROLE))
+        when_attorney = _and(when_entity, _applicant_answer(ATTORNEY, ROLE))
+
+    sections = [_addressee(a)]
+    selection = _applicant(a.title, on_behalf_options, has_role=has_role, when_entity=when_entity)
+    if selection is not None:
+        sections.append(selection)
+    sections.append(_your_data(applicant.applicant_pesel))
+    if own and applicant.person_address:
+        sections.append(_address("adres_zamieszkania", "Adres zamieszkania", "", prefilled=True))
     if entity:
-        sections.append(_entity_data())
-        sections.append(_address("adres_siedziby", "Adres siedziby", "_siedziba", prefilled=False, states=show(FOR_LEGAL_ENTITY)))
-        sections.append(_representative())
-    if person:
-        sections.append(_other_person())
-        sections.append(
-            _address(
-                "adres_zamieszkania_osoby_ktorej_jestes_pelnomocnikiem",
-                "Adres zamieszkania innej osoby",
-                "_inna_osoba",
-                prefilled=False,
-                states=show(FOR_OTHER_PERSON),
+        sections.append(_entity_data(applicant, when_entity))
+        if applicant.entity_address:
+            sections.append(_address("adres_siedziby", "Adres siedziby", "_siedziba", prefilled=False, states=show(when_entity)))
+        if applicant.representative_proof:
+            sections.append(_representative(when_representative))
+    if other:
+        sections.append(_other_person(when_other))
+        if applicant.person_address:
+            sections.append(
+                _address(
+                    "adres_zamieszkania_osoby_ktorej_jestes_pelnomocnikiem",
+                    "Adres zamieszkania innej osoby",
+                    "_inna_osoba",
+                    prefilled=False,
+                    states=show(when_other),
+                )
             )
-        )
-    sections.append(_power_of_attorney(a.applicants))
-    if person:
-        sections.append(_person_fee(a.title))
-    if entity:
-        sections.append(_entity_fee(a.title))
+    if applicant.correspondence_address:
+        sections.append(_correspondence_address())
+    if applicant.proxy:
+        when_proxy = f"{when_other} or ({when_attorney})" if other and has_role else when_other or when_attorney
+        sections.append(_power_of_attorney(when_proxy))
+        if other:
+            sections.append(_person_fee(a.title, when_other))
+        if has_role:
+            sections.append(_entity_fee(a.title, when_attorney))
     return tab(DATA_PAGE, sections)
 
 
@@ -331,21 +369,22 @@ def data_page(a: FormAnalysis) -> dict:
 
 
 def contact_page(a: FormAnalysis) -> dict:
-    """S12 kontakt z danymi inicjalnymi; S13 zgoda bazowa i oświadczenia z papieru, każde wymagane."""
-    contact = section(
-        "dane_do_kontaktu",
-        "Dane do kontaktu",
-        [
-            _text("numer_telefonu", "Numer telefonu", **_registry("phoneNumber")),
-            _text("adres_e_mail", "Adres e-mail", validation=["EMAIL"], **_registry("email")),
-        ],
-        body=paragraphs(CONTACT_INFO),
-    )
+    """S12 według papieru, S13 ze zgodą bazową i oświadczeniami."""
+    fields = []
+    if ContactField.PHONE in a.applicant.contact:
+        fields.append(_text("numer_telefonu", "Numer telefonu", **_registry("phoneNumber")))
+    if ContactField.EMAIL in a.applicant.contact:
+        fields.append(_text("adres_e_mail", "Adres e-mail", validation=["EMAIL"], **_registry("email")))
+
+    sections = []
+    if fields:
+        sections.append(section("dane_do_kontaktu", "Dane do kontaktu", fields, body=paragraphs(CONTACT_INFO)))
     consents = [{"description": html_document(_privacy_consent()), "required": True}]
     consents += [{"description": html_document(paragraphs(text)), "required": True} for text in a.statements]
     consent = field("CONSENT_SECTION", "zgoda", consentSectionConfig={"consents": consents, "files": []})
     title = "Zgody i oświadczenia" if a.statements else "Zgoda"
-    return tab(CONTACT_PAGE, [contact, section("zgoda_wyrazenie", title, [consent])])
+    sections.append(section("zgoda_wyrazenie", title, [consent]))
+    return tab(CONTACT_PAGE, sections)
 
 
 def finish_page(a: FormAnalysis) -> dict:

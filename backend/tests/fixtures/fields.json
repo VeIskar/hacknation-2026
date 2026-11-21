@@ -2,6 +2,18 @@
   "title": "Wniosek o stwierdzenie nadpłaty podatku",
   "addressee": {"type": "URZAD", "name": "Urząd Gminy Ulan-Majorat"},
   "applicants": "BOTH",
+  "applicant": {
+    "proxy": true,
+    "applicant_pesel": true,
+    "person_address": true,
+    "entity_ids": ["NIP", "REGON", "KRS"],
+    "entity_ids_one_of": false,
+    "entity_address": true,
+    "representative_proof": true,
+    "correspondence_address": false,
+    "contact": ["PHONE", "EMAIL"],
+    "applicant_extra_fields": []
+  },
   "signature": true,
   "subject_pages": [
     {

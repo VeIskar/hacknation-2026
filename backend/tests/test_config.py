@@ -3,12 +3,15 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from compose import environment, interpolation
 from fastapi.testclient import TestClient
 
 from app.config import Settings, get_settings
 from app.main import app
 
 ROOT = Path(__file__).resolve().parents[2]
+# W kontenerze `api` model jest w serwisie `ollama`, nie na localhost (M1.5).
+COMPOSE_DEFAULTS = {"LLM_BASE_URL": "http://ollama:11434/v1"}
 
 
 @pytest.fixture(autouse=True)
@@ -52,21 +55,15 @@ def _env_example_names() -> set[str]:
 
 
 def _compose_api_environment() -> set[str]:
-    """Nazwy z listy `environment:` serwisu `api` (bez parsera YAML, który nie jest zależnością)."""
-    lines = (ROOT / "docker-compose.yml").read_text(encoding="utf-8").splitlines()
-    start = lines.index("  api:")
-    names: set[str] = set()
-    in_env = False
-    for line in lines[start + 1 :]:
-        if re.match(r"^  \S", line):  # następny serwis
-            break
-        if re.match(r"^    \S", line):
-            in_env = line.strip() == "environment:"
-            continue
-        # Forma `NAZWA: ${NAZWA:-}`: wartość z powłoki albo .env, a gdy brak, pusta (domyślna).
-        match = re.match(r"^      ([A-Z][A-Z0-9_]*): \$\{([A-Z][A-Z0-9_]*):-\}\s*$", line)
-        if in_env and match and match.group(1) == match.group(2):
-            names.add(match.group(1))
+    """Zmienne `api`, które compose bierze z powłoki albo .env: `NAZWA: ${NAZWA:-}`.
+
+    Pusta domyślna daje domyślną wartość z config.py. Wyjątki z inną domyślną: COMPOSE_DEFAULTS.
+    """
+    names = set()
+    for key, value in environment("api").items():
+        parsed = interpolation(value)
+        if parsed == (key, COMPOSE_DEFAULTS.get(key, "")):
+            names.add(key)
     return names
 
 
@@ -81,3 +78,14 @@ def test_compose_passes_every_setting_to_api() -> None:
     names = _env_example_names()
     assert "MAX_FILE_SIZE_MB" in names
     assert names <= _compose_api_environment()
+
+
+def test_env_example_does_not_override_compose_defaults() -> None:
+    """`cp env.example .env` nie może nadpisać domyślnych wartości compose (M1.5, recenzja #1).
+
+    Pusta wartość w .env daje w compose wartość domyślną (`${NAZWA:-…}`), a lokalnie domyślną z config.py.
+    """
+    text = (ROOT / "env.example").read_text(encoding="utf-8")
+    for name in COMPOSE_DEFAULTS:
+        values = re.findall(rf"^{name}=(.*)$", text, flags=re.MULTILINE)
+        assert values == [""], f"{name} w env.example ma być pusty, jest {values}"
