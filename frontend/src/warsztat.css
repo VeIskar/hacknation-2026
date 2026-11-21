@@ -1,0 +1,316 @@
+/* Warsztat urzędnika, kierunek "Zakreślacz". Strefy eUsługi ten plik nie styluje. */
+
+.wb {
+  min-height: 100vh;
+  padding: 0 2rem 2.5rem;
+}
+
+.wb-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem 1.5rem;
+  padding: 1.5rem 0 1.25rem;
+}
+
+.wb-top h1 {
+  margin: 0;
+  font-family: var(--font-tytul);
+  font-size: 2.75rem;
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+}
+
+.wb-id {
+  margin: 0.25rem 0 0;
+  color: var(--color-szary);
+  overflow-wrap: anywhere;
+}
+
+.wb-id b {
+  color: var(--color-atrament);
+  font-weight: 700;
+}
+
+.wb-akcje {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.b {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0.5rem 1rem;
+  border: 2px solid var(--color-atrament);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-atrament);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.b:hover {
+  background: var(--color-paper);
+}
+
+.b-main {
+  background: var(--color-atrament);
+  color: var(--color-paper);
+}
+
+.b-main:hover {
+  background: #3a3f45;
+}
+
+.b-krok {
+  margin-top: 1.5rem;
+}
+
+.scena {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2rem;
+}
+
+.panel {
+  max-width: 40rem;
+}
+
+.arkusz {
+  margin: 0;
+  border: 1px solid var(--color-obrys);
+  background: var(--color-paper);
+}
+
+.arkusz-pusty {
+  border: 1px dashed var(--color-obrys);
+  background: transparent;
+}
+
+.arkusz-obraz {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.arkusz-zdanie {
+  margin: 0;
+  padding: 1.25rem 1.5rem;
+  color: var(--color-szary);
+}
+
+.arkusz-podpis {
+  padding: 0.5rem 0.75rem;
+  border-top: 1px solid var(--color-obrys);
+  color: var(--color-szary);
+  font-size: 1rem;
+}
+
+/* Papier stoi po lewej na każdym ekranie, od wczytania do wyniku. W DOM jest drugi,
+   żeby klawiatura i czytnik ekranu trafiały najpierw na pole pliku. */
+@media (min-width: 900px) {
+  .scena {
+    grid-template-columns: minmax(16rem, 30rem) minmax(0, 40rem);
+    align-items: start;
+    gap: 0 6rem;
+  }
+
+  .papier {
+    position: sticky;
+    top: 1.5rem;
+    grid-row: 1;
+    grid-column: 1;
+  }
+
+  .panel {
+    grid-row: 1;
+    grid-column: 2;
+  }
+
+  /* Cała strona A4 mieści się w oknie pod nagłówkiem. */
+  .arkusz {
+    width: min(100%, calc((100vh - 11rem) * 595 / 842));
+  }
+
+  .arkusz-pusty {
+    aspect-ratio: 595 / 842;
+  }
+}
+
+.pole-etykieta {
+  display: block;
+  margin: 0 0 0.25rem;
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.pole-opis {
+  margin: 0 0 0.75rem;
+  color: var(--color-szary);
+}
+
+.strefa {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 9rem;
+  padding: 1.5rem;
+  border: 2px dashed var(--color-atrament);
+  border-radius: 6px;
+  background: var(--color-paper);
+}
+
+.strefa[data-over='true'] {
+  border-style: solid;
+}
+
+.strefa input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+/* Input jest przezroczysty, więc jego obrysu nie widać. Ten sam obrys rysuje strefa. */
+.strefa:has(input:focus-visible) {
+  outline: 3px solid var(--color-ink);
+  outline-offset: 3px;
+}
+
+/* Przeglądarka bez :has() (Firefox przed 121) pominęłaby regułę wyżej i fokus byłby niewidoczny. */
+@supports not selector(:has(*)) {
+  .strefa:focus-within {
+    outline: 3px solid var(--color-ink);
+    outline-offset: 3px;
+  }
+}
+
+.strefa-tekst {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.zakreslone {
+  padding: 0.05em 0.3em;
+  border-radius: 3px;
+  background: var(--color-zakreslacz);
+  color: var(--color-atrament);
+  font-weight: 700;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+/* Duży tekst: pociągnięcie zakreślacza pod dolną częścią liter, nie żółta tablica. */
+.zakreslone-pas {
+  position: relative;
+  display: inline-block;
+  isolation: isolate;
+}
+
+.zakreslone-pas::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  right: -0.12em;
+  bottom: 0.14em;
+  left: -0.12em;
+  height: 0.4em;
+  border-radius: 3px;
+  background: var(--color-zakreslacz);
+}
+
+.blad {
+  margin: 1rem 0 0;
+  padding: 0.75rem 1rem;
+  border: 2px solid var(--color-error);
+  border-radius: 6px;
+  background: var(--color-paper);
+  font-weight: 700;
+}
+
+.czas-etykieta {
+  margin: 0 0 0.25rem;
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.czas {
+  margin: 0 0 1.5rem 0.4rem;
+  font-size: 3.5rem;
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.zdanie {
+  max-width: 32rem;
+  margin: 0 0 0.5rem;
+}
+
+.tytul-wniosku {
+  margin: 0 0 1rem;
+  font-family: var(--font-tytul);
+  font-size: 1.75rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.karta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 2.5rem;
+  margin: 0 0 1.5rem;
+}
+
+.karta dt {
+  color: var(--color-szary);
+  font-size: 1rem;
+}
+
+.karta dd {
+  margin: 0;
+  font-size: 1.375rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.json {
+  max-height: 70vh;
+  margin: 0;
+  padding: 1rem;
+  overflow: auto;
+  border: 1px solid var(--color-obrys);
+  background: var(--color-paper);
+  font-family: ui-monospace, 'Cascadia Mono', Menlo, Consolas, monospace;
+  font-size: 0.9375rem;
+  line-height: 1.5;
+  tab-size: 2;
+}
+
+@media (max-width: 899px) {
+  .wb {
+    padding: 0 1rem 2rem;
+  }
+
+  .wb-top h1 {
+    font-size: 2.125rem;
+  }
+
+  .wb-akcje .b {
+    flex: 1 1 calc(50% - 0.25rem);
+  }
+
+  .czas {
+    font-size: 2.75rem;
+  }
+}

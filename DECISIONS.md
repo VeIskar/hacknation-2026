@@ -33,7 +33,19 @@ Claude Code version used: (write `claude --version` here on the day)
 
 ## Event: web
 
-(frontend dependencies and choices go here)
+F1 (web):
+
+| What                                   | Why                                                                                  | Licence    |
+| -------------------------------------- | ------------------------------------------------------------------------------------ | ---------- |
+| pdfjs-dist 6.5.438                     | pierwsza strona wczytanego PDF-a w przeglądarce; plik nie jest wysyłany drugi raz     | Apache-2.0 |
+| @napi-rs/canvas (opcjonalna, z pdfjs-dist) | potrzebna pdfjs tylko w Node; w przeglądarce nieużywana i nie trafia do paczki   | MIT        |
+| Atkinson Hyperlegible Next 2.001 (plik kroju) | krój warsztatu, projektowany dla osób słabowidzących; `google/fonts`, `ofl/atkinsonhyperlegiblenext` | OFL-1.1 (D15) |
+| Brygada 1918 3.006 (plik kroju)        | tylko tytuły (h1, nazwa wniosku); `google/fonts`, `ofl/brygada1918`                  | OFL-1.1 (D15) |
+
+- Kroje leżą bez zmian w `frontend/src/fonts/`, każdy z własnym `OFL.txt`. Bez CDN i bez subsetowania (D15).
+- Kierunek warsztatu „Zakreślacz” (wybór lidera, 2026-11-22): żółty `#FFD60A` tylko jako wypełnienie
+  zakreślenia pod ciemnym tekstem. Nigdy jako obrys fokusu, przycisk ani pasy. Obrys fokusu jest ciemny.
+- Podgląd pierwszej strony: PDF przez pdfjs-dist, JPG i PNG natywnie, inne formaty dostają jedno zdanie.
 
 ## Event: api
 

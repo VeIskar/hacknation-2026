@@ -1,6 +1,23 @@
 @import 'tailwindcss';
+@import './warsztat.css' layer(components);
 
-/* One action colour, flat backgrounds, measured contrast. See DESIGN.md. */
+/* Kroje bez zmian, z repozytorium, bez CDN (D15 w DECISIONS.md). Licencje: src/fonts/<kroj>/OFL.txt. */
+@font-face {
+  font-family: 'Atkinson Hyperlegible Next';
+  src: url('./fonts/atkinson/AtkinsonHyperlegibleNext[wght].ttf') format('truetype');
+  font-weight: 200 800;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Brygada 1918';
+  src: url('./fonts/brygada/Brygada1918[wght].ttf') format('truetype');
+  font-weight: 400 700;
+  font-display: swap;
+}
+
+/* Two zones, see DESIGN.md. Strefa eUsługi: ink, muted, paper, line, action, error.
+   Warsztat: blat, atrament, szary, obrys i zakreślacz. Kontrast zmierzony (PROGRESS.web.md, F0). */
 @theme {
   --color-ink: #1a1a1a;
   --color-muted: #4a4a4a;
@@ -9,45 +26,26 @@
   --color-action: #0b5cad;
   --color-action-ink: #ffffff;
   --color-error: #b00020;
+
+  --color-blat: #e9eae6;
+  --color-atrament: #16181b;
+  --color-szary: #4a4f55;
+  --color-obrys: #6a7077;
+  /* Tylko wypełnienie pod ciemnym tekstem. Nigdy obrys fokusu, przycisk ani pasy. */
+  --color-zakreslacz: #ffd60a;
+
+  --font-warsztat: 'Atkinson Hyperlegible Next', system-ui, sans-serif;
+  --font-tytul: 'Brygada 1918', Georgia, serif;
 }
 
 @layer base {
   body {
     margin: 0;
-    background: var(--color-paper);
-    color: var(--color-ink);
-    font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    background: var(--color-blat);
+    color: var(--color-atrament);
+    font-family: var(--font-warsztat);
     font-size: 1.125rem;
     line-height: 1.5;
-  }
-
-  main {
-    max-width: 40rem;
-    padding: 1.5rem 1rem;
-  }
-
-  h1 {
-    font-size: 1.75rem;
-    font-weight: 700;
-    line-height: 1.2;
-    margin: 0 0 1rem;
-  }
-
-  p {
-    margin: 0 0 1rem;
-  }
-
-  button {
-    min-height: 44px;
-    min-width: 44px;
-    padding: 0.5rem 1.25rem;
-    border: 0;
-    border-radius: 4px;
-    background: var(--color-action);
-    color: var(--color-action-ink);
-    font: inherit;
-    font-weight: 600;
-    cursor: pointer;
   }
 
   /* Never remove this ring: the keyboard test in tests/e2e/a11y.spec.ts checks it. */
