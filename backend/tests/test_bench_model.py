@@ -85,11 +85,12 @@ def test_missing_extra_and_retyped_fields_lower_the_scores() -> None:
     assert result["applicants_ok"] is False
 
 
-def test_missing_applicants_means_the_schema_default() -> None:
+def test_missing_applicants_is_not_a_match() -> None:
+    # Od P1.2a `applicants` jest wymagane, więc brak klucza nie znaczy już BOTH.
     predicted = copy.deepcopy(REFERENCE)
     del predicted["applicants"]
     assert REFERENCE["applicants"] == "BOTH"
-    assert bench.field_quality(predicted, REFERENCE)["applicants_ok"] is True
+    assert bench.field_quality(predicted, REFERENCE)["applicants_ok"] is False
 
 
 def _analysis(*labels: str) -> dict:

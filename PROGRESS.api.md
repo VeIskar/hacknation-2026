@@ -41,6 +41,21 @@ Krok P2: `lint.check(form)` dla M1.4 i E1 (schemat COI, Reguły techniczne, JSON
 - `DECISIONS.md`: jeden wpis z tolerancjami COI i rozstrzygnięciami z Fazy 0.
 - Dowód: testy i mutacje dla każdej reguły, przegląd diffu, `bash scripts/gate.sh api -rs`, 0 pominiętych.
 
+Krok M1.2 (Marcin): JWT według „API contract” (401, `Authorization: Bearer`, `/health` otwarte).
+- `backend/app/auth.py`: zależność `require_token` (HS256/384/512, wymagany `exp`), `AuthError` 401,
+  skrypt `python -m app.auth token [--hours N]`; brak `JWT_SECRET` przy włączonym JWT → 500.
+- `backend/app/main.py`: `require_token` na `POST /api/forms` przed odczytem pliku, 401 z `WWW-Authenticate`.
+- `backend/requirements.txt` + `DECISIONS.md`: PyJWT 2.15.1 (MIT).
+- Dowód: `test_auth.py` (brak/zły/wygasły/obcy token, zły schemat, `/health`, JWT wyłączony, skrypt).
+
+Krok P1.2a: wymagany kontrakt MVP `FormAnalysis.applicant` i jawne `applicants`.
+
+- `backend/app/models.py`: decyzje z papieru, walidacja spójności, wspólne `show_if` i naprawa Unicode.
+- `backend/tests/fixtures/*.json`: migracja czterech analiz i dodanie analizy F3.
+- `backend/tests/test_models.py`: schemat, reguły, Unicode, każdy fixture przez generator i linter.
+- `DECISIONS.md` i „Requests”: decyzja MVP oraz treści do zgłoszenia liderowi.
+- Dowód: czerwone nowe testy, mutacje reguł i Unicode, `bash scripts/gate.sh api -rs` bez pominięć, przegląd nazw plików.
+
 Krok K1 (Mikołaj, gałąź `mikolaj/k1`): pomiar `qwen3.5:4b` w lokalnej Ollamie (Docker 0.40.15, CPU).
 
 - `backend/app/llm.py`: klient `/v1/chat/completions` (httpx) z ustawieniami z `config.Settings`; `reasoning_effort: "none"`, `response_format` ze schematem `FormAnalysis`; sieć, timeout, zła odpowiedź → `LLMUnavailable`.
@@ -58,6 +73,8 @@ Krok K1 (Mikołaj, gałąź `mikolaj/k1`): pomiar `qwen3.5:4b` w lokalnej Ollami
 - lider → Mikołaj (K3, `analysis.py`): `ValidationError` z `FormAnalysis.model_validate` po ponowieniach zamień na `LLMUnavailable` (D4).
 - lider → Mikołaj (K2, `extract`): przytnij `images` do 20 sztuk i 40 MB przed utworzeniem `ExtractedDocument` i dopisz ostrzeżenie (D3).
 - Marcin → lider (`SPEC.md`, Must 1 i „API contract”): dopisać wyjątek od zgodności typu z rozszerzeniem, np. „Plik `.doc`, który w środku jest DOCX, jest przyjmowany i czytany jak DOCX (tak są zapisane pliki `.DOC` z folderów 5 i 7). `.jpe` jest przyjmowane jak `.jpg` (plik `.JPE` w folderze 7).” Kod już tak działa (DECISIONS, M1.1); uwaga Pawła z recenzji M1.1.
+- Paweł → lider (P1.2a, `SZABLONY_SEKCJI.md`, rozdz. 1): dodać tabelę „decyzja → sekcja” dla `ApplicantData` z zaznaczeniem, że dobór obowiązuje od P1.2b.
+- Paweł → lider (P1.2a, `DELEGACJA.md`, rozdz. 2.1): dopisać wymagane `applicants` i `applicant: ApplicantData`, walidację i niezależność od ekstraktora oraz kolejność P1.2a → P1.2b/P1.2c.
 - Mikołaj → lider (`SPEC.md`, „Model”): zamień `think: false` na `reasoning_effort: "none"`, bo `/v1` ignoruje `think` (pomiar K1 w `DECISIONS.md`).
 - Mikołaj → Marcin (M1.5, `docker-compose.yml`): serwis `ollama/ollama:0.40.15` z `OLLAMA_CONTEXT_LENGTH=16384` i `OLLAMA_NO_CLOUD=1`, bez portu na hoście (API Ollamy nie ma haseł).
 - Mikołaj → Marcin (`config.py`, `env.example`): `LLM_TIMEOUT_S=120` jest za małe na CPU (K1: 238–344 s na formularz); podnieś do 600 albo zmierz na maszynie demo.
@@ -75,5 +92,9 @@ Krok K1 (Mikołaj, gałąź `mikolaj/k1`): pomiar `qwen3.5:4b` w lokalnej Ollami
 - M1.1-fix: done 4 ustalenia Pawła (limit z .env w compose + walidacja, ODS `mimetype`, błędy ZIP → 415, wielkość liter `Content-Type`) + test limitu strumieniowego; nowe testy czerwone przed poprawką, test strumieniowy czerwony po usunięciu kontroli w pętli; fuzz 200 000 uszkodzonych ZIP-ów: 0 wyjątków poza `UploadError`; `gate.sh api -rs` → 177 passed, 0 pominiętych / next zapis w SPEC (Request do lidera), potem M1.2 / blocker brak.
 - P2 (linter `lint.check`): done oba wzorce COI i 4 wyniki generatora → `[]`, 119 testów lintera, 70/70 mutacji wykrytych; `bash scripts/gate.sh api -rs` → `327 passed`, 0 pominiętych, 1 ostrzeżenie Starlette, `GATE: PASS (api)` / next M1.4 i E1 mogą użyć `lint.check` / blocker brak.
 - P2 po recenzji: done `isinstance` z wyłączeniem bool jako liczby, surowe znaki i obsługa błędu dekodowania JSONata, 20 nowych przypadków widzianych na czerwono, 25/25 mutacji recenzji i 70/70 mutacji P2; `bash scripts/gate.sh api -rs` → `347 passed`, 0 pominiętych, 1 ostrzeżenie Starlette, `GATE: PASS (api)` / next M1.4 i E1 / blocker brak.
+- M1.2 kontrakt: done lider zatwierdził 401 w `SPEC.md` (`Authorization: Bearer <JWT_TOKEN>`, `detail` 401, JWT poza „Later”); prośba zamknięta / next M1.2 `auth.py`, `test_auth.py` / blocker: czy `/health` jest otwarte przy JWT – nierozstrzygnięte.
+- M1.2: done `auth.py` (Bearer, HMAC, wymagany `exp`, sekret 32/48/64 B), 401 z `WWW-Authenticate` przed odczytem pliku, `/health` otwarte, `python -m app.auth token`, PyJWT 2.15.1 (MIT); `gate.sh api -rs` → 187 passed, 0 pominiętych; mutacje (bez zależności, bez `exp`, bez nagłówka) wykryte / next M1.3 Docker / blocker brak.
+- M1.2 recenzja (subagent `reviewer`, werdykt SHIP): 0 CONFIRMED, 5 LATER (REVIEW.md): `JWT_*`/`MAX_FILE_SIZE_MB` w compose → M1.3, `securitySchemes` w OpenAPI → M1.6, kolejność w DECISIONS, walidacja sekretu przy starcie, 2 testy; `gate.sh` → 187 passed / next rebase na `origin/main`, M1.3 / blocker brak.
+- P1.2a: done kontrakt MVP, 5 fixture’ów, 29 nowych przypadków czerwonych przed wdrożeniem i 25/25 mutacji wykrytych, `bash scripts/gate.sh api -rs` → `397 passed`, 0 pominiętych, 1 ostrzeżenie Starlette, `GATE: PASS (api)` / next commit człowieka i aktualizacja dokumentów przez lidera / blocker brak.
 - K1 (pomiar na `2e7bdba`, gałąź przewinięta na `4e9d228`): done `llm.py` (klient `/v1`, `reasoning_effort: "none"`, `config.Settings`), `scripts/bench_model.py`, testy offline; pomiar `qwen3.5:4b`, folder 5: JSON 3/3, `FormAnalysis` 0/3, DOCX 238–344 s, JPG 575 s (`DECISIONS.md`); `gate.sh api -rs` na `4e9d228` → 259 passed, 0 pominiętych; 35/35 mutacji wykrytych / next K2 (skany przez OCR), K3 z ponowieniem po błędzie walidatora / blocker `LLM_TIMEOUT_S=120` krótszy niż czas na CPU (prośba do Marcina).
 - K1 recenzja (Codex, baza `4e9d228`; P2 weszło potem na `main`): done 1/8 CONFIRMED, `llm.py` zamienia zły typ `usage`, tokenów i `reasoning` na brak wartości (wcześniej `AttributeError` omijał `LLMUnavailable`, czyli 503); 4 nowe przypadki czerwone przed poprawką, 5/5 mutacji wykrytych; `gate.sh api -rs` → 263 passed, 0 pominiętych, `GATE: PASS (api)` / later: 7 ustaleń (proxy w httpx, 6 w `bench_model.py`) w REVIEW.md / next scalenie z `main`: konflikt w PROGRESS.api.md, zostaw oba wpisy / blocker brak.

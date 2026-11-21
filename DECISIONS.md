@@ -49,11 +49,23 @@ Decyzje lidera po recenzji P0 (2026-11-21). Kod: `backend/app/errors.py`, `backe
 
 - **P2 – linter** (`backend/app/lint.py`). Kontrolujemy `repeatingSectionGrid` zgodnie z eksportami COI, dopuszczamy dodatkowe klucze, `defaultValue` jako tekst lub tablicę, pusty `validation: {}`, brak `states` i `options[].techName` oraz `TEXT_BLOCK` obok `INFO_SECTION` na `FINISH` (Reguły, ak. 12, wymieniają wyłącznie `INFO_SECTION`). Opis importu, ak. 71, określa `validation` jako „tablica stringów przyjmująca nazwy predefiniowanych walidacji”. Przyjmujemy dziewięć nazw z Reguł, pola informacyjne mają pustą konfigurację walidatorów. Opis importu, ak. 96–98, i schemat, w. 109–111, umieszczają `required` w `consentSectionConfig`. Reguły, ak. 575–582, i oba wzorce umieszczają flagę przy każdej zgodzie, więc tam jest wymagana. Na poziomie konfiguracji sprawdzamy jej typ, gdy występuje. `techName` sekcji i pól są unikalne w formularzu. Różne pola mogą używać tych samych identyfikatorów i nazw technicznych opcji. JSONata dopasowuje literał do `id` lub `name` opcji, a pole słownikowe pomija kontrolę wartości. Sprawdzamy osiągalność stron od pierwszej i drogę z każdej `MAIN` do `FINISH`. Odwołanie JSONata musi wskazywać pole wyboru, siatka wymaga `x/y/rows/cols`, strona wymaga niepustych `id` i `title`, pole niepustych `id` i `type`, link niepustego `id`, a lista `consents` co najmniej jednej zgody, przy czym `id` stron, pól (w tym sekcji) i linków należą do jednej przestrzeni, a typy sprawdzamy przez `isinstance` z wyłączeniem `bool` jako liczby.
 
+- **P1.2a – kontrakt.** `FormAnalysis` wymaga jawnych `applicants` i `applicant: ApplicantData`. Decyzje MVP mają przesłanki w papierze i są niezależne od ekstraktora. Dane spoza szablonu trafiają do `applicant_extra_fields`, a reguły D4 dla `show_if` obowiązują także w tej liście. Tekst analizy naprawia samotne surogaty do U+FFFD przed walidacją. Dobór sekcji należy do P1.2b, detektor do P1.2c, a tryby rozszerzone do P1.3.
+
 M1.1 (Marcin):
 
 | What                    | Why                                                         | Licence    |
 | ----------------------- | ----------------------------------------------------------- | ---------- |
 | python-multipart 0.0.34 | Starlette's multipart parser needs it for `POST /api/forms` | Apache-2.0 |
+
+M1.2 (Marcin):
+
+| What          | Why                                             | Licence |
+| ------------- | ----------------------------------------------- | ------- |
+| PyJWT 2.15.1  | JWT na `POST /api/forms` (Treść pkt 5, SPEC 401) | MIT     |
+
+- Tylko algorytmy HMAC (HS256/384/512) i wymagany `exp`: sekret jest wspólny, token nie żyje wiecznie.
+  Sekret ma co najmniej 32/48/64 bajty (RFC 7518, 3.2); krótszy albo inny algorytm to 500 i wpis w logu.
+- Token sprawdzamy przed odczytem pliku, więc bez tokenu serwer nie czyta treści żądania.
 
 - Plik tylko w pamięci: treść żądania czytamy sami do `MAX_FILE_SIZE_MB` + 64 KB (potem 413), a parser
   dostaje bufor większy niż żądanie, więc nie powstaje plik tymczasowy (Treść pkt 5).

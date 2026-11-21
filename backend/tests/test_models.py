@@ -9,7 +9,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from app import models
+from app import lint, models
+from app.generator import build_form
 from app.models import (
     MAX_IMAGES,
     MAX_IMAGES_BYTES,
@@ -174,6 +175,185 @@ def test_schema_examples_are_the_reviewed_ones() -> None:
     assert set(re.findall(r"'([^']+)'", model_prompt_text())) == SCHEMA_EXAMPLES
 
 
+def test_applicant_decisions_are_required_without_defaults() -> None:
+    schema = FormAnalysis.model_json_schema()
+    assert {"applicants", "applicant"} <= set(schema["required"])
+    assert all("default" not in schema["properties"][key] for key in ("applicants", "applicant"))
+    applicant_schema = schema["$defs"]["ApplicantData"]
+    assert applicant_schema["additionalProperties"] is False
+    assert set(applicant_schema["required"]) == applicant_schema["properties"].keys() == {
+        "proxy", "applicant_pesel", "person_address", "entity_ids", "entity_ids_one_of", "entity_address",
+        "representative_proof", "correspondence_address", "contact", "applicant_extra_fields",
+    }
+    assert all("default" not in prop for prop in applicant_schema["properties"].values())
+
+
+def test_applicant_accepts_explicit_false_and_empty_lists() -> None:
+    data = fields_json()
+    data["applicants"] = "PERSON"
+    data["applicant"] = {
+        "proxy": False,
+        "applicant_pesel": False,
+        "person_address": False,
+        "entity_ids": [],
+        "entity_ids_one_of": False,
+        "entity_address": False,
+        "representative_proof": False,
+        "correspondence_address": False,
+        "contact": [],
+        "applicant_extra_fields": [],
+    }
+    analysis = FormAnalysis.model_validate(data)
+    assert analysis.applicant.model_dump(mode="json") == data["applicant"]
+
+
+def test_applicant_accepts_choice_of_two_entity_ids() -> None:
+    data = fields_json()
+    data["applicant"].update(entity_ids=["NIP", "REGON"], entity_ids_one_of=True)
+    applicant = FormAnalysis.model_validate(data).applicant
+    assert applicant.entity_ids_one_of is True
+    assert applicant.entity_ids == ["NIP", "REGON"]
+
+
+@pytest.mark.parametrize(
+    ("fixture_name", "changes", "message"),
+    [
+        pytest.param("analysis_person.json", {"entity_ids": ["NIP"]}, "identyfikatorów podmiotu", id="person-entity-ids"),
+        pytest.param(
+            "analysis_person.json", {"entity_ids": ["NIP", "REGON"], "entity_ids_one_of": True},
+            "nie wybiera jednego identyfikatora podmiotu", id="person-one-of",
+        ),
+        pytest.param("analysis_person.json", {"entity_address": True}, "adresu siedziby", id="person-entity-address"),
+        pytest.param("analysis_person.json", {"representative_proof": True}, "odpisu z rejestru", id="person-representative-proof"),
+        pytest.param("analysis_entity.json", {"applicant_pesel": True}, "PESEL wnioskodawcy", id="entity-pesel"),
+        pytest.param("analysis_entity.json", {"person_address": True}, "adresu zamieszkania", id="entity-person-address"),
+        pytest.param(
+            "fields.json", {"entity_ids": ["NIP"], "entity_ids_one_of": True},
+            "co najmniej dwóch identyfikatorów", id="one-of-with-one-id",
+        ),
+        pytest.param(
+            "fields.json", {"entity_ids": [], "entity_ids_one_of": True},
+            "co najmniej dwóch identyfikatorów", id="one-of-with-no-ids",
+        ),
+        pytest.param("fields.json", {"entity_ids": ["NIP", "NIP"]}, "Identyfikatory podmiotu nie mogą się powtarzać", id="duplicate-ids"),
+        pytest.param("fields.json", {"contact": ["EMAIL", "EMAIL"]}, "Pola kontaktowe nie mogą się powtarzać", id="duplicate-contacts"),
+    ],
+)
+def test_applicant_rejects_inconsistent_decisions(fixture_name: str, changes: dict, message: str) -> None:
+    data = json.loads((FIXTURES / fixture_name).read_text(encoding="utf-8"))
+    data["applicant"].update(changes)
+    with pytest.raises(ValidationError, match=message):
+        FormAnalysis.model_validate(data)
+
+
+@pytest.fixture
+def analysis_with_extra_fields() -> dict:
+    data = fields_json()
+    data["applicant"]["applicant_extra_fields"] = [
+        {"label": "Rodzaj dokumentu", "type": "RADIO", "options": ["Dowód osobisty", "Paszport"]},
+        {
+            "label": "Numer paszportu",
+            "type": "TEXT_FIELD",
+            "show_if": {"field": "Rodzaj dokumentu", "equals": "Paszport"},
+        },
+    ]
+    return data
+
+
+def test_applicant_show_if_accepts_choice_from_same_list(analysis_with_extra_fields: dict) -> None:
+    fields = FormAnalysis.model_validate(analysis_with_extra_fields).applicant.applicant_extra_fields
+    assert fields[1].show_if is not None
+    assert fields[1].show_if.field == fields[0].label
+    assert fields[1].show_if.equals == fields[0].options[1]
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        pytest.param(
+            lambda f: f[1]["show_if"].update(field=RADIO, equals=TO_ACCOUNT),
+            "w dodatkowych danych wnioskodawcy nie ma pola", id="outside-list",
+        ),
+        pytest.param(
+            lambda f: f.append({"label": "Rodzaj dokumentu", "type": "TEXT_FIELD"}),
+            "etykieta 'Rodzaj dokumentu' jest niejednoznaczna", id="ambiguous-label",
+        ),
+        pytest.param(
+            lambda f: f[0].update(show_if={"field": "Rodzaj dokumentu", "equals": "Paszport"}),
+            "wskazuje to samo pole", id="self-reference",
+        ),
+        pytest.param(
+            lambda f: f[0].update(type="TEXT_FIELD", options=[]),
+            "'Rodzaj dokumentu' nie jest polem wyboru", id="not-a-choice",
+        ),
+        pytest.param(
+            lambda f: f[1]["show_if"].update(equals="Karta pobytu"),
+            "nie ma opcji 'Karta pobytu'", id="missing-option",
+        ),
+    ],
+)
+def test_applicant_show_if_rejects_invalid_reference(
+    analysis_with_extra_fields: dict, change: Callable[[list[dict]], object], message: str,
+) -> None:
+    change(analysis_with_extra_fields["applicant"]["applicant_extra_fields"])
+    with pytest.raises(ValidationError, match=message):
+        FormAnalysis.model_validate(analysis_with_extra_fields)
+
+
+@pytest.mark.parametrize(
+    ("original", "normalized"),
+    [
+        pytest.param("x\ud83d", "x\ufffd", id="lone-high"),
+        pytest.param("x\ude00", "x\ufffd", id="lone-low"),
+        pytest.param("x\ud83d\ude00", "x😀", id="surrogate-pair"),
+        pytest.param("x😀", "x😀", id="emoji"),
+    ],
+)
+def test_analysis_normalizes_unicode_and_builds_utf8(original: str, normalized: str) -> None:
+    data = fields_json()
+    data["title"] = f" {original} "
+    data["subject_pages"][0]["sections"] = [{
+        "title": "Odbiór",
+        "description": original,
+        "fields": [
+            {
+                "label": f"Wybór {normalized}",
+                "type": "RADIO",
+                "options": [f" {original} "],
+            },
+            {
+                "label": "Uwagi",
+                "type": "TEXT_FIELD",
+                "description": original,
+                "show_if": {"field": f" Wybór {original} ", "equals": f" {original} "},
+            },
+        ],
+    }]
+    analysis = FormAnalysis.model_validate(data)
+    subject = analysis.subject_pages[0].sections[0]
+    source, target = subject.fields
+    assert analysis.title == normalized
+    assert subject.description == target.description == normalized
+    assert source.options == [normalized]
+    assert target.show_if is not None
+    assert (target.show_if.field, target.show_if.equals) == (source.label, normalized)
+    encoded = json.dumps(build_form(analysis), ensure_ascii=False).encode("utf-8")
+    assert normalized.encode("utf-8") in encoded
+
+
+def test_duplicate_options_are_checked_after_unicode_normalization() -> None:
+    data = fields_json()
+    field(data, RADIO)["options"] = ["Opcja \ud83d", "Opcja \ude00"]
+    with pytest.raises(ValidationError, match="powtórzone opcje"):
+        FormAnalysis.model_validate(data)
+
+
+@pytest.mark.parametrize("path", sorted(FIXTURES.glob("*.json")), ids=lambda path: path.name)
+def test_every_analysis_fixture_builds_and_passes_lint(path: Path) -> None:
+    analysis = FormAnalysis.model_validate_json(path.read_text(encoding="utf-8"))
+    assert lint.check(build_form(analysis)) == []
+
+
 def _strings(value: object) -> list[str]:
     if isinstance(value, str):
         return [value]
@@ -206,6 +386,8 @@ def test_control_set_does_not_leak_into_model_prompt_or_fixtures(
     coi_control_reference: dict, coi_working_reference: dict
 ) -> None:
     control_only = _coi_texts(coi_control_reference) - _coi_texts(coi_working_reference)
+    # REGON jest niezależną wartością kontraktu MVP. Wyłączamy tylko samodzielną etykietę.
+    control_only.discard("regon")
     assert control_only, "zbiór kontrolny nie ma własnych tekstów, test nic by nie sprawdzał"
     fixtures = sorted(FIXTURES.glob("*.json"))
     assert "fields.json" in [path.name for path in fixtures]

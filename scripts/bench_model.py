@@ -61,8 +61,6 @@ Zasady:
 - Grupuj pola w sekcje tematyczne.
 Zwróć wyłącznie JSON."""
 
-DEFAULT_APPLICANTS = FormAnalysis.model_fields["applicants"].default
-
 WARMUP_SCHEMA = {"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"]}
 
 
@@ -173,9 +171,9 @@ def field_quality(predicted: Any, reference: dict[str, Any]) -> dict[str, Any]:
         "show_if_predicted": sum(1 for f in ours if f[2]),
         "show_if_reference": sum(1 for f in theirs if f[2]),
         "missing_reference_labels": [theirs[j][0] for j in range(len(theirs)) if j not in matched],
-        # Brak klucza to wartość domyślna schematu, tak samo jak w FormAnalysis.model_validate.
         "applicants_ok": isinstance(predicted, dict)
-        and predicted.get("applicants", DEFAULT_APPLICANTS) == reference.get("applicants", DEFAULT_APPLICANTS),
+        and "applicants" in predicted
+        and predicted["applicants"] == reference.get("applicants"),
         "addressee_type_ok": isinstance(predicted, dict)
         and isinstance(predicted.get("addressee"), dict)
         and predicted["addressee"].get("type") == reference.get("addressee", {}).get("type"),
