@@ -1,4 +1,4 @@
-"""K3: analiza dokumentu przez lokalny model, wynik to FormAnalysis (DELEGACJA.md, rozdz. 2.2, zadanie K3).
+"""K3: analiza dokumentu przez model, wynik to FormAnalysis (DELEGACJA.md, rozdz. 2.2, zadanie K3).
 
 Przepływ: lekkie uporządkowanie tekstu, kontrola budżetu kontekstu, llm.chat_json ze schematem
 FormAnalysis, potem FormAnalysis.model_validate_json. Wynik niezgodny z kontraktem wraca do modelu
@@ -19,16 +19,21 @@ from pydantic import ValidationError
 
 from app.config import Settings
 from app.errors import ExtractionError, LLMUnavailable
-from app.llm import UNAVAILABLE_DETAIL, ChatResult, Message, chat_json, image_part
+from app.llm import (
+    UNAVAILABLE_DETAIL,
+    ChatResult,
+    Message,
+    answer_token_limit,
+    chat_json,
+    image_part,
+    provider,
+)
 from app.models import ExtractedDocument, FormAnalysis
 
 log = logging.getLogger(__name__)
 
 # Decyzja 2026-11-21: pierwsza próba i jedno ponowienie, bo na CPU jedna próba trwa 240–344 s (K1).
 MAX_ATTEMPTS = 2
-# Ollama na /v1 nie przyjmuje num_ctx. Kontekst ustala serwer: OLLAMA_CONTEXT_LENGTH=16384 (Requests, M1.5).
-CONTEXT_TOKENS = 16384
-ANSWER_TOKENS = 4096
 # K1: prompt, schemat i tekst nadpłaty to 7338 znaków i 2034 tokeny promptu, czyli 3,6 znaku na token.
 # Przyjmujemy mniej znaków na token, żeby oszacowanie było ostrożne: polski tekst bez wielokropków
 # dzieli się na tokeny drobniej niż schemat.
@@ -63,8 +68,9 @@ Przedmiot wniosku (subject_pages):
 - Typ pola: kwota lub liczba to NUMBER, data to DATEPICKER, uzasadnienie lub opis to TEXTAREA, reszta to TEXT_FIELD.
 - Lista „1) … 2) …” albo kwadraty do zaznaczenia: RADIO dla jednego wyboru, CHECKBOX dla wielu, SELECT dla ponad 5 opcji.
 - Dane dopisywane przy opcji to osobne pole z show_if tej opcji.
-- show_if.field to dokładna etykieta innego pola wyboru na tej samej stronie.
-- show_if.equals to dokładna nazwa jednej z opcji tego pola. Pole nie wskazuje samego siebie.
+- show_if.field to dokładna etykieta wcześniejszego pola wyboru, jednoznaczna na wszystkich stronach przedmiotu.
+- Podaj jedną opcję w equals, a kolejne w any_of. Wystarczy wybranie jednej z nich.
+- show_if_all wymaga wszystkich warunków razem z show_if. Warunki mogą dotyczyć pola lub całej sekcji.
 - Załączniki: sekcja z opisem i pole FILE_UPLOADER dla każdego wymienionego załącznika.
 - required: false tylko wtedy, gdy formularz mówi, że pole jest nieobowiązkowe albo „jeśli dotyczy”.
 - Grupuj pola w sekcje tematyczne. Tytuł sekcji to jej temat.
@@ -161,26 +167,22 @@ def estimate_prompt_tokens(messages: Sequence[Message]) -> int:
     return math.ceil(chars / CHARS_PER_TOKEN) + images * IMAGE_TOKENS + len(messages) * MESSAGE_TOKENS
 
 
-def _needed_tokens(messages: Sequence[Message]) -> int:
-    return estimate_prompt_tokens(messages) + ANSWER_TOKENS
-
-
-def _ensure_fits(messages: Sequence[Message], attempt: int) -> None:
+def _ensure_fits(messages: Sequence[Message], attempt: int, context_tokens: int, max_tokens: int) -> None:
     """Za długie zapytanie serwer przyciąłby po cichu, razem z instrukcjami. Wtedy nie wysyłamy go wcale."""
-    needed = _needed_tokens(messages)
-    if needed > CONTEXT_TOKENS:
+    needed = estimate_prompt_tokens(messages) + max_tokens
+    if needed > context_tokens:
         log.warning(
             "Analiza, próba %d: zapytanie z odpowiedzią to ok. %d tokenów, kontekst ma %d. "
             "Dokument wymaga analizy fragmentami albo większego kontekstu.",
             attempt,
             needed,
-            CONTEXT_TOKENS,
+            context_tokens,
         )
         raise LLMUnavailable(detail=UNAVAILABLE_DETAIL)
 
 
-def _ensure_not_truncated(messages: Sequence[Message], result: ChatResult, attempt: int) -> None:
-    """Serwer z kontekstem mniejszym niż CONTEXT_TOKENS (domyślnie 4096) przycina prompt bez błędu.
+def _ensure_not_truncated(messages: Sequence[Message], result: ChatResult, attempt: int, settings: Settings) -> None:
+    """Serwer z kontekstem mniejszym niż skonfigurowany w aplikacji może przyciąć prompt bez błędu.
 
     Analiza części dokumentu przeszłaby walidację jako kompletna, więc za mało tokenów promptu to 503.
     """
@@ -188,12 +190,14 @@ def _ensure_not_truncated(messages: Sequence[Message], result: ChatResult, attem
         return
     minimum = math.floor(_size(messages)[0] / MAX_CHARS_PER_TOKEN)
     if result.prompt_tokens < minimum:
+        hint = " Sprawdź OLLAMA_CONTEXT_LENGTH." if provider(settings) == "ollama" else ""
         log.warning(
             "Analiza, próba %d: serwer policzył %d tokenów promptu, a tekst to co najmniej %d. "
-            "Zapytanie zostało przycięte: sprawdź OLLAMA_CONTEXT_LENGTH.",
+            "Zapytanie zostało przycięte.%s",
             attempt,
             result.prompt_tokens,
             minimum,
+            hint,
         )
         raise LLMUnavailable(detail=UNAVAILABLE_DETAIL)
 
@@ -233,14 +237,16 @@ def _validate(content: str) -> FormAnalysis:
     return FormAnalysis.model_validate(data)
 
 
-def _retry_messages(base: list[Message], result: ChatResult, exc: ValidationError, attempt: int) -> list[Message]:
+def _retry_messages(
+    base: list[Message], result: ChatResult, exc: ValidationError, attempt: int, context_tokens: int, max_tokens: int
+) -> list[Message]:
     """Poprzednia odpowiedź z błędami. Gdy z nią zapytanie się nie mieści, same błędy: dokument zostaje cały."""
     full = [
         *base,
         {"role": "assistant", "content": result.content},
         {"role": "user", "content": correction_message(exc, result.finish_reason)},
     ]
-    if _needed_tokens(full) <= CONTEXT_TOKENS:
+    if estimate_prompt_tokens(full) + max_tokens <= context_tokens:
         return full
     log.info("Analiza, próba %d: ponowienie bez poprzedniej odpowiedzi, bo z nią nie mieści się w kontekście.", attempt + 1)
     return [*base, {"role": "user", "content": correction_message(exc, result.finish_reason, SHORT_CORRECTION_INTRO)}]
@@ -264,7 +270,7 @@ def _log_attempt(level: int, attempt: int, result: ChatResult, outcome: str) -> 
 def analyze(
     doc: ExtractedDocument, *, settings: Settings, transport: httpx.BaseTransport | None = None
 ) -> FormAnalysis:
-    """Opis formularza z lokalnego modelu, zwalidowany kontraktem FormAnalysis.
+    """Opis formularza zwalidowany kontraktem FormAnalysis.
 
     settings podaje wołający, np. trasa z Depends(get_settings), więc dependency_overrides w testach
     obejmują też model i LLM_FIXTURE. Funkcja jest synchroniczna i na CPU trwa minuty.
@@ -274,18 +280,22 @@ def analyze(
     """
     base = [{"role": "system", "content": system_message_text()}, user_message(doc)]
     messages = base
+    context_tokens = settings.llm_context_tokens
+    max_tokens = answer_token_limit(settings)
     for attempt in range(1, MAX_ATTEMPTS + 1):
-        _ensure_fits(messages, attempt)
+        _ensure_fits(messages, attempt, context_tokens, max_tokens)
         result = chat_json(
-            messages, FormAnalysis.model_json_schema(), settings=settings, max_tokens=ANSWER_TOKENS, transport=transport
+            messages, FormAnalysis.model_json_schema(), settings=settings, max_tokens=max_tokens, transport=transport
         )
-        _ensure_not_truncated(messages, result, attempt)
+        if result.reasoning:
+            log.warning("Analiza, próba %d: model zwrócił tok rozumowania (%d znaków).", attempt, len(result.reasoning))
+        _ensure_not_truncated(messages, result, attempt, settings)
         try:
             analysis = _validate(result.content)
         except ValidationError as exc:
             kinds = ", ".join(sorted({error["type"] for error in exc.errors()}))
             _log_attempt(logging.WARNING, attempt, result, f"{exc.error_count()} błędów walidacji ({kinds})")
-            messages = _retry_messages(base, result, exc, attempt)
+            messages = _retry_messages(base, result, exc, attempt, context_tokens, max_tokens)
             continue
         _log_attempt(logging.INFO, attempt, result, "poprawna analiza")
         return analysis

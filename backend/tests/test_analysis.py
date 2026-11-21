@@ -7,6 +7,7 @@ import html
 import json
 import logging
 import re
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -18,8 +19,6 @@ from pydantic import ValidationError
 
 from app import analysis
 from app.analysis import (
-    ANSWER_TOKENS,
-    CONTEXT_TOKENS,
     CORRECTION_INTRO,
     CORRECTION_OUTRO,
     EMPTY_DOCUMENT_DETAIL,
@@ -40,7 +39,12 @@ from app.models import ApplicantData, ExtractedDocument, FormAnalysis
 
 FIELDS = Path(__file__).parent / "fixtures" / "fields.json"
 VALID = FIELDS.read_text(encoding="utf-8")
-SETTINGS = Settings(llm_base_url="http://model.test/v1", llm_timeout_s=5)
+CONTEXT_TOKENS = 16384
+ANSWER_TOKENS = 4096
+SETTINGS = Settings(
+    llm_base_url="http://model.test/v1", llm_timeout_s=5,
+    llm_context_tokens=CONTEXT_TOKENS, llm_max_tokens=ANSWER_TOKENS,
+)
 RADIO = "Wybierz, co mamy zrobić z nadpłatą"
 # Zmyślony wniosek w stylu folderu 5. Strona 2 zaczyna się po znaku \f.
 DOC_TEXT = (
@@ -132,6 +136,18 @@ def test_request_carries_rules_schema_and_prepared_text() -> None:
     assert "--- Strona 2 ---\nKwotę nadpłaty proszę:" in user["content"]
     assert "z tytułu … w kwocie … zł" in user["content"]
     assert "...." not in user["content"] and "____" not in user["content"]
+
+
+def test_request_explains_p14_show_if() -> None:
+    model = FakeModel(VALID)
+    _run(model)
+    prompt = model.requests[0]["messages"][0]["content"]
+    assert (
+        "- show_if.field to dokładna etykieta wcześniejszego pola wyboru, jednoznaczna na wszystkich stronach przedmiotu.\n"
+        "- Podaj jedną opcję w equals, a kolejne w any_of. Wystarczy wybranie jednej z nich.\n"
+        "- show_if_all wymaga wszystkich warunków razem z show_if. Warunki mogą dotyczyć pola lub całej sekcji.\n"
+    ) in prompt
+    assert "na tej samej stronie" not in prompt
 
 
 def test_ocr_text_is_marked_as_possibly_misspelled() -> None:
@@ -244,6 +260,30 @@ def test_context_budget_decides_before_any_request(
     assert "analizy fragmentami" in caplog.text
 
 
+def test_f8_size_fits_the_larger_budget_including_retry() -> None:
+    doc = ExtractedDocument(source_format="docx", text=_form_text(31_000))
+    model = FakeModel(_answer_with_self_reference(), VALID)
+    with pytest.raises(LLMUnavailable) as caught:
+        analyze(doc, settings=SETTINGS, transport=model.transport)
+    assert caught.value.status_code == 503
+    assert model.requests == []
+
+    large = replace(SETTINGS, llm_context_tokens=65536, llm_max_tokens=8192)
+    assert analyze(doc, settings=large, transport=model.transport) == FormAnalysis.model_validate_json(VALID)
+    first, second = model.requests
+    assert first["max_tokens"] == second["max_tokens"] == 8192
+    assert second["messages"][2]["role"] == "assistant"
+
+
+def test_response_limit_is_reserved_in_the_context_before_any_request() -> None:
+    doc = ExtractedDocument(source_format="docx", text=_form_text(13_000))
+    settings = replace(SETTINGS, llm_max_tokens=8192)
+    model = FakeModel(VALID)
+    with pytest.raises(LLMUnavailable):
+        analyze(doc, settings=settings, transport=model.transport)
+    assert model.requests == []
+
+
 def test_prompt_cut_by_a_server_with_smaller_context_is_503(caplog: pytest.LogCaptureFixture) -> None:
     """Recenzja K3: tekst rozmiaru folderu 9 na serwerze z domyślnym kontekstem Ollamy (4096)."""
     model = FakeModel(VALID, VALID, context_tokens=4096)
@@ -253,6 +293,37 @@ def test_prompt_cut_by_a_server_with_smaller_context_is_503(caplog: pytest.LogCa
     assert caught.value.detail == UNAVAILABLE_DETAIL
     assert len(model.requests) == 1
     assert "serwer policzył 4096 tokenów promptu" in caplog.text
+    assert "OLLAMA_CONTEXT_LENGTH" in caplog.text
+
+
+def test_prompt_cut_by_eden_has_no_ollama_hint(caplog: pytest.LogCaptureFixture) -> None:
+    @dataclass(frozen=True)
+    class EdenSettings(Settings):
+        llm_provider: str = "edenai"
+
+    settings = EdenSettings(
+        llm_base_url="https://api.eu.edenai.run/v3", llm_model="ovhcloud/Qwen3.5-9B", llm_api_key="synthetic-test-key",
+    )
+    model = FakeModel(VALID, context_tokens=4096)
+    doc = ExtractedDocument(source_format="docx", text=_form_text(13_000))
+    with pytest.raises(LLMUnavailable):
+        analyze(doc, settings=settings, transport=model.transport)
+    assert "Zapytanie zostało przycięte" in caplog.text
+    assert "OLLAMA_CONTEXT_LENGTH" not in caplog.text
+
+
+def test_reasoning_logs_only_its_length(caplog: pytest.LogCaptureFixture) -> None:
+    reasoning = "Model rozważa treść formularza."
+
+    def reply(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"choices": [{"message": {"content": VALID, "reasoning_content": reasoning}}]})
+
+    assert analyze(DOC, settings=SETTINGS, transport=httpx.MockTransport(reply)) == FormAnalysis.model_validate_json(VALID)
+    assert any(
+        record.levelno == logging.WARNING and f"tok rozumowania ({len(reasoning)} znaków)" in record.getMessage()
+        for record in caplog.records
+    )
+    assert reasoning not in caplog.text
 
 
 def test_answer_without_token_usage_is_accepted() -> None:
