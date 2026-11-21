@@ -2,9 +2,34 @@
 
 ## State
 
-2026-11-21 19:00 · M1.5 gotowe do commita na `marcin/m1.5` (worktree `.claude/worktrees/m1.5`, baza `marcin/m1.3`,
-już na `main` jako #9). Przed PR: scalić `origin/main` (konflikty w `PROGRESS.api.md`, `DECISIONS.md`).
-Next: M1.4 (czeka na K2/K3; można zacząć z zaślepkami), `LLM_TIMEOUT_S` (prośba Mikołaja), M1.6 README.
+2026-11-22 00:46 · `905b69a step M1.7: LLM_PROVIDER (ollama albo edenai) z hostem, kluczem i modelem otwartym wg D9`
+· zmienione pliki: 0 · gałąź `marcin/m1.7` wypchnięta, PR do `main` jeszcze nie scalony (`main` = `2a139f9`).
+
+Done (Must, obszar Marcina; dowód w `backend/tests`):
+- Przyjęcie pliku, typy, limit 413, błędy 400/503/500 – `test_files.py`, `test_api.py`.
+- Cały łańcuch `POST /api/forms` (odczyt → analiza → strażnik → generator → linter) – `test_api.py` z `LLM_FIXTURE`.
+- JWT opcjonalny, `/health` i `/api/info` otwarte – `test_auth.py`, `test_info.py`.
+- Obrazy `api` i `ollama` bez roota, compose bez zapisu poza /tmp – `test_docker.py`.
+- `LLM_CONTEXT_TOKENS` i `LLM_PROVIDER` (Ollama domyślnie, Eden AI wg D9: host, klucz, model otwarty) – `test_config.py`.
+- Ręcznie: formularz 3 przez Eden AI (`flexai/Qwen3.5-9B`) → poprawny JSON COI.
+
+In progress: M1.7 skończone i zrecenzowane (`REVIEW.md`, 4 CONFIRMED poprawione, 1 LATER). Czeka na PR.
+
+Broken: nothing.
+
+Next:
+1. PR `marcin/m1.7` → `main`; przy konflikcie scalić `origin/main` (zwykle `PROGRESS.api.md`, `DECISIONS.md`).
+2. Człowiek: w `.env` dopisać `LLM_PROVIDER=edenai` (adres Eden AI przy `ollama` zatrzymuje start), klucz podawać w powłoce;
+   zmierzyć czas całego procesu na formularzach 5 i 9 wobec D11 (~180 s) i oddać liczby liderowi.
+3. Request Mikołaja: docstring `test_format_without_reader_yet_is_400` (XLSX ma czytnik) + prawdziwy XLSX → 200.
+
+Decisions waiting for the human / lead:
+- Scalenie `lead/mentor-2111` (czeka na mentorów); lider potwierdza listę modeli i hostów Eden AI z wpisu M1.7.
+- Kod HTTP dla JSON-a odrzuconego przez linter (dziś 500).
+- `LLM_EXTRA_BODY` przy `edenai`: lista dozwolonych kluczy (LATER z recenzji, po pomiarze na żywo).
+- Usunięcie scalonych gałęzi zdalnych.
+
+Gate: `bash scripts/gate.sh` → `GATE: PASS (api)`
 
 ## Plan
 
