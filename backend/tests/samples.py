@@ -39,6 +39,23 @@ def _broken_ods() -> bytes:
 
 
 BROKEN_ODS = _broken_ods()
+ODS_MIMETYPE_WITH_TAIL = _zip(
+    {"mimetype": b"application/vnd.oasis.opendocument.spreadsheet\nsmieci", "content.xml": b"<x/>"}
+)
+
+
+def _patch(data: bytes, marker: bytes, offset: int, value: bytes) -> bytes:
+    """Nadpisuje pole nagłówka ZIP: `offset` bajtów za pierwszym `marker`."""
+    raw = bytearray(data)
+    at = raw.index(marker) + offset
+    raw[at : at + len(value)] = value
+    return bytes(raw)
+
+
+# Uszkodzone metadane ZIP, na których zipfile rzuca NotImplementedError albo ValueError.
+ODS_BAD_ZIP_VERSION = _patch(ODS, b"PK\x01\x02", 6, b"\xff\x00")  # wersja potrzebna do rozpakowania
+XLSX_BAD_ZIP_VERSION = _patch(XLSX, b"PK\x01\x02", 6, b"\xff\x00")
+ODS_BAD_CD_OFFSET = _patch(ODS, b"PK\x05\x06", 16, b"\xff\xff\xff\x7f")  # początek katalogu
 ODT = _zip({"mimetype": b"application/vnd.oasis.opendocument.text", "content.xml": b"<x/>"})
 PLAIN_ZIP = _zip({"readme.txt": b"to nie jest dokument"})
 

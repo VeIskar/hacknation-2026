@@ -60,6 +60,10 @@ M1.1 (Marcin):
 - `.jpe` przyjmujemy jako `jpg` (DELEGACJA rozdz. 2.2), bo folder 7 materiałów COI ma plik `.JPE`.
 - `.doc`, który w środku jest DOCX, przechodzi, a `validate_upload` zwraca `docx`. Takie są pliki
   `.DOC` w folderach 5 i 7. `extract` dostaje więc format treści, nie samo rozszerzenie.
+- Konfiguracja błędna (`MAX_FILE_SIZE_MB` ≤ 0 lub niecałkowite, `LLM_TIMEOUT_S` ≤ 0) zatrzymuje start
+  API z nazwą zmiennej, zamiast dawać 413 lub 500 przy każdym pliku. Compose przekazuje każdą
+  zmienną z `env.example` jako `${NAZWA:-}`: ta forma działa też w podman-compose.
+- ODS: wpis `mimetype` musi być dokładnie równy typowi (bez końca linii i dopisków), jak w ODF 1.2.
 
 ## Event: whole project
 
