@@ -11,6 +11,7 @@ Ten sam FormAnalysis daje identyczny JSON: identyfikatory to UUID5, nie losowe U
 
 import html
 import json
+import re
 import unicodedata
 import uuid
 from collections.abc import Iterable
@@ -36,6 +37,22 @@ ADD_VALIDATORS = True
 
 # Stała przestrzeń nazw UUID5. Zmiana zmienia identyfikatory we wszystkich generowanych formularzach.
 ID_NAMESPACE = uuid.UUID("7319e414-8854-44a5-ae2b-fdac98e7d0b9")
+
+_POLISH_LETTERS = str.maketrans("ąćęłńóśźż", "acelnoszz")
+_LABEL_VALIDATORS = {
+    "PESEL": re.compile(r"\bpesel\b"),
+    "NIP": re.compile(r"\bnip\b"),
+    "REGON": re.compile(r"\bregon\b"),
+    "ZIP_CODE": re.compile(r"\bkod\s+pocztowy\b"),
+    "EMAIL": re.compile(r"\b(?:e-mail|email|adres\s+poczty\s+elektronicznej)\b"),
+    "SERIAL_NUMBER_ID_CARD": re.compile(r"\bseria\s+i\s+numer\s+dowodu\b"),
+    "EPUAP": re.compile(r"\bepuap\b"),
+    "ADE": re.compile(r"\b(?:e-doreczen|adres\s+do\s+doreczen\s+elektronicznych)\b"),
+}
+_COMPOUND_LABEL = re.compile(
+    r"[,;/]|\b(?:i|oraz|lub|albo|telefon(?:u)?|tel|miejscowosc|ulica|imie|nazwisko|data|"
+    r"paszport(?:u)?|dokument(?:u)?|domu|lokalu)\b"
+)
 
 
 def build_form(a: FormAnalysis) -> dict:
@@ -126,6 +143,22 @@ def _subject_sections(source_sections: list[SubjectSection], title: str, names: 
     return sections
 
 
+def _validator_from_label(label: str) -> str | None:
+    """Zwraca walidator typu dla jednej kategorii w etykiecie pojedynczej danej."""
+    normalized = unicodedata.normalize("NFC", label).casefold().translate(_POLISH_LETTERS)
+    matches = [
+        (validator, match)
+        for validator, pattern in _LABEL_VALIDATORS.items()
+        if (match := pattern.search(normalized))
+    ]
+    if len(matches) != 1:
+        return None
+
+    [(validator, match)] = matches
+    remainder = f"{normalized[:match.start()]} {normalized[match.end():]}"
+    return None if _COMPOUND_LABEL.search(remainder) else validator
+
+
 def _subject_field(subject_field: SubjectField, tech_name: str, states: list[dict]) -> dict:
     if subject_field.type is FieldType.TEXT_BLOCK:
         # Jak TEXT_BLOCK we wzorcach: pusty tytuł, cała treść w opisie. Bez REQUIRED, bo nic się nie wpisuje.
@@ -133,13 +166,16 @@ def _subject_field(subject_field: SubjectField, tech_name: str, states: list[dic
         heading = html.escape(subject_field.label, quote=False)
         body = f"<p><strong>{heading}</strong></p>{details}" if details else paragraphs(subject_field.label)
         return field("TEXT_BLOCK", tech_name, description=html_document(body), states=states)
+    validation = [template.REQUIRED] if subject_field.required else []
+    if subject_field.type is FieldType.TEXT_FIELD and (validator := _validator_from_label(subject_field.label)) is not None:
+        validation.append(validator)
     return field(
         subject_field.type.value,
         tech_name,
         subject_field.label,
         description=field_description(subject_field.description),
         options=subject_field.options,
-        validation=[template.REQUIRED] if subject_field.required else [],
+        validation=validation,
         states=states,
     )
 

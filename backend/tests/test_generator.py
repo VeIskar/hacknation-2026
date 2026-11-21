@@ -496,8 +496,8 @@ def test_form9_has_entity_role_and_additional_applicant_fields() -> None:
     data = _analysis_data(
         "ENTITY", proxy=True, entity_address=True, representative_proof=True, correspondence_address=True,
         applicant_extra_fields=[
-            {"label": "Seria i numer dowodu", "type": "TEXT_FIELD"},
-            {"label": "Adres ePUAP", "type": "TEXT_FIELD", "required": False},
+            {"label": "Seria i numer dowodu osobistego pełnomocnika", "type": "TEXT_FIELD"},
+            {"label": "Adres skrzynki ePUAP", "type": "TEXT_FIELD", "required": False},
         ],
     )
     form = build_form(FormAnalysis.model_validate(data))
@@ -511,9 +511,12 @@ def test_form9_has_entity_role_and_additional_applicant_fields() -> None:
     ]
     assert states(items["potwierdzenie_ze_jestes_reprezentantem"]) == [AS_REPRESENTATIVE]
     assert states(items["pelnomocnictwo"]) == states(items["oplata_skarbowa_pelnomocnictwo_2"]) == [AS_ATTORNEY]
-    assert _field_names(items["dodatkowe_dane_wnioskodawcy"]) == ["seria_i_numer_dowodu", "adres_epuap"]
-    assert items["adres_epuap"]["validation"] == []
+    id_card, epuap = "seria_i_numer_dowodu_osobistego_pelnomocnika", "adres_skrzynki_epuap"
+    assert _field_names(items["dodatkowe_dane_wnioskodawcy"]) == [id_card, epuap]
+    assert items[id_card]["validation"] == ["REQUIRED", "SERIAL_NUMBER_ID_CARD"]
+    assert items[epuap]["validation"] == ["EPUAP"]
     assert layout(form)[-2] == ("Kontakt i zgody", "MAIN", [("zgoda_wyrazenie", ["zgoda"])])
+    assert lint.check(form) == []
 
 
 @pytest.mark.parametrize("applicants", ["ENTITY", "BOTH"])
@@ -557,8 +560,8 @@ def test_applicant_extra_show_uses_local_names_after_global_collisions() -> None
 
 def test_applicant_decision_matrix_passes_lint() -> None:
     extra_fields = [
-        {"label": "Dokument tożsamości", "type": "RADIO", "options": ["Dowód osobisty", "Paszport"]},
-        {"label": "Numer paszportu", "type": "TEXT_FIELD", "show_if": {"field": "Dokument tożsamości", "equals": "Paszport"}},
+        {"label": "Kanał kontaktu", "type": "RADIO", "options": ["ePUAP", "Poczta"]},
+        {"label": "Adres skrzynki ePUAP", "type": "TEXT_FIELD", "show_if": {"field": "Kanał kontaktu", "equals": "ePUAP"}},
     ]
     values = {
         "proxy": (False, True),
@@ -679,6 +682,101 @@ def test_addressee_and_signature_parameters() -> None:
 
 
 # --- walidatory (SZABLONY, rozdz. 5) i determinizm ------------------------------------------------
+
+
+def _generated_subject_field(field_data: dict) -> dict:
+    data = _analysis_data("PERSON")
+    data["subject_pages"][0]["sections"][0]["fields"] = [field_data]
+    form = build_form(FormAnalysis.model_validate(data))
+    assert lint.check(form) == []
+    return form["tabs"][1]["questions"][0]["field"]["repeatingSectionGrid"][0]["field"]
+
+
+@pytest.mark.parametrize(
+    ("label", "validator"),
+    [
+        pytest.param("Numer PESEL", "PESEL", id="pesel"),
+        pytest.param("PESEL", "PESEL", id="pesel-standalone"),
+        pytest.param("PESEL dziecka", "PESEL", id="pesel-child"),
+        pytest.param("Numer NIP wnioskodawcy", "NIP", id="nip"),
+        pytest.param("NIP", "NIP", id="nip-standalone"),
+        pytest.param("REGON", "REGON", id="regon"),
+        pytest.param("KOD POCZTOWY", "ZIP_CODE", id="zip-uppercase"),
+        pytest.param("Kod pocztowy", "ZIP_CODE", id="zip-standalone"),
+        pytest.param("Kod pocztowy poprzedniego właściciela", "ZIP_CODE", id="zip-previous-owner"),
+        pytest.param("Adres e-mail", "EMAIL", id="e-mail"),
+        pytest.param("Adres e-mail (opcjonalnie)", "EMAIL", id="email-optional-note"),
+        pytest.param("Adres EMAIL", "EMAIL", id="email"),
+        pytest.param("Adres poczty elektronicznej", "EMAIL", id="email-phrase"),
+        pytest.param("Adres e-mail (adres poczty elektronicznej)", "EMAIL", id="email-same-category"),
+        pytest.param("SERIA I NUMER DOWODU OSOBISTEGO", "SERIAL_NUMBER_ID_CARD", id="id-card"),
+        pytest.param("Seria i numer dowodu osobistego pełnomocnika", "SERIAL_NUMBER_ID_CARD", id="id-card-proxy"),
+        pytest.param("Adres skrzynki ePUAP", "EPUAP", id="epuap"),
+        pytest.param("Adres e-doręczeń", "ADE", id="ade-short"),
+        pytest.param("Adres do doręczeń elektronicznych", "ADE", id="ade-phrase"),
+        pytest.param("ADRES DO DORECZEN ELEKTRONICZNYCH", "ADE", id="ade-ascii-uppercase"),
+        pytest.param(unicodedata.normalize("NFD", "Adres e-doręczeń"), "ADE", id="ade-nfd"),
+        pytest.param("Numer domu", None, id="house-number"),
+        pytest.param("Kod sprawy", None, id="case-code"),
+        pytest.param("Opis", None, id="description"),
+        pytest.param("Numer rachunku bankowego", None, id="bank-account"),
+        pytest.param("Peselowy identyfikator", None, id="pesel-substring"),
+        pytest.param("Numer XNIP", None, id="nip-substring"),
+        pytest.param("REGON2026", None, id="regon-substring"),
+        pytest.param("Kod pocztowyXYZ", None, id="zip-substring"),
+        pytest.param("Adres emailowy", None, id="email-substring"),
+        pytest.param("Seria i numer dowoduXYZ", None, id="id-card-substring"),
+        pytest.param("Adres ePUAP2", None, id="epuap-substring"),
+        pytest.param("Adres e-doręczeńXYZ", None, id="ade-substring"),
+        pytest.param("NIP lub REGON", None, id="ambiguous-tax-id"),
+        pytest.param("PESEL, kod pocztowy lub adres e-mail", None, id="ambiguous-three"),
+        pytest.param("Nr telefonu i e-mail", None, id="phone-and-email"),
+        pytest.param("Telefon / e-mail wykonawcy", None, id="phone-slash-email"),
+        pytest.param("E-mail lub telefon do kontaktu", None, id="email-or-phone"),
+        pytest.param("Kod pocztowy i miejscowość", None, id="zip-and-city"),
+        pytest.param("Adres (ulica, nr domu, kod pocztowy, miejscowość)", None, id="full-address"),
+        pytest.param("PESEL lub numer paszportu", None, id="pesel-or-passport"),
+        pytest.param("PESEL lub seria i numer dowodu", None, id="pesel-or-id-card"),
+        pytest.param("Pesel (w przypadku braku – numer dokumentu)", None, id="pesel-with-document-alternative"),
+        pytest.param("Imię, nazwisko i PESEL kandydata", None, id="name-and-pesel"),
+        pytest.param("Data urodzenia i PESEL", None, id="birth-date-and-pesel"),
+        pytest.param("NIP; drugi identyfikator", None, id="semicolon-after-nip"),
+        pytest.param("PESEL oraz numer sprawy", None, id="pesel-and-case-number"),
+        pytest.param("PESEL albo numer sprawy", None, id="pesel-or-case-number"),
+        pytest.param("Adres e-mail (tel. kontaktowy)", None, id="email-with-phone-note"),
+    ],
+)
+def test_text_field_validators_follow_label(label: str, validator: str | None) -> None:
+    item = _generated_subject_field({"label": label, "type": "TEXT_FIELD", "required": True})
+    assert item["title"] == label
+    assert item["validation"] == (["REQUIRED", validator] if validator else ["REQUIRED"])
+
+
+@pytest.mark.parametrize("field_type", ["TEXTAREA", "NUMBER", "DATEPICKER", "RADIO", "CHECKBOX", "SELECT", "TEXT_BLOCK", "FILE_UPLOADER"])
+def test_label_does_not_add_type_validator_to_other_fields(field_type: str) -> None:
+    data = {"label": "Numer PESEL", "type": field_type, "required": True}
+    if field_type in {"RADIO", "CHECKBOX", "SELECT"}:
+        data["options"] = ["Podaję", "Nie podaję"]
+    item = _generated_subject_field(data)
+    assert item["validation"] == ([] if field_type == "TEXT_BLOCK" else ["REQUIRED"])
+
+
+def test_analysis_field_validators_can_be_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    data = _analysis_data(
+        "PERSON", person_address=True,
+        applicant_extra_fields=[{"label": "Adres skrzynki ePUAP", "type": "TEXT_FIELD", "required": False}],
+    )
+    data["subject_pages"][0]["sections"][0]["fields"].append({"label": "Numer PESEL", "type": "TEXT_FIELD"})
+    analysis = FormAnalysis.model_validate(data)
+    items = by_tech_name(build_form(analysis))
+    assert items["numer_pesel"]["validation"] == ["REQUIRED", "PESEL"]
+    assert items["adres_skrzynki_epuap"]["validation"] == ["EPUAP"]
+    assert items["kod_pocztowy"]["validation"] == ["REQUIRED", "ZIP_CODE"]
+
+    monkeypatch.setattr(generator_form, "ADD_VALIDATORS", False)
+    form = build_form(analysis)
+    assert all(item["validation"] == [] for item in elements(form).values())
+    assert lint.check(form) == []
 
 
 def test_validators_follow_szablony_chapter_5() -> None:
