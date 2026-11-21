@@ -1,0 +1,29 @@
+{
+  "title": "Wniosek o zgodę na ustawienie stoiska handlowego",
+  "addressee": {"type": "URZAD", "name": "Urząd Gminy Zielony Dół"},
+  "applicants": "ENTITY",
+  "signature": true,
+  "subject_pages": [
+    {
+      "title": "Informacje o stoisku",
+      "sections": [
+        {
+          "title": "Stoisko",
+          "description": "",
+          "fields": [
+            {"label": "Miejsce stoiska", "type": "TEXT_FIELD", "required": true},
+            {"label": "Rodzaj towaru", "type": "CHECKBOX", "required": true, "options": ["Żywność", "Rękodzieło", "Inne"]},
+            {
+              "label": "Opis innego towaru",
+              "type": "TEXTAREA",
+              "required": true,
+              "show_if": {"field": "Rodzaj towaru", "equals": "Inne"}
+            },
+            {"label": "Plan stoiska", "type": "FILE_UPLOADER", "required": false}
+          ]
+        }
+      ]
+    }
+  ],
+  "statements": ["Oświadczam, że mam prawo sprzedawać te towary."]
+}

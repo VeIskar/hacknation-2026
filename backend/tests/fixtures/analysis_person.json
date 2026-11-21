@@ -1,0 +1,22 @@
+{
+  "title": "Wniosek o wpis do rejestru pszczelarzy",
+  "addressee": {"type": "ORGAN", "name": "Burmistrz Miasta Lipowo"},
+  "applicants": "PERSON",
+  "signature": true,
+  "subject_pages": [
+    {
+      "title": "Informacje o pasiece",
+      "sections": [
+        {
+          "title": "Pasieka",
+          "description": "",
+          "fields": [
+            {"label": "Liczba uli", "type": "NUMBER", "required": true},
+            {"label": "Data założenia pasieki", "type": "DATEPICKER", "required": false}
+          ]
+        }
+      ]
+    }
+  ],
+  "statements": []
+}

@@ -1,4 +1,6 @@
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Request
@@ -29,7 +31,13 @@ UPLOAD_BODY = {
     }
 }
 
-app = FastAPI(title="Cyfryzacja formularzy")
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    get_settings()  # zła wartość w .env zatrzymuje start z nazwą zmiennej, a nie daje 500 później
+    yield
+
+
+app = FastAPI(title="Cyfryzacja formularzy", lifespan=lifespan)
 
 
 @app.exception_handler(AppError)

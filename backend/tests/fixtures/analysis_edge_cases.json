@@ -1,0 +1,75 @@
+{
+  "title": "Wniosek o kartę mieszkańca <Kwiatkowo> & okolic",
+  "addressee": {"type": "ORGAN", "name": "Wójt Gminy Kwiatkowo"},
+  "applicants": "BOTH",
+  "signature": false,
+  "subject_pages": [
+    {
+      "title": "Dane",
+      "sections": [
+        {
+          "title": "Twoje dane",
+          "description": "Wpisz dane <dziecka> & opiekuna.",
+          "fields": [
+            {"label": "Imię", "type": "TEXT_FIELD", "required": true},
+            {"label": "Czy karta ma być pilna?", "type": "RADIO", "required": true, "options": ["Tak, \"ekspres\"", "Nie \\ zwykły tryb"]}
+          ]
+        },
+        {
+          "title": "Twoje dane",
+          "description": "",
+          "fields": [
+            {"label": "Imię", "type": "TEXT_FIELD", "required": false},
+            {
+              "label": "Informacja o opłacie & terminie",
+              "type": "TEXT_BLOCK",
+              "required": true,
+              "description": "Tryb ekspresowy kosztuje 20 zł.",
+              "show_if": {"field": "Czy karta ma być pilna?", "equals": "Tak, \"ekspres\""}
+            },
+            {
+              "label": "Uwagi",
+              "type": "TEXTAREA",
+              "required": false,
+              "description": "Np. <termin> & miejsce odbioru.",
+              "show_if": {"field": "Czy karta ma być pilna?", "equals": "Nie \\ zwykły tryb"}
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Dane",
+      "sections": [
+        {
+          "title": "Odbiór karty",
+          "description": "",
+          "fields": [
+            {"label": "Sposób odbioru", "type": "SELECT", "required": true, "options": ["Osobiście", "Pocztą"]},
+            {
+              "label": "Adres do wysyłki",
+              "type": "TEXT_FIELD",
+              "required": true,
+              "show_if": {"field": "Sposób odbioru", "equals": "Pocztą"}
+            },
+            {"label": "Ważna informacja", "type": "TEXT_BLOCK", "required": true}
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Opinia 'sołtysa'",
+      "sections": [
+        {
+          "title": "Opinia",
+          "description": "",
+          "fields": [
+            {"label": "Czy masz opinię?", "type": "RADIO", "required": true, "options": ["Tak", "Nie"]},
+            {"label": "Plik z opinią", "type": "FILE_UPLOADER", "required": true, "show_if": {"field": "Czy masz opinię?", "equals": "Tak"}}
+          ]
+        }
+      ]
+    }
+  ],
+  "statements": ["Oświadczam, że mieszkam w gminie.", "Oświadczam, że dane są prawdziwe."]
+}
