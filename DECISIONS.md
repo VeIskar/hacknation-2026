@@ -155,6 +155,30 @@ z bajtów w pamięci. Odczyt K2 zostaje lokalny i deterministyczny: COI dopuści
 używa zewnętrznego OCR ani kluczy API (decyzja lidera). Strona bez tekstu zostaje pusta między
 separatorami `\f` i trafia do `warnings`; jej OCR to osobny krok.
 
+K2.4 (Mikołaj): XLSX i ODS bez nowej zależności: `zipfile` i `ElementTree` z biblioteki standardowej,
+jak DOCX w K2.1. `openpyxl` i `odfpy` z DELEGACJA niepotrzebne, więc `requirements.txt` bez zmian.
+
+- **Układ tekstu.** Arkusz to strona (`\f`), w kolejności skoroszytu. Wiersz to niepuste komórki
+  rozdzielone ` | `, jak wiersz tabeli DOCX. Puste arkusze, wiersze i komórki są pomijane. Nazw
+  arkuszy nie dodajemy: nie są tekstem formularza. W 6 z 7 folderów XLSX i ODS dają identyczny tekst.
+  W folderze 3 XLSX nie ma wiersza „Młynary, dnia…”, który ma ODS. To różnica w samych plikach.
+- **Zakres.** Wchodzą wszystkie komórki z tekstem, także ukryte i przykryte scaleniem. Nie wchodzą
+  komentarze, nagłówki i stopki wydruku ani kształty XLSX: tych części materiały COI nie mają.
+  Wartość logiczna to „PRAWDA” albo „FAŁSZ”, jak w polskim Excelu i LibreOffice.
+- **Liczby XLSX.** Liczby i daty zostają w postaci zapisanej w pliku, np. data jako numer seryjny.
+  Format wyświetlania wymagałby odczytu stylów. ODS zapisuje tekst wyświetlany, więc go używamy.
+- **Limity.** 8 MB rozpakowanych XML na cały plik, 1 MB na spis arkuszy i relacje. Do tego
+  100 poziomów zagnieżdżenia XML, 10 000 elementów w jednej komórce i 1 mln znaków tekstu.
+  Znaki liczymy przed rozwinięciem powtórzeń ODS. Pusty wiersz powtórzony 1 048 576 razy
+  (tak zapisuje LibreOffice) jest pomijany bez pętli. Przekroczenie albo kodowanie XML, którego
+  parser nie zna, daje 400.
+- **Pamięć.** XML czytamy strumieniowo. Przetworzona komórka znika z drzewa, więc w pamięci są
+  tylko otwarte elementy i jedna komórka.
+- **Pomiar.** 16 plików COI (foldery 1–9): 0,8–51 ms na plik, szczyt pamięci procesu 43 MB.
+  Najgorsze przypadki tuż pod limitem 8 MB, z ZIP-ów 9–25 KB: do 2,45 s CPU, szczyt procesu
+  72 MB (39 MB po samym imporcie). Przed limitami recenzja zmierzyła 416–867 MB dla jednego
+  długiego wiersza, głębokiego zagnieżdżenia i komórki z milionem elementów.
+
 ## Event: whole project
 
 - **D7 – odpowiedzialność.** Lider rozstrzyga kontrakty, zakres i integrację. `SPEC.md` określa kontrakty, `DECISIONS.md` zapisuje decyzje, `DELEGACJA.md` wyznacza wykonawców, a `PROGRESS*.md` rejestruje postęp i wyniki bramek.
