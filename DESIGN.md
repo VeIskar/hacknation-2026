@@ -47,3 +47,15 @@ Judges reward simplicity and accessibility. Tokens live in frontend/src/index.cs
 ## Limits
 
 - No national emblem, no mObywatel logo, no imitation of an official service's look.
+
+## Two zones (lead decision, 21.11)
+
+- Workbench (the official's tool: loading, waiting, source view, dependency map, report) may
+  have a signature look: its own typeface, a paper and ink palette, motion. Still: contrast
+  4.5:1, visible focus outline, prefers-reduced-motion, no decorative gradients, no glass,
+  no glow, no emoji.
+- eUsługa preview (what a citizen sees) follows "Forms" above and the COI standards strictly.
+  The workbench frames it and never restyles it.
+- Motion: allowed when it shows where something came from or where it went.
+- Fonts: font files in the repo, no CDN. OFL-1.1 allowed for unmodified font files only,
+  recorded in DECISIONS.md.

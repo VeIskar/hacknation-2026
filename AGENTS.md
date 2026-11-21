@@ -31,6 +31,7 @@ Paste the last lines of gate.sh and test:e2e output in your final message.
 - Never disable lint rules, axe rules or TypeScript checks.
 - No new dependency without one line in DECISIONS.md (why, license).
   Licenses: MIT, Apache or BSD only. Three MPL-2.0 exceptions are recorded in
+  Font files (not packages): OFL-1.1 allowed, unmodified, see D15 in DECISIONS.md.
   DECISIONS.md (axe, lightningcss, certifi). Do not remove them and do not add another.
 - UI text in Polish, max 15 words per sentence, no jargon.
 - Every interactive element: visible focus, accessible name, 44px target.
