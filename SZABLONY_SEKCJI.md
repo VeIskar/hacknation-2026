@@ -57,10 +57,10 @@ Klucze dodatkowe – **tylko gdy potrzebne**: `defaultValue`, `defaultValueType`
 | Opis pola | `""` gdy pusty, inaczej `"<html><head></head><body><p>…</p></body></html>"` |
 | Opcje RADIO/CHECKBOX/SELECT | `{"id": "<nazwa>", "name": "<nazwa>", "techName": "<slug>"}` – **id = nazwa**, nie UUID |
 | `techName` | slug z etykiety: małe litery, bez polskich znaków, `_` zamiast spacji (`Wybierz, jako kto wnioskujesz` → `wybierz_jako_kto_wnioskujesz`) |
-| `validation` | we wzorcach zawsze `[]` – **[decyzja]** dodajemy walidatory jako rozszerzenie (REQUIRED, PESEL, NIP, REGON, EMAIL, ZIP_CODE) – patrz rozdz. 5 |
+| `validation` | we wzorcach zawsze `[]` – **[decyzja]** dodajemy walidatory jako rozszerzenie (REQUIRED, PESEL, NIP, REGON, EMAIL, ZIP_CODE, a w polach z analizy także SERIAL_NUMBER_ID_CARD, EPUAP, ADE) – patrz rozdz. 5; mentor COI potwierdził, że to dozwolone (D13) |
 | Dane inicjalne | `"defaultValue": "MLPZ.name"`, `"defaultValueType": "EXTERNAL_SYSTEM"` |
 | Słownik krajów | `"dictionaryName": "Kraje"`, `"defaultValue": ["Polska"]` (lista!), `"searchEnabled": true` |
-| Adres w Polsce | **jedno** pole SELECT: `"dictionaryName": "TERYT_4G_DOWODOWY"`, `"multiLevelTree": true`, `"searchEnabled": true`, `"defaultValue": []` |
+| Adres w Polsce | **jedno** pole SELECT: `"dictionaryName": "TERYT_4G_DOWODOWY"`, `"multiLevelTree": true`, `"searchEnabled": true`, `"defaultValue": []`. Nazwę podają Standardy COI (rozdz. „Adres”) i wzorce; plik słowników COI jej nie wymienia – otwarte pytanie do mentora (D14) |
 | Zgoda | `CONSENT_SECTION` z `"consentSectionConfig": {"consents": [{"description": "<html…>", "required": true}], "files": []}` |
 | Strona końcowa | sekcja z polem **TEXT_BLOCK** (nie INFO_SECTION) |
 
@@ -80,24 +80,45 @@ Wszystkie z sekcji `podmiot_wniosku` na stronie `Dane`.
 
 ---
 
-## 1. Parametry – jedyne, co AI ustala dla części szablonowej
+## 1. Parametry – co AI ustala dla części szablonowej
 
 | Parametr | Przykład (nadpłata) | Przykład (numer porządkowy) | Skąd na papierze |
 |---|---|---|---|
 | `TYTUL` | Wniosek o stwierdzenie nadpłaty podatku | Wniosek o ustalenie numeru porządkowego nieruchomości | nagłówek „WNIOSEK o …” |
 | `ADRESAT_TYP` | URZAD | ORGAN | „Urząd Gminy…” → URZAD; „Wójt / Burmistrz / Prezydent / Starosta…” → ORGAN |
 | `ADRESAT_NAZWA` | Urząd Gminy Ulan-Majorat | Wójt Gminy Elbląg | blok adresata (bez ulicy i kodu) |
-| `WNIOSKODAWCY` | OBA (bo „Nazwisko i imię/Nazwa firmy”, PESEL/NIP) | OBA („imię i nazwisko/nazwa wnioskodawcy”) | jakie dane wnioskodawcy są na papierze |
+| `WNIOSKODAWCY` (`applicants`) | OBA (bo „Nazwisko i imię/Nazwa firmy”, PESEL/NIP) | OBA („imię i nazwisko/nazwa wnioskodawcy”) | jakie dane wnioskodawcy są na papierze |
+| `WNIOSKODAWCA` (`applicant`) | decyzje z tabeli niżej | decyzje z tabeli niżej | o jakie dane wnioskodawcy, pełnomocnika i kontaktu pyta papier |
 | `TEMAT_STRONY` | Informacje o nadpłacie | Informacje o budynku | czego dotyczy treść wniosku |
 | `PODPIS` | tak | nie (inny tekst podglądu) | domyślnie tak |
 
-`WNIOSKODAWCY` → opcje radia i sekcje warunkowe:
+Nazwy w kodzie (`FormAnalysis.applicants`): FIZYCZNA = `PERSON`, PODMIOT = `ENTITY`, OBA = `BOTH`.
 
-| Wartość | Opcje „Wybierz, w czyim imieniu wnioskujesz” | Sekcje warunkowe (rozdz. 3) |
+Od P1.2b sekcje strony „Dane” wynikają z `applicants` i decyzji `applicant` (kontrakt P1.2a, zasada D8). S2 pokazuje tylko faktyczne wybory; nie ma już radia z jedną opcją dla PODMIOT.
+
+| `applicants` | „Wybierz, w czyim imieniu …” | „Wybierz, jako kto …” (Pełnomocnik · Reprezentant) |
 |---|---|---|
-| FIZYCZNA | Swoim · Innej osoby | S6, S7, S9, S10 |
-| PODMIOT | Osoby prawnej lub jednostki organizacyjnej **[decyzja: radio z 1 opcją]** | S4, S5, S8, S9, S11 |
-| OBA (oba wzorce) | Swoim · Innej osoby · Osoby prawnej lub jednostki organizacyjnej | wszystkie |
+| PERSON | Swoim · Innej osoby, gdy `proxy`; bez `proxy` nie ma radia | nie ma |
+| ENTITY | nie ma radia (jedna ścieżka) | gdy `proxy` |
+| BOTH (oba wzorce) | Swoim · Innej osoby (gdy `proxy`) · Osoby prawnej lub jednostki organizacyjnej | gdy `proxy`, SHOW [PRAWNA] |
+
+S2 bez żadnego radia nie powstaje. Przy jednej ścieżce warunki SHOW pomijają radio z S2, np. przy ENTITY S4 nie ma SHOW, a S11 ma tylko [PEŁN].
+
+| Decyzja (`applicant`) | Sekcja (rozdz. 3–4) |
+|---|---|
+| zawsze | S1 i S3 z polami Imię, Nazwisko |
+| `applicant_pesel` | pole `numer_pesel` w S3 |
+| `person_address` | S4a przy PERSON i BOTH; S7, gdy jest ścieżka „Innej osoby” |
+| `applicants` = ENTITY lub BOTH | S4: Nazwa i identyfikatory z `entity_ids` w kolejności NIP, REGON, KRS |
+| `entity_ids_one_of` | NIP i REGON w S4 bez REQUIRED, opis sekcji „Podaj jeden z: …” |
+| `entity_address` | S5 (ENTITY, BOTH) |
+| `representative_proof` | S8 (ENTITY, BOTH) |
+| `proxy` | S9; S6 i S10 przy ścieżce „Innej osoby”; S11 przy ENTITY i BOTH |
+| `correspondence_address` | „Adres do korespondencji” (`adres_do_korespondencji`): RADIO „Czy adres do korespondencji jest inny?” (Tak · Nie) i szablon adresu z `SUF` = `_korespondencyjny`, bez danych inicjalnych, SHOW: radio = Tak |
+| `contact` | S12 tylko z wybranymi polami: PHONE → `numer_telefonu`, EMAIL → `adres_e_mail`; pusta lista: bez S12 |
+| `applicant_extra_fields` | sekcja „Dodatkowe dane wnioskodawcy” przed S9 (bez S9: na końcu strony), pola jak na stronach przedmiotu |
+
+Ścieżka „Innej osoby” istnieje przy PERSON lub BOTH z `proxy`.
 
 `CZASOWNIK` w etykietach: „wnioskujesz” (Wniosek), „zgłaszasz” (Zgłoszenie), „deklarujesz” (Deklaracja).
 
@@ -107,9 +128,9 @@ Wszystkie z sekcji `podmiot_wniosku` na stronie `Dane`.
 
 | # | `title` | `type` | Zawartość |
 |---|---|---|---|
-| 1 | `Dane` | MAIN | S1–S11 (szablon) |
+| 1 | `Dane` | MAIN | S1–S11 (szablon, dobór wg rozdz. 1) |
 | 2…n | `TEMAT_STRONY` (np. „Informacje o nadpłacie”) | MAIN | **przedmiot wniosku – generuje AI** |
-| n+1 | `Kontakt i zgody` **[decyzja; wzorzec 1 ma „Kontakt z urzędem”]** | MAIN | S12, S13 |
+| n+1 | `Kontakt i zgody` **[decyzja; wzorzec 1 ma „Kontakt z urzędem”]** | MAIN | S12 (wg `contact`), S13 |
 | ostatnia | `Strona końcowa` | FINISH | S14 |
 
 ---
@@ -137,7 +158,7 @@ Pole: `readOnly: true`, `defaultValue: "<ADRESAT_NAZWA>"` (bez `defaultValueType
 | 1 | TEXT_FIELD | `nazwisko` | Nazwisko | true | `MLPZ.surname` | EXTERNAL_SYSTEM |
 | 2 | TEXT_FIELD | `numer_pesel` | Numer PESEL | true | `MLPZ.pesel` | EXTERNAL_SYSTEM |
 
-[decyzja] MLPZ jak w Standardach (wzorzec 5 ma `PESEL.*`, wzorzec 1 nie ma pola PESEL).
+[decyzja] MLPZ jak w Standardach (wzorzec 5 ma `PESEL.*`, wzorzec 1 nie ma pola PESEL). Pole `numer_pesel` jest tylko przy `applicant_pesel` (rozdz. 1).
 
 ### SZABLON ADRESU – 9 pól, `SUF` = sufiks techName
 
@@ -169,7 +190,7 @@ Pole: `readOnly: true`, `defaultValue: "<ADRESAT_NAZWA>"` (bez `defaultValueType
 | 2 | `regon` | REGON |
 | 3 | `numer_krs` | Numer KRS |
 
-Wszystkie TEXT_FIELD. [decyzja] pełna wersja (jak wzorzec 1 i Standardy); wzorzec 5 ma tylko Nazwa i NIP.
+Wszystkie TEXT_FIELD. Nazwa jest zawsze, a NIP, REGON i Numer KRS według `entity_ids` (rozdz. 1). Wzorzec 1 i Standardy mają pełną wersję, wzorzec 5 tylko Nazwa i NIP.
 
 ### S8 · Potwierdzenie, że jesteś reprezentantem – `potwierdzenie_ze_jestes_reprezentantem` · SHOW `([PRAWNA]) and ([REPR])`
 Opis sekcji: „Dołącz aktualny odpis danych z Krajowego Rejestru Sądowego lub innego rejestru. Odpis powinien potwierdzać, że jesteś reprezentantem podmiotu lub instytucji.”
@@ -214,7 +235,7 @@ Opis `oplata_info_1` (HTML):
 Opis `oplata_info`: jak w S10, ale „…dla adresu **siedziby podmiotu, który udzielił** pełnomocnictwa…” + akapit „Więcej informacji o opłacie skarbowej za pełnomocnictwo znajdziesz na stronie [biznes.gov.pl](https://www.biznes.gov.pl/pl/portal/0089#9)”.
 Tytuł sekcji: „Opłata skarbowa za pełnomocnictwo” (wzorce mają literówkę „pełnomonictwo” – poprawiamy).
 
-**Kolejność sekcji na stronie „Dane”:** S1, S2, S3, S4a, S4, S5, S8, S6, S7, S9, S10, S11 (jak we wzorcach).
+**Kolejność sekcji na stronie „Dane”:** S1, S2, S3, S4a, S4, S5, S8, S6, S7, Adres do korespondencji, Dodatkowe dane wnioskodawcy, S9, S10, S11. Kolejność S1–S11 jest jak we wzorcach. Sekcji bez decyzji z rozdz. 1 nie ma.
 
 ---
 
@@ -227,6 +248,8 @@ Opis sekcji: „Wpisanie danych do kontaktu może przyspieszyć załatwienie spr
 |---|---|---|---|---|---|
 | 0 | TEXT_FIELD | `numer_telefonu` | Numer telefonu | `MLPZ.phoneNumber` (EXTERNAL_SYSTEM) | false |
 | 1 | TEXT_FIELD | `adres_e_mail` | Adres e-mail | `MLPZ.email` (EXTERNAL_SYSTEM) | false |
+
+Pola według `contact` (rozdz. 1). Gdy papier nie zbiera danych do kontaktu, S12 nie ma.
 
 ### S13 · Zgoda – `zgoda_wyrazenie` · „Zgoda”
 | y | Typ | techName | consentSectionConfig |
@@ -244,14 +267,17 @@ Gdy papier ma oświadczenia → tytuł sekcji „Zgody i oświadczenia”.
 
 ## 5. Walidatory – nasze rozszerzenie (wzorce mają `[]`)
 
+Mentor COI potwierdził 2026-11-21: puste `validation` we wzorcach nie zabrania walidatorów. Dodajemy reguły, które wynikają z pola (D13).
+
 | Pole | validation |
 |---|---|
 | radia w S2, pola obowiązkowe przedmiotu wniosku, uploady obowiązkowe | `["REQUIRED"]` |
-| `numer_pesel` | `["REQUIRED", "PESEL"]` |
-| `nip` / `regon` | `["REQUIRED", "NIP"]` / `["REQUIRED", "REGON"]` |
+| `numer_pesel` (S3) | `[]` – pole do odczytu z rejestru (DECISIONS, P1) |
+| `nip` / `regon` | `["REQUIRED", "NIP"]` / `["REQUIRED", "REGON"]`; przy `entity_ids_one_of` bez `REQUIRED` |
 | `adres_e_mail` | `["EMAIL"]` |
 | `kod_pocztowy*` (PL) | `["REQUIRED", "ZIP_CODE"]` |
 | pola readOnly z rejestru | `[]` |
+| pola TEXT_FIELD z analizy (strony przedmiotu, „Dodatkowe dane wnioskodawcy”) | walidator typu z etykiety (po `REQUIRED`, gdy pole jest wymagane): PESEL, NIP, REGON, ZIP_CODE, EMAIL, SERIAL_NUMBER_ID_CARD, EPUAP, ADE. Dwie kategorie albo etykieta złożona → bez walidatora typu (DECISIONS, P1.3a) |
 
 Przełącznik w konfiguracji: `ADD_VALIDATORS=true/false`, żeby jednym ruchem wrócić do formatu 1:1 z wzorcem.
 
@@ -267,12 +293,15 @@ Przełącznik w konfiguracji: `ADD_VALIDATORS=true/false`, żeby jednym ruchem w
 | „Kwotę nadpłaty proszę: 1) zaliczyć na poczet… z tytułu …… 2) zwrócić przelewem na wskazany rachunek ……” | RADIO `wybierz_co_mamy_zrobic_z_nadplata` „Wybierz, co mamy zrobić z nadpłatą” + TEXT_FIELD `nazwa_podatku` (SHOW opcja 1) + TEXT_FIELD `numer_rachunku` (SHOW opcja 2) |
 | „w załączeniu: 1) korekta deklaracji” | sekcja „Korekta deklaracji” z opisem + FILE_UPLOADER `plik_deklaracji_podatkowej` |
 
-**Zasady przekształcenia (dla promptu):**
-- etykiety prostym językiem, 2. osoba („Wybierz…”, „Uzasadnij…”), bez „Na podstawie art. …”;
+**Zasady przekształcenia (dla promptu).** Mentor COI potwierdził trzy z nich (D8): zachowanie treści sprawy, prosty język z warunkami SHOW oraz sekcje wnioskodawcy według papieru (rozdz. 1).
+- zachowaj każdą informację potrzebną do załatwienia sprawy: dane innych osób, daty zdarzeń, załączniki, instrukcje, wybory i ich warunki (D8);
+- etykiety prostym językiem, 2. osoba („Wybierz…”, „Uzasadnij…”), bez „Na podstawie art. …” (D8);
 - „……” po tekście → pole; typ wg treści: kwota/liczba → NUMBER, data → DATEPICKER, uzasadnienie/opis → TEXTAREA, reszta → TEXT_FIELD;
-- „proszę: 1) … 2) …” / kwadraciki □ → RADIO (jeden wybór) lub CHECKBOX (wiele); dane dopisywane przy opcji → pole z SHOW tej opcji;
+- „proszę: 1) … 2) …” / kwadraciki □ → RADIO (jeden wybór) lub CHECKBOX (wiele); dane dopisywane przy opcji → pole z SHOW tej opcji (D8);
 - „w załączeniu / załączniki:” → sekcja z opisem + FILE_UPLOADER na każdy wymieniony załącznik;
-- „Oświadczam, że…” → consent w S13;
+- „Oświadczam, że…” wymagane od tej samej osoby w każdej ścieżce → consent w S13; zgody opcjonalne i warunkowe zostają przy danych, których dotyczą (P1.2a);
 - grupuj pola w sekcje tematyczne (tytuł sekcji = temat).
 
-**Usuwamy z papieru** (pokrywa to szablon): miejscowość i data, podpis, imię i nazwisko / nazwa wnioskodawcy, adres wnioskodawcy, PESEL/NIP wnioskodawcy, telefon/e-mail, adresat, „Na podstawie art. …”, klauzula RODO (zastępuje ją zgoda z linkiem), pola „wypełnia urząd”, przypisy.
+**Dane wnioskodawcy** (imię i nazwisko lub nazwa, adres, PESEL, NIP/REGON/KRS, pełnomocnik, telefon, e-mail) nie trafiają na strony przedmiotu. AI zapisuje je jako decyzje `applicant` (rozdz. 1), a dane spoza szablonu w `applicant_extra_fields` (P1.2a, D8).
+
+**Usuwamy z papieru** (pokrywa to szablon): miejscowość i data, podpis (→ `signature`), adresat (→ `addressee`), „Na podstawie art. …”, klauzula RODO (zastępuje ją zgoda z linkiem), pola „wypełnia urząd”, przypisy.
