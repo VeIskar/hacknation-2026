@@ -16,6 +16,7 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
+from app import analysis
 from app.analysis import (
     ANSWER_TOKENS,
     CONTEXT_TOKENS,
@@ -296,11 +297,27 @@ def test_retry_is_not_sent_when_even_the_errors_alone_do_not_fit(caplog: pytest.
 
 
 def test_deeply_nested_answer_is_a_validation_error_not_a_crash() -> None:
-    """json.loads rzuca wtedy RecursionError, a nie ValueError: bez obsługi byłoby 500 zamiast ponowienia."""
+    """Głęboko zagnieżdżona odpowiedź to błąd walidacji całego JSON-a i ponowienie, nie 500.
+
+    Treść błędu zależy od Pythona: do 3.13 json.loads rzuca RecursionError i opisuje go parser Pydantic
+    („recursion limit exceeded”), od 3.14 json.loads ją przyjmuje, a model odrzuca listę (`model_type`).
+    """
     # 20 000 poziomów to 40 000 znaków: tyle model może wypisać w limicie ANSWER_TOKENS.
     model = FakeModel("[" * 20_000 + "]" * 20_000, VALID)
     assert _run(model) == FormAnalysis.model_validate_json(VALID)
-    assert "\n- cały JSON: Invalid JSON: recursion limit exceeded" in model.requests[1]["messages"][-1]["content"]
+    assert len(model.requests) == 2
+    assert "\n- cały JSON: " in model.requests[1]["messages"][-1]["content"]
+
+
+def test_recursion_error_from_json_loads_falls_back_to_pydantic_parser(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Gałąź RecursionError w _validate (Python do 3.13) sprawdzona na każdej wersji Pythona."""
+
+    def too_deep(_: str) -> Any:
+        raise RecursionError("maximum recursion depth exceeded")
+
+    monkeypatch.setattr(analysis.json, "loads", too_deep)
+    with pytest.raises(ValidationError, match="recursion limit exceeded"):
+        analysis._validate("[" * 20_000 + "]" * 20_000)
 
 
 def test_lone_surrogate_from_the_model_is_repaired_like_in_the_contract() -> None:
