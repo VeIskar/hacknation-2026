@@ -56,6 +56,11 @@ def build_request(
     }
 
 
+def _typed(value: Any, kind: type) -> Any:
+    """Metadane są tylko diagnostyką: zły typ to brak wartości, a nie powód do odrzucenia odpowiedzi."""
+    return value if isinstance(value, kind) and not isinstance(value, bool) else None
+
+
 def chat_json(
     messages: list[Message],
     schema: dict[str, Any],
@@ -89,12 +94,12 @@ def chat_json(
     if not isinstance(content, str) or not content.strip():
         raise LLMUnavailable(detail=UNAVAILABLE_DETAIL)
 
-    usage = payload.get("usage") or {}
+    usage = _typed(payload.get("usage"), dict) or {}
     return ChatResult(
         content=content,
-        reasoning=message.get("reasoning") or message.get("reasoning_content") or "",
-        prompt_tokens=usage.get("prompt_tokens"),
-        completion_tokens=usage.get("completion_tokens"),
+        reasoning=_typed(message.get("reasoning"), str) or _typed(message.get("reasoning_content"), str) or "",
+        prompt_tokens=_typed(usage.get("prompt_tokens"), int),
+        completion_tokens=_typed(usage.get("completion_tokens"), int),
         finish_reason=choice.get("finish_reason"),
         elapsed_s=elapsed,
     )

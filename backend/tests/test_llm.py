@@ -91,6 +91,25 @@ def test_any_model_failure_becomes_llm_unavailable(reply: httpx.Response | Excep
     assert caught.value.detail == UNAVAILABLE_DETAIL
 
 
+@pytest.mark.parametrize(
+    ("usage", "message"),
+    [
+        ([1200, 340], {}),
+        ({"prompt_tokens": "1200", "completion_tokens": [340]}, {}),
+        ({}, {"reasoning": 641}),
+        ({}, {"reasoning_content": 641}),
+    ],
+    ids=["usage-list", "tokens-not-int", "reasoning-number", "reasoning-content-number"],
+)
+def test_malformed_metadata_keeps_the_answer_and_drops_bad_values(usage: object, message: dict) -> None:
+    body = _completion(**message)
+    body["usage"] = usage
+    result = chat_json(MESSAGES, {}, settings=SETTINGS, transport=_transport(httpx.Response(200, json=body)))
+    assert result.content == '{"title": "x"}'
+    assert result.reasoning == ""
+    assert (result.prompt_tokens, result.completion_tokens) == (None, None)
+
+
 def test_without_settings_the_client_uses_app_config(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LLM_BASE_URL", "http://env.test/v1")
     monkeypatch.setenv("LLM_MODEL", "SpeakLeash/bielik-4.5b-v3.0-instruct:Q8_0")
