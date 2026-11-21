@@ -46,6 +46,13 @@ Krok K2.2 (Mikołaj): lokalny OCR dla JPG i PNG, w tym aliasów normalizowanych 
 - `backend/tests/test_extract.py`: wybór języka, przekazanie bajtów, brak tekstu i błędy OCR bez procesu zewnętrznego.
 - Dowód: RED/GREEN, `bash scripts/gate.sh api -rs` oraz Tesseract `pol` na skanach z folderów 1 i 5.
 
+Krok K2.3 (Mikołaj): odczyt warstwy tekstowej PDF przez `pypdf`, bez OCR.
+
+- `backend/app/extract/`: strony z bajtów w pamięci, kolejność stron, separator `\f`, ostrzeżenie o stronach bez tekstu, błędy odczytu jako `ExtractionError`.
+- `backend/tests/test_extract.py`: PDF wielostronicowy, pusta strona, PDF bez tekstu, pliki uszkodzone, polskie znaki, próbki COI z folderów 1 i 5; OCR nie jest wołany.
+- Zależność `pypdf==7.1.1` (BSD-3-Clause): wpis w `DECISIONS.md`, a linia w `requirements.txt` to Request do Marcina.
+- Dowód: RED/GREEN każdego testu i `bash scripts/gate.sh api -rs`.
+
 ## Requests
 
 (one line per change you need from another area: who asks, what, why)
@@ -55,6 +62,7 @@ Krok K2.2 (Mikołaj): lokalny OCR dla JPG i PNG, w tym aliasów normalizowanych 
 - lider → Mikołaj (K3, `analysis.py`): `ValidationError` z `FormAnalysis.model_validate` po ponowieniach zamień na `LLMUnavailable` (D4).
 - lider → Mikołaj (K2, `extract`): przytnij `images` do 20 sztuk i 40 MB przed utworzeniem `ExtractedDocument` i dopisz ostrzeżenie (D3).
 - Mikołaj → Marcin (K2, `backend/Dockerfile` i `backend/requirements.txt`): uzgodnić instalację Tesseract z `pol` i wersję `pypdf` do odczytu PDF.
+- Mikołaj → Marcin (K2.3, `backend/requirements.txt`): dopisać `pypdf==7.1.1` (BSD-3-Clause, bez wymaganych zależności, Python ≥ 3.10). Bez tej linii `import app.extract` kończy się `ModuleNotFoundError` w obrazie API i w świeżym `.venv`, więc K2.3 nie może wejść na `main` przed nią.
 - Marcin → lider (`SPEC.md`, Must 1 i „API contract”): dopisać wyjątek od zgodności typu z rozszerzeniem, np. „Plik `.doc`, który w środku jest DOCX, jest przyjmowany i czytany jak DOCX (tak są zapisane pliki `.DOC` z folderów 5 i 7). `.jpe` jest przyjmowane jak `.jpg` (plik `.JPE` w folderze 7).” Kod już tak działa (DECISIONS, M1.1); uwaga Pawła z recenzji M1.1.
 
 ## Log
@@ -71,3 +79,5 @@ Krok K2.2 (Mikołaj): lokalny OCR dla JPG i PNG, w tym aliasów normalizowanych 
 - K2.1 (`mikolaj/k2`, baza `4e9d228`): done tekst akapitów i tabel DOCX w pamięci, w tym próbki COI 1/5 oraz `.DOC` wykryty jako DOCX. 9/9 nowych przypadków widzianych na czerwono, po przywróceniu kodu `gate.sh api -rs` → 237 passed, a na kopii `c7d6cf1` z tym samym kodem → 406 passed, bez pominiętych / next PDF, arkusze, OCR i binarny DOC / blocker dla OCR: Tesseract z `pol` w obrazie API.
 - K2.2 (`mikolaj/k2`): done lokalny OCR JPG/PNG przez Tesseract `pol`; 8 nowych przypadków RED/GREEN, 7/7 skanów COI z wymaganymi słowami (foldery 1, 5, `.JPE` z 7), 0,64–5,44 s. `gate.sh api -rs` → 245 passed w worktree, 444 passed na kopii `d0c07fd` z P1.2a, bez pominiętych / next tekst PDF, arkusze i binarny DOC / blocker wdrożenia OCR: Tesseract z `pol` w obrazie API.
 - K2.1/K2.2 po recenzji: done odczyt `w:sdt` i kontrolowane 500 przy braku programu Tesseract, 3 przypadki RED/GREEN, 7/7 rzeczywistych skanów; `gate.sh api -rs` → 248 passed na bazie K2 i 558 passed na `4e9603e` z kodem K2, 0 pominiętych / next pierwszy commit po decyzji lidera / blocker integracji: konflikty w `DECISIONS.md` i `PROGRESS.api.md`, uwagi w `REVIEW.md`.
+- K2.3 (`mikolaj/k2`, baza `2892e6a`): done warstwa tekstowa PDF przez `pypdf` 7.1.1: kolejność stron, separator `\f`, ostrzeżenie o stronach bez tekstu, każdy błąd odczytu jako 400, bez OCR. 13 nowych przypadków, każdy widziany na czerwono (RED albo mutacja kodu); fuzz 5877 uszkodzonych PDF-ów: 0 zawieszeń, wyjątki spoza `PyPdfError` potwierdzone; 9/9 PDF-ów COI ma tekst na każdej stronie, odczyt do 0,39 s. `gate.sh api -rs` → 261 passed, 0 pominiętych / next OCR stron PDF bez tekstu (wymaga decyzji o rendererze), obrazy w DOCX, XLSX, ODS, binarny DOC / blocker: `pypdf` w `requirements.txt` (Request do Marcina) i synchronizacja z `main`.
+- K2.3 recenzja (Codex, `--uncommitted`, kopia bez `.env` i materiałów): 3 ustalenia, 0 do poprawy w K2 (brak `pypdf` w `requirements.txt` rozwiązany na `main` przez PR #13; budżet zasobów i PDF z AES jako LATER w `REVIEW.md`). Własne sondy: 1 CONFIRMED – font PDF oddawał NUL, `\f` i niesparowany surogat jako tekst (fałszywy podział stron, tekst nie do zapisania w UTF-8); poprawione, test czerwony przed poprawką. `gate.sh api -rs` → 262 passed, 0 pominiętych / next commit lidera, potem scalenie `main` / blocker brak.
