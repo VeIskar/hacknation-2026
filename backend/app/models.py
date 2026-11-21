@@ -9,6 +9,7 @@ roboczego (folder 5). Zbiór kontrolny (folder 1) nie może się w nich pojawić
 tests/test_models.py.
 """
 
+from collections import defaultdict
 from enum import StrEnum
 from typing import Annotated, Self
 
@@ -18,6 +19,8 @@ from pydantic import (
     ConfigDict,
     Field,
     StringConstraints,
+    ValidationError,
+    field_validator,
     model_validator,
 )
 
@@ -119,10 +122,21 @@ CHOICE_TYPES = frozenset({FieldType.RADIO, FieldType.CHECKBOX, FieldType.SELECT}
 
 
 class ShowIf(StrictModel):
-    """Pole jest widoczne tylko po wybraniu konkretnej opcji w innym polu tej samej strony."""
+    """Widoczność po wybraniu jednej z podanych opcji."""
 
-    field: Text = Field(description="Etykieta pola wyboru (RADIO, CHECKBOX, SELECT), od którego to zależy")
-    equals: Text = Field(description="Nazwa opcji, po której wybraniu pole się pokazuje")
+    field: Text = Field(
+        description="Dokładna etykieta wcześniejszego pola RADIO, CHECKBOX lub SELECT, jednoznaczna w przedmiocie."
+    )
+    equals: Text = Field(description="Dokładna nazwa opcji, po której element jest widoczny.")
+    any_of: list[Text] = Field(
+        default_factory=list, description="Dodatkowe opcje tego samego pola, łączone z equals przez lub, bez powtórzeń."
+    )
+
+    @model_validator(mode="after")
+    def _options_are_unique(self) -> Self:
+        if self.equals in self.any_of or len(set(self.any_of)) != len(self.any_of):
+            raise ValueError("show_if ma powtórzone opcje")
+        return self
 
 
 class SubjectField(StrictModel):
@@ -139,7 +153,10 @@ class SubjectField(StrictModel):
     options: list[Text] = Field(
         default_factory=list, description="Opcje dla RADIO, CHECKBOX i SELECT; dla innych typów pusta lista"
     )
-    show_if: ShowIf | None = Field(default=None, description="Warunek widoczności; brak, gdy pole widać zawsze")
+    show_if: ShowIf | None = Field(default=None, description="Warunek widoczności pola. Można go łączyć z show_if_all.")
+    show_if_all: list[ShowIf] = Field(
+        default_factory=list, description="Wszystkie warunki muszą być spełnione razem z show_if, jeśli je podano."
+    )
 
     @model_validator(mode="after")
     def _options_match_type(self) -> Self:
@@ -154,46 +171,78 @@ class SubjectField(StrictModel):
         return self
 
 
-def _validate_show_if(fields: list[SubjectField], location: str) -> None:
-    """Etykiety mogą się powtarzać, ale etykieta źródła musi wskazywać dokładnie jedno pole."""
+def _validate_choice_condition(source: SubjectField, condition: ShowIf, context: str) -> None:
+    if source.type not in CHOICE_TYPES:
+        raise ValueError(f"{context}: '{source.label}' nie jest polem wyboru")
+    for option in (condition.equals, *condition.any_of):
+        if option not in source.options:
+            raise ValueError(f"{context}: pole '{source.label}' nie ma opcji '{option}'")
+
+
+def _validate_applicant_show_if(fields: list[SubjectField]) -> None:
+    """Dodatkowe dane wnioskodawcy mają tylko proste warunki we własnej liście."""
     for field in fields:
         condition = field.show_if
+        context = f"show_if pola '{field.label}'"
+        if field.show_if_all or (condition is not None and condition.any_of):
+            raise ValueError(f"{context}: dodatkowe dane wnioskodawcy przyjmują tylko show_if z field i equals")
         if condition is None:
             continue
         sources = [candidate for candidate in fields if candidate.label == condition.field]
         if not sources:
-            raise ValueError(f"show_if pola '{field.label}': {location} nie ma pola '{condition.field}'")
+            raise ValueError(f"{context}: w dodatkowych danych wnioskodawcy nie ma pola '{condition.field}'")
         if len(sources) > 1:
             raise ValueError(
-                f"show_if pola '{field.label}': etykieta '{condition.field}' jest niejednoznaczna, "
-                f"ma ją {len(sources)} pól {location}"
+                f"{context}: etykieta '{condition.field}' jest niejednoznaczna, "
+                f"ma ją {len(sources)} pól w dodatkowych danych wnioskodawcy"
             )
         source = sources[0]
         if source is field:
-            raise ValueError(f"show_if pola '{field.label}' wskazuje to samo pole")
-        if source.type not in CHOICE_TYPES:
-            raise ValueError(f"show_if pola '{field.label}': '{source.label}' nie jest polem wyboru")
-        if condition.equals not in source.options:
-            raise ValueError(
-                f"show_if pola '{field.label}': pole '{source.label}' nie ma opcji '{condition.equals}'"
-            )
+            raise ValueError(f"{context} wskazuje to samo pole")
+        _validate_choice_condition(source, condition, context)
 
 
 class SubjectSection(StrictModel):
     title: Text = Field(description="Tytuł sekcji tematycznej, np. 'Rozliczenie nadpłaty'")
     description: DescriptionText = Field(default="", description="Krótki opis sekcji; pusty, gdy zbędny")
     fields: list[SubjectField] = Field(min_length=1)
+    show_if: ShowIf | None = Field(default=None, description="Warunek całej sekcji. Źródło musi być przed sekcją.")
+    show_if_all: list[ShowIf] = Field(
+        default_factory=list, description="Wszystkie warunki muszą być spełnione razem z show_if, jeśli je podano."
+    )
 
 
 class SubjectPage(StrictModel):
     title: Text = Field(description="Tytuł strony, np. 'Informacje o nadpłacie'")
     sections: list[SubjectSection] = Field(min_length=1)
 
-    @model_validator(mode="after")
-    def _show_if_points_to_one_choice_field(self) -> Self:
-        fields = [field for section in self.sections for field in section.fields]
-        _validate_show_if(fields, "na stronie")
-        return self
+
+SubjectPosition = tuple[int, int, int]
+
+
+def _validate_subject_target(
+    target: SubjectField | SubjectSection,
+    position: SubjectPosition,
+    sources: dict[str, list[tuple[SubjectPosition, SubjectField]]],
+) -> None:
+    subject = f"sekcji '{target.title}'" if isinstance(target, SubjectSection) else f"pola '{target.label}'"
+    conditions = [] if target.show_if is None else [("show_if", target.show_if)]
+    conditions.extend((f"show_if_all[{index}]", condition) for index, condition in enumerate(target.show_if_all))
+    for key, condition in conditions:
+        context = f"{key} {subject}"
+        candidates = sources.get(condition.field, [])
+        if not candidates:
+            raise ValueError(f"{context}: w przedmiocie nie ma pola '{condition.field}'")
+        if len(candidates) > 1:
+            raise ValueError(f"{context}: etykieta '{condition.field}' jest niejednoznaczna w przedmiocie")
+        source_position, source = candidates[0]
+        if source_position == position:
+            raise ValueError(f"{context} wskazuje to samo pole")
+        if position[2] == -1 and source_position[:2] == position[:2]:
+            raise ValueError(f"{context}: pole '{source.label}' leży wewnątrz ukrywanej sekcji")
+        if source_position >= position:
+            raise ValueError(f"{context}: źródło '{source.label}' musi być przed elementem zależnym")
+        _validate_choice_condition(source, condition, context)
 
 
 class ApplicantData(StrictModel):
@@ -229,7 +278,7 @@ class ApplicantData(StrictModel):
     applicant_extra_fields: list[SubjectField] = Field(
         description=(
             "Dane wnioskodawcy poza szablonem, np. data urodzenia, seria i numer dowodu, dokument zamiast PESEL lub adres ePUAP. "
-            "Warunki show_if wskazują pole z tej samej listy. Wpisz pustą listę, gdy nie ma takich danych."
+            "Tylko show_if z field i equals. Źródło z tej samej listy. Wpisz pustą listę, gdy nie ma takich danych."
         )
     )
 
@@ -241,7 +290,7 @@ class ApplicantData(StrictModel):
             raise ValueError("Wybór jednego identyfikatora wymaga co najmniej dwóch identyfikatorów podmiotu.")
         if len(set(self.contact)) != len(self.contact):
             raise ValueError("Pola kontaktowe nie mogą się powtarzać.")
-        _validate_show_if(self.applicant_extra_fields, "w dodatkowych danych wnioskodawcy")
+        _validate_applicant_show_if(self.applicant_extra_fields)
         return self
 
 
@@ -282,6 +331,28 @@ class FormAnalysis(StrictModel):
     statements: list[Text] = Field(
         default_factory=list, description="Oświadczenia z wniosku ('Oświadczam, że…'), prostym językiem"
     )
+
+    @field_validator("subject_pages")
+    @classmethod
+    def _subject_conditions_are_valid(cls, pages: list[SubjectPage]) -> list[SubjectPage]:
+        sources: dict[str, list[tuple[SubjectPosition, SubjectField]]] = defaultdict(list)
+        for page_index, page in enumerate(pages):
+            for section_index, section in enumerate(page.sections):
+                for field_index, field in enumerate(section.fields):
+                    sources[field.label].append(((page_index, section_index, field_index), field))
+
+        for page_index, page in enumerate(pages):
+            try:
+                for section_index, section in enumerate(page.sections):
+                    _validate_subject_target(section, (page_index, section_index, -1), sources)
+                    for field_index, field in enumerate(section.fields):
+                        _validate_subject_target(field, (page_index, section_index, field_index), sources)
+            except ValueError as error:
+                # K3 korzysta z lokalizacji strony w komunikacie naprawczym.
+                raise ValidationError.from_exception_data(
+                    cls.__name__, [{"type": "value_error", "loc": (page_index,), "input": page, "ctx": {"error": error}}]
+                ) from error
+        return pages
 
     @model_validator(mode="after")
     def _applicant_matches_type(self) -> Self:

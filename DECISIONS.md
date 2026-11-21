@@ -55,6 +55,8 @@ Decyzje lidera po recenzji P0 (2026-11-21). Kod: `backend/app/errors.py`, `backe
 
 - **P1.3a.** Pola `TEXT_FIELD` z analizy dostają walidator typu po `REQUIRED`, jeśli etykieta po NFC, casefold i usunięciu polskich znaków pasuje do dokładnie jednej kategorii na granicach słów (PESEL, NIP, REGON, ZIP_CODE, EMAIL, SERIAL_NUMBER_ID_CARD, EPUAP, ADE). Etykieta złożona → bez walidatora typu, jeśli po usunięciu dopasowanej frazy pozostaje separator, spójnik lub słowo innej danej. Dobór odbywa się bez modelu, a `ADD_VALIDATORS = False` czyści wszystkie walidatory.
 
+- **P1.4.** Alternatywy i koniunkcje SHOW na polach i sekcjach przedmiotu, wcześniejsze źródła między stronami i wykrywanie cykli. F9 jest jednym formularzem z czterema warunkowymi miejscami dla podopiecznych.
+
 M1.1 (Marcin):
 
 | What                    | Why                                                         | Licence    |

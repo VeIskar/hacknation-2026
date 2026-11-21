@@ -1,0 +1,882 @@
+{
+  "title": "Wniosek o przyznanie stypendium, nagrody lub wyróżnienia sportowego Rady Miasta Zgierza",
+  "addressee": {
+    "type": "ORGAN",
+    "name": "Prezydent Miasta Zgierza"
+  },
+  "applicants": "ENTITY",
+  "applicant": {
+    "proxy": true,
+    "applicant_pesel": false,
+    "person_address": false,
+    "entity_ids": [],
+    "entity_ids_one_of": false,
+    "entity_address": true,
+    "representative_proof": true,
+    "correspondence_address": true,
+    "contact": [
+      "PHONE"
+    ],
+    "applicant_extra_fields": [
+      {
+        "label": "Seria i numer dowodu osobistego pełnomocnika",
+        "type": "TEXT_FIELD",
+        "required": false,
+        "description": "Wpisz dane, jeśli składasz wniosek jako pełnomocnik klubu."
+      },
+      {
+        "label": "Telefon klubu sportowego",
+        "type": "TEXT_FIELD",
+        "required": false
+      },
+      {
+        "label": "Sposób korespondencji z urzędem",
+        "type": "RADIO",
+        "options": [
+          "Poczta tradycyjna",
+          "Skrzynka ePUAP",
+          "e-Doręczenia"
+        ]
+      },
+      {
+        "label": "Adres skrzynki ePUAP",
+        "type": "TEXT_FIELD",
+        "show_if": {
+          "field": "Sposób korespondencji z urzędem",
+          "equals": "Skrzynka ePUAP"
+        }
+      },
+      {
+        "label": "Adres do e-Doręczeń",
+        "type": "TEXT_FIELD",
+        "show_if": {
+          "field": "Sposób korespondencji z urzędem",
+          "equals": "e-Doręczenia"
+        }
+      }
+    ]
+  },
+  "signature": true,
+  "subject_pages": [
+    {
+      "title": "Kandydat",
+      "sections": [
+        {
+          "title": "Wybór wniosku",
+          "fields": [
+            {
+              "label": "Rodzaj wniosku",
+              "type": "RADIO",
+              "options": [
+                "Stypendium",
+                "Nagroda",
+                "Wyróżnienie"
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Dane kandydata",
+          "fields": [
+            {
+              "label": "Imię kandydata",
+              "type": "TEXT_FIELD"
+            },
+            {
+              "label": "Nazwisko kandydata",
+              "type": "TEXT_FIELD"
+            },
+            {
+              "label": "Data urodzenia kandydata",
+              "type": "DATEPICKER"
+            },
+            {
+              "label": "Adres zameldowania kandydata",
+              "type": "TEXTAREA",
+              "description": "Adres zameldowania może się różnić od adresu zamieszkania."
+            },
+            {
+              "label": "Adres do korespondencji kandydata",
+              "type": "TEXTAREA",
+              "required": false,
+              "description": "Wpisz adres, jeśli różni się od adresu zameldowania."
+            },
+            {
+              "label": "Czy kandydat jest pełnoletni?",
+              "type": "RADIO",
+              "options": [
+                "Tak",
+                "Nie"
+              ],
+              "show_if": {
+                "field": "Rodzaj wniosku",
+                "equals": "Stypendium",
+                "any_of": [
+                  "Nagroda"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "title": "Dyscypliny sportowe kandydata",
+          "show_if": {
+            "field": "Rodzaj wniosku",
+            "equals": "Stypendium"
+          },
+          "fields": [
+            {
+              "label": "Rodzaje dyscyplin sportowych",
+              "type": "CHECKBOX",
+              "options": [
+                "zespołowa",
+                "indywidualna – inna",
+                "indywidualna – lekkoatletyka"
+              ]
+            },
+            {
+              "label": "Dyscypliny sportowe",
+              "type": "CHECKBOX",
+              "options": [
+                "gimnastyka artystyczna",
+                "hokej",
+                "karate",
+                "kolarstwo",
+                "koszykówka",
+                "lekkoatletyka",
+                "łucznictwo",
+                "łyżwiarstwo",
+                "narciarstwo klasyczne",
+                "piłka nożna",
+                "piłka ręczna",
+                "piłka siatkowa",
+                "piłka wodna",
+                "sport motocyklowy",
+                "sporty walki",
+                "sporty wodne",
+                "tenis stołowy",
+                "tenis ziemny",
+                "unihokej",
+                "zapasy",
+                "Inna dyscyplina"
+              ],
+              "show_if": {
+                "field": "Rodzaje dyscyplin sportowych",
+                "equals": "zespołowa",
+                "any_of": [
+                  "indywidualna – inna",
+                  "indywidualna – lekkoatletyka"
+                ]
+              }
+            },
+            {
+              "label": "Podaj inną dyscyplinę",
+              "type": "TEXT_FIELD",
+              "show_if": {
+                "field": "Dyscypliny sportowe",
+                "equals": "Inna dyscyplina"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Osiągnięcia",
+      "sections": [
+        {
+          "title": "Opinia macierzystego klubu sportowego",
+          "fields": [
+            {
+              "label": "Treść opinii klubu",
+              "type": "TEXTAREA",
+              "description": "Podaj opinię klubu potwierdzającą nienaganną postawę etyczną i moralną kandydata."
+            },
+            {
+              "label": "Plik z opinią klubu",
+              "type": "FILE_UPLOADER",
+              "required": false
+            },
+            {
+              "label": "Dodatkowe informacje o kandydacie",
+              "type": "TEXTAREA",
+              "required": false
+            }
+          ]
+        },
+        {
+          "title": "Osiągnięcia sportowca",
+          "show_if": {
+            "field": "Rodzaj wniosku",
+            "equals": "Stypendium",
+            "any_of": [
+              "Nagroda"
+            ]
+          },
+          "fields": [
+            {
+              "label": "Najważniejsze osiągnięcia kandydata",
+              "type": "TEXTAREA"
+            },
+            {
+              "label": "Dyplomy lub inne dowody osiągnięć",
+              "type": "FILE_UPLOADER",
+              "required": false
+            },
+            {
+              "label": "Zaświadczenia o osiągnięciach kandydata",
+              "type": "FILE_UPLOADER",
+              "description": "Dołącz zaświadczenia odpowiedniego polskiego związku sportowego lub inne oficjalne dokumenty. Przykładem są komunikaty z zawodów."
+            }
+          ]
+        },
+        {
+          "title": "Podopieczni trenera",
+          "show_if": {
+            "field": "Rodzaj wniosku",
+            "equals": "Wyróżnienie"
+          },
+          "fields": [
+            {
+              "label": "Liczba podopiecznych",
+              "type": "RADIO",
+              "options": [
+                "1",
+                "2",
+                "3",
+                "4"
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Dane podopiecznego 1",
+          "show_if": {
+            "field": "Rodzaj wniosku",
+            "equals": "Wyróżnienie"
+          },
+          "fields": [
+            {
+              "label": "Imię i nazwisko podopiecznego",
+              "type": "TEXT_FIELD"
+            },
+            {
+              "label": "Osiągnięcia sportowe podopiecznego",
+              "type": "TEXTAREA"
+            },
+            {
+              "label": "Czy podopieczny 1 jest pełnoletni?",
+              "type": "RADIO",
+              "options": [
+                "Tak",
+                "Nie"
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Dane podopiecznego 2",
+          "show_if": {
+            "field": "Liczba podopiecznych",
+            "equals": "2",
+            "any_of": [
+              "3",
+              "4"
+            ]
+          },
+          "fields": [
+            {
+              "label": "Imię i nazwisko podopiecznego",
+              "type": "TEXT_FIELD"
+            },
+            {
+              "label": "Osiągnięcia sportowe podopiecznego",
+              "type": "TEXTAREA"
+            },
+            {
+              "label": "Czy podopieczny 2 jest pełnoletni?",
+              "type": "RADIO",
+              "options": [
+                "Tak",
+                "Nie"
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Dane podopiecznego 3",
+          "show_if": {
+            "field": "Liczba podopiecznych",
+            "equals": "3",
+            "any_of": [
+              "4"
+            ]
+          },
+          "fields": [
+            {
+              "label": "Imię i nazwisko podopiecznego",
+              "type": "TEXT_FIELD"
+            },
+            {
+              "label": "Osiągnięcia sportowe podopiecznego",
+              "type": "TEXTAREA"
+            },
+            {
+              "label": "Czy podopieczny 3 jest pełnoletni?",
+              "type": "RADIO",
+              "options": [
+                "Tak",
+                "Nie"
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Dane podopiecznego 4",
+          "show_if": {
+            "field": "Liczba podopiecznych",
+            "equals": "4"
+          },
+          "fields": [
+            {
+              "label": "Imię i nazwisko podopiecznego",
+              "type": "TEXT_FIELD"
+            },
+            {
+              "label": "Osiągnięcia sportowe podopiecznego",
+              "type": "TEXTAREA"
+            },
+            {
+              "label": "Czy podopieczny 4 jest pełnoletni?",
+              "type": "RADIO",
+              "options": [
+                "Tak",
+                "Nie"
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Dokumenty podopiecznych",
+          "show_if": {
+            "field": "Rodzaj wniosku",
+            "equals": "Wyróżnienie"
+          },
+          "fields": [
+            {
+              "label": "Dyplomy lub inne dowody osiągnięć podopiecznych",
+              "type": "FILE_UPLOADER",
+              "required": false
+            },
+            {
+              "label": "Zaświadczenia o osiągnięciach podopiecznych",
+              "type": "FILE_UPLOADER",
+              "description": "Dołącz zaświadczenia odpowiedniego polskiego związku sportowego lub inne oficjalne dokumenty. Przykładem są komunikaty z zawodów."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Zgody",
+      "sections": [
+        {
+          "title": "Przechowywanie zgód",
+          "fields": [
+            {
+              "label": "Kto przechowuje zgodę",
+              "type": "TEXT_BLOCK",
+              "description": "Wypełniony formularz zgody przechowuje właściwy administrator danych osobowych."
+            }
+          ]
+        },
+        {
+          "title": "Zgoda pełnoletniego kandydata do stypendium",
+          "description": "Zgodę składa pełnoletni kandydat.",
+          "show_if_all": [
+            {
+              "field": "Rodzaj wniosku",
+              "equals": "Stypendium"
+            },
+            {
+              "field": "Czy kandydat jest pełnoletni?",
+              "equals": "Tak"
+            }
+          ],
+          "fields": [
+            {
+              "label": "Imię i nazwisko kandydata",
+              "type": "TEXT_FIELD"
+            },
+            {
+              "label": "Zgoda na przetwarzanie danych",
+              "type": "CHECKBOX",
+              "description": "Wyrażam zgodę na przetwarzanie moich danych osobowych zawartych we wniosku. Zgoda obejmuje przekazanie wniosku Komisji stypendialnej do spraw stypendiów sportowych Rady Miasta Zgierza.",
+              "options": [
+                "Wyrażam zgodę"
+              ]
+            },
+            {
+              "label": "Akceptacja regulaminu",
+              "type": "CHECKBOX",
+              "description": "Potwierdzam znajomość regulaminu przyznawania stypendiów sportowych Rady Miasta Zgierza. Akceptuję wszystkie jego postanowienia.",
+              "options": [
+                "Akceptuję regulamin"
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Zgoda opiekuna kandydata do stypendium",
+          "description": "Zgodę składa rodzic lub opiekun prawny nieletniego kandydata.",
+          "show_if_all": [
+            {
+              "field": "Rodzaj wniosku",
+              "equals": "Stypendium"
+            },
+            {
+              "field": "Czy kandydat jest pełnoletni?",
+              "equals": "Nie"
+            }
+          ],
+          "fields": [
+            {
+              "label": "Imię i nazwisko kandydata",
+              "type": "TEXT_FIELD"
+            },
+            {
+              "label": "Imię i nazwisko rodzica lub opiekuna prawnego",
+              "type": "TEXT_FIELD"
+            },
+            {
+              "label": "Zgoda na przetwarzanie danych",
+              "type": "CHECKBOX",
+              "description": "Wyrażam zgodę na przetwarzanie danych osobowych mojego dziecka lub podopiecznego zawartych we wniosku. Zgoda obejmuje przekazanie wniosku Komisji stypendialnej do spraw stypendiów sportowych Rady Miasta Zgierza.",
+              "options": [
+                "Wyrażam zgodę"
+              ]
+            },
+            {
+              "label": "Akceptacja regulaminu",
+              "type": "CHECKBOX",
+              "description": "Potwierdzam znajomość regulaminu przyznawania stypendiów sportowych Rady Miasta Zgierza. Akceptuję wszystkie jego postanowienia.",
+              "options": [
+                "Akceptuję regulamin"
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Zgoda pełnoletniego kandydata do nagrody",
+          "description": "Zgodę składa pełnoletni kandydat.",
+          "show_if_all": [
+            {
+              "field": "Rodzaj wniosku",
+              "equals": "Nagroda"
+            },
+            {
+              "field": "Czy kandydat jest pełnoletni?",
+              "equals": "Tak"
+            }
+          ],
+          "fields": [
+            {
+              "label": "Imię i nazwisko kandydata",
+              "type": "TEXT_FIELD"
+            },
+            {
+              "label": "Zgoda na przetwarzanie danych",
+              "type": "CHECKBOX",
+              "description": "Wyrażam zgodę na przetwarzanie moich danych osobowych zawartych we wniosku. Zgoda obejmuje przekazanie wniosku do rozpatrzenia.",
+              "options": [
+                "Wyrażam zgodę"
+              ]
+            },
+            {
+              "label": "Akceptacja regulaminu",
+              "type": "CHECKBOX",
+              "description": "Potwierdzam znajomość regulaminu przyznawania nagród sportowych Rady Miasta Zgierza. Akceptuję wszystkie jego postanowienia.",
+              "options": [
+                "Akceptuję regulamin"
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Zgoda opiekuna kandydata do nagrody",
+          "description": "Zgodę składa rodzic lub opiekun prawny nieletniego kandydata.",
+          "show_if_all": [
+            {
+              "field": "Rodzaj wniosku",
+              "equals": "Nagroda"
+            },
+            {
+              "field": "Czy kandydat jest pełnoletni?",
+              "equals": "Nie"
+            }
+          ],
+          "fields": [
+            {
+              "label": "Imię i nazwisko kandydata",
+              "type": "TEXT_FIELD"
+            },
+            {
+              "label": "Imię i nazwisko rodzica lub opiekuna prawnego",
+              "type": "TEXT_FIELD"
+            },
+            {
+              "label": "Zgoda na przetwarzanie danych",
+              "type": "CHECKBOX",
+              "description": "Wyrażam zgodę na przetwarzanie danych osobowych mojego dziecka lub podopiecznego zawartych we wniosku. Zgoda obejmuje przekazanie wniosku do rozpatrzenia.",
+              "options": [
+                "Wyrażam zgodę"
+              ]
+            },
+            {
+              "label": "Akceptacja regulaminu",
+              "type": "CHECKBOX",
+              "description": "Potwierdzam znajomość regulaminu przyznawania nagród sportowych Rady Miasta Zgierza. Akceptuję wszystkie jego postanowienia.",
+              "options": [
+                "Akceptuję regulamin"
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Zgoda trenera",
+          "description": "Zgodę składa kandydat do wyróżnienia.",
+          "show_if": {
+            "field": "Rodzaj wniosku",
+            "equals": "Wyróżnienie"
+          },
+          "fields": [
+            {
+              "label": "Imię i nazwisko kandydata",
+              "type": "TEXT_FIELD"
+            },
+            {
+              "label": "Zgoda na przetwarzanie danych",
+              "type": "CHECKBOX",
+              "description": "Wyrażam zgodę na przetwarzanie moich danych osobowych zawartych we wniosku. Zgoda obejmuje przekazanie wniosku do rozpatrzenia.",
+              "options": [
+                "Wyrażam zgodę"
+              ]
+            },
+            {
+              "label": "Akceptacja regulaminu",
+              "type": "CHECKBOX",
+              "description": "Potwierdzam znajomość regulaminu przyznawania wyróżnień sportowych Rady Miasta Zgierza. Akceptuję wszystkie jego postanowienia.",
+              "options": [
+                "Akceptuję regulamin"
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Zgoda pełnoletniego podopiecznego 1",
+          "description": "Zgodę składa pełnoletni podopieczny.",
+          "show_if_all": [
+            {
+              "field": "Rodzaj wniosku",
+              "equals": "Wyróżnienie"
+            },
+            {
+              "field": "Czy podopieczny 1 jest pełnoletni?",
+              "equals": "Tak"
+            }
+          ],
+          "fields": [
+            {
+              "label": "Imię i nazwisko podopiecznego",
+              "type": "TEXT_FIELD"
+            },
+            {
+              "label": "Zgoda na przetwarzanie danych",
+              "type": "CHECKBOX",
+              "description": "Wyrażam zgodę na przetwarzanie moich danych osobowych zawartych we wniosku. Zgoda obejmuje przekazanie wniosku do rozpatrzenia.",
+              "options": [
+                "Wyrażam zgodę"
+              ]
+            },
+            {
+              "label": "Akceptacja regulaminu",
+              "type": "CHECKBOX",
+              "description": "Potwierdzam znajomość regulaminu przyznawania wyróżnień sportowych Rady Miasta Zgierza. Akceptuję wszystkie jego postanowienia.",
+              "options": [
+                "Akceptuję regulamin"
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Zgoda opiekuna podopiecznego 1",
+          "description": "Zgodę składa rodzic lub opiekun prawny nieletniego podopiecznego.",
+          "show_if_all": [
+            {
+              "field": "Rodzaj wniosku",
+              "equals": "Wyróżnienie"
+            },
+            {
+              "field": "Czy podopieczny 1 jest pełnoletni?",
+              "equals": "Nie"
+            }
+          ],
+          "fields": [
+            {
+              "label": "Imię i nazwisko podopiecznego",
+              "type": "TEXT_FIELD"
+            },
+            {
+              "label": "Imię i nazwisko rodzica lub opiekuna prawnego",
+              "type": "TEXT_FIELD"
+            },
+            {
+              "label": "Zgoda na przetwarzanie danych",
+              "type": "CHECKBOX",
+              "description": "Wyrażam zgodę na przetwarzanie danych osobowych mojego dziecka lub podopiecznego zawartych we wniosku. Zgoda obejmuje przekazanie wniosku do rozpatrzenia.",
+              "options": [
+                "Wyrażam zgodę"
+              ]
+            },
+            {
+              "label": "Akceptacja regulaminu",
+              "type": "CHECKBOX",
+              "description": "Potwierdzam znajomość regulaminu przyznawania wyróżnień sportowych Rady Miasta Zgierza. Akceptuję wszystkie jego postanowienia.",
+              "options": [
+                "Akceptuję regulamin"
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Zgoda pełnoletniego podopiecznego 2",
+          "description": "Zgodę składa pełnoletni podopieczny.",
+          "show_if_all": [
+            {
+              "field": "Rodzaj wniosku",
+              "equals": "Wyróżnienie"
+            },
+            {
+              "field": "Czy podopieczny 2 jest pełnoletni?",
+              "equals": "Tak"
+            }
+          ],
+          "fields": [
+            {
+              "label": "Imię i nazwisko podopiecznego",
+              "type": "TEXT_FIELD"
+            },
+            {
+              "label": "Zgoda na przetwarzanie danych",
+              "type": "CHECKBOX",
+              "description": "Wyrażam zgodę na przetwarzanie moich danych osobowych zawartych we wniosku. Zgoda obejmuje przekazanie wniosku do rozpatrzenia.",
+              "options": [
+                "Wyrażam zgodę"
+              ]
+            },
+            {
+              "label": "Akceptacja regulaminu",
+              "type": "CHECKBOX",
+              "description": "Potwierdzam znajomość regulaminu przyznawania wyróżnień sportowych Rady Miasta Zgierza. Akceptuję wszystkie jego postanowienia.",
+              "options": [
+                "Akceptuję regulamin"
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Zgoda opiekuna podopiecznego 2",
+          "description": "Zgodę składa rodzic lub opiekun prawny nieletniego podopiecznego.",
+          "show_if_all": [
+            {
+              "field": "Rodzaj wniosku",
+              "equals": "Wyróżnienie"
+            },
+            {
+              "field": "Czy podopieczny 2 jest pełnoletni?",
+              "equals": "Nie"
+            }
+          ],
+          "fields": [
+            {
+              "label": "Imię i nazwisko podopiecznego",
+              "type": "TEXT_FIELD"
+            },
+            {
+              "label": "Imię i nazwisko rodzica lub opiekuna prawnego",
+              "type": "TEXT_FIELD"
+            },
+            {
+              "label": "Zgoda na przetwarzanie danych",
+              "type": "CHECKBOX",
+              "description": "Wyrażam zgodę na przetwarzanie danych osobowych mojego dziecka lub podopiecznego zawartych we wniosku. Zgoda obejmuje przekazanie wniosku do rozpatrzenia.",
+              "options": [
+                "Wyrażam zgodę"
+              ]
+            },
+            {
+              "label": "Akceptacja regulaminu",
+              "type": "CHECKBOX",
+              "description": "Potwierdzam znajomość regulaminu przyznawania wyróżnień sportowych Rady Miasta Zgierza. Akceptuję wszystkie jego postanowienia.",
+              "options": [
+                "Akceptuję regulamin"
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Zgoda pełnoletniego podopiecznego 3",
+          "description": "Zgodę składa pełnoletni podopieczny.",
+          "show_if_all": [
+            {
+              "field": "Rodzaj wniosku",
+              "equals": "Wyróżnienie"
+            },
+            {
+              "field": "Czy podopieczny 3 jest pełnoletni?",
+              "equals": "Tak"
+            }
+          ],
+          "fields": [
+            {
+              "label": "Imię i nazwisko podopiecznego",
+              "type": "TEXT_FIELD"
+            },
+            {
+              "label": "Zgoda na przetwarzanie danych",
+              "type": "CHECKBOX",
+              "description": "Wyrażam zgodę na przetwarzanie moich danych osobowych zawartych we wniosku. Zgoda obejmuje przekazanie wniosku do rozpatrzenia.",
+              "options": [
+                "Wyrażam zgodę"
+              ]
+            },
+            {
+              "label": "Akceptacja regulaminu",
+              "type": "CHECKBOX",
+              "description": "Potwierdzam znajomość regulaminu przyznawania wyróżnień sportowych Rady Miasta Zgierza. Akceptuję wszystkie jego postanowienia.",
+              "options": [
+                "Akceptuję regulamin"
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Zgoda opiekuna podopiecznego 3",
+          "description": "Zgodę składa rodzic lub opiekun prawny nieletniego podopiecznego.",
+          "show_if_all": [
+            {
+              "field": "Rodzaj wniosku",
+              "equals": "Wyróżnienie"
+            },
+            {
+              "field": "Czy podopieczny 3 jest pełnoletni?",
+              "equals": "Nie"
+            }
+          ],
+          "fields": [
+            {
+              "label": "Imię i nazwisko podopiecznego",
+              "type": "TEXT_FIELD"
+            },
+            {
+              "label": "Imię i nazwisko rodzica lub opiekuna prawnego",
+              "type": "TEXT_FIELD"
+            },
+            {
+              "label": "Zgoda na przetwarzanie danych",
+              "type": "CHECKBOX",
+              "description": "Wyrażam zgodę na przetwarzanie danych osobowych mojego dziecka lub podopiecznego zawartych we wniosku. Zgoda obejmuje przekazanie wniosku do rozpatrzenia.",
+              "options": [
+                "Wyrażam zgodę"
+              ]
+            },
+            {
+              "label": "Akceptacja regulaminu",
+              "type": "CHECKBOX",
+              "description": "Potwierdzam znajomość regulaminu przyznawania wyróżnień sportowych Rady Miasta Zgierza. Akceptuję wszystkie jego postanowienia.",
+              "options": [
+                "Akceptuję regulamin"
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Zgoda pełnoletniego podopiecznego 4",
+          "description": "Zgodę składa pełnoletni podopieczny.",
+          "show_if_all": [
+            {
+              "field": "Rodzaj wniosku",
+              "equals": "Wyróżnienie"
+            },
+            {
+              "field": "Czy podopieczny 4 jest pełnoletni?",
+              "equals": "Tak"
+            }
+          ],
+          "fields": [
+            {
+              "label": "Imię i nazwisko podopiecznego",
+              "type": "TEXT_FIELD"
+            },
+            {
+              "label": "Zgoda na przetwarzanie danych",
+              "type": "CHECKBOX",
+              "description": "Wyrażam zgodę na przetwarzanie moich danych osobowych zawartych we wniosku. Zgoda obejmuje przekazanie wniosku do rozpatrzenia.",
+              "options": [
+                "Wyrażam zgodę"
+              ]
+            },
+            {
+              "label": "Akceptacja regulaminu",
+              "type": "CHECKBOX",
+              "description": "Potwierdzam znajomość regulaminu przyznawania wyróżnień sportowych Rady Miasta Zgierza. Akceptuję wszystkie jego postanowienia.",
+              "options": [
+                "Akceptuję regulamin"
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Zgoda opiekuna podopiecznego 4",
+          "description": "Zgodę składa rodzic lub opiekun prawny nieletniego podopiecznego.",
+          "show_if_all": [
+            {
+              "field": "Rodzaj wniosku",
+              "equals": "Wyróżnienie"
+            },
+            {
+              "field": "Czy podopieczny 4 jest pełnoletni?",
+              "equals": "Nie"
+            }
+          ],
+          "fields": [
+            {
+              "label": "Imię i nazwisko podopiecznego",
+              "type": "TEXT_FIELD"
+            },
+            {
+              "label": "Imię i nazwisko rodzica lub opiekuna prawnego",
+              "type": "TEXT_FIELD"
+            },
+            {
+              "label": "Zgoda na przetwarzanie danych",
+              "type": "CHECKBOX",
+              "description": "Wyrażam zgodę na przetwarzanie danych osobowych mojego dziecka lub podopiecznego zawartych we wniosku. Zgoda obejmuje przekazanie wniosku do rozpatrzenia.",
+              "options": [
+                "Wyrażam zgodę"
+              ]
+            },
+            {
+              "label": "Akceptacja regulaminu",
+              "type": "CHECKBOX",
+              "description": "Potwierdzam znajomość regulaminu przyznawania wyróżnień sportowych Rady Miasta Zgierza. Akceptuję wszystkie jego postanowienia.",
+              "options": [
+                "Akceptuję regulamin"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

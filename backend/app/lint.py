@@ -156,6 +156,7 @@ class _Check:
         self.ids: set[str] = set()
         self.tech_names: set[str] = set()
         self.index = _index(tabs)
+        self.show_dependencies: dict[int, dict[int, str | None]] = defaultdict(dict)
 
     def error(self, path: str, message: str) -> None:
         self.errors.append(f"{path}: {message}")
@@ -276,6 +277,8 @@ class _Check:
             item_path = f"{path}.repeatingSectionGrid[{index}]"
             child = self.grid_item(item, item_path)
             if child is not None:
+                # Widoczność pola zależy również od widoczności sekcji.
+                self.show_dependencies[id(child)][id(field)] = None
                 self.field(child, f"{item_path}.field", top=False, finish=finish)
                 child_kind = child.get("type")
                 if isinstance(child_kind, str) and child_kind in _FIELDS:
@@ -336,9 +339,9 @@ class _Check:
                     self.error(f"{item_path}.type", "stan pola musi mieć typ SHOW lub READ_ONLY")
             query = self.get(state, item_path, "query", (str,), required=True, nonempty=True)
             if query is not None:
-                self.query(query, f"{item_path}.query")
+                self.query(query, f"{item_path}.query", owner=id(field) if kind == "SHOW" else None)
 
-    def query(self, query: str, path: str) -> None:
+    def query(self, query: str, path: str, *, owner: int | None) -> None:
         answers = _parse_query(query)
         if answers is None:
             self.error(path, "nierozpoznane zapytanie JSONata")
@@ -346,6 +349,9 @@ class _Check:
         for answer in answers:
             if message := self.answer_error(answer):
                 self.error(path, message)
+            elif owner is not None:
+                source = self.index[answer.page][answer.section][1][answer.field]
+                self.show_dependencies[owner].setdefault(id(source), path)
 
     def answer_error(self, answer: _Answer) -> str | None:
         sections = self.index.get(answer.page)
@@ -372,6 +378,36 @@ class _Check:
                 if isinstance(value, str) and value == answer.option:
                     return None
         return f"nie ma opcji {answer.option!r} we wskazanym polu"
+
+    def show_cycles(self) -> None:
+        """Szuka powrotów do aktywnych węzłów bez rekurencji po całym formularzu."""
+        visited: set[int] = set()
+        reported: set[str] = set()
+        for start, dependencies in self.show_dependencies.items():
+            if start in visited:
+                continue
+            visited.add(start)
+            active = {start}
+            stack: list[tuple[int, Iterator[tuple[int, str | None]], str | None]] = [
+                (start, iter(dependencies.items()), None),
+            ]
+            while stack:
+                node, neighbors, incoming = stack[-1]
+                edge = next(neighbors, None)
+                if edge is None:
+                    stack.pop()
+                    active.remove(node)
+                    continue
+                target, path = edge
+                if target in active:
+                    # Krawędź pole → sekcja nie ma zapytania. Wtedy wskaż SHOW prowadzące do pola.
+                    if (query_path := path or incoming) is not None and query_path not in reported:
+                        self.error(query_path, "cykl zależności SHOW")
+                        reported.add(query_path)
+                elif target not in visited:
+                    visited.add(target)
+                    active.add(target)
+                    stack.append((target, iter(self.show_dependencies.get(target, {}).items()), path))
 
     def flow(self, flow: dict, pages: list[tuple[int, str, str | None]], last_index: int) -> None:
         links = self.get(flow, "flow", "links", (list,), required=True)
@@ -410,9 +446,10 @@ class _Check:
 
 
 def check(form: dict) -> list[str]:
-    """Zwraca błędy ze ścieżkami w kolejności przejścia po formularzu."""
+    """Zwraca błędy przejścia po formularzu, a następnie błędy cykli SHOW."""
     if not isinstance(form, dict):
         return ["$: oczekiwano obiektu"]
     audit = _Check(form.get("tabs"))
     audit.form(form)
+    audit.show_cycles()
     return audit.errors

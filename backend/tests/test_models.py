@@ -136,7 +136,6 @@ INVALID_ANALYSES: list[tuple[str, Callable[[dict], object], str | None, str]] = 
     ("show_if: źródło nie jest polem wyboru", lambda d: field(d, "Numer rachunku")["show_if"].update(field="Kwota"), None, "nie jest polem wyboru"),
     ("show_if: pole wskazuje samo siebie", lambda d: field(d, RADIO).update(show_if={"field": RADIO, "equals": TO_ACCOUNT}), None, "wskazuje to samo pole"),
     ("show_if: etykieta źródła powtórzona", lambda d: field(d, "Kwota").update(label=RADIO), None, "niejednoznaczna"),
-    ("show_if: źródło na innej stronie", _dependents_on_second_page, None, "nie ma pola"),
     ("nieznany klucz: analiza", lambda d: d.update(validation=["PESEL"]), "validation", "extra_forbidden"),
     ("nieznany klucz: adresat", lambda d: d["addressee"].update(street="x"), "street", "extra_forbidden"),
     ("nieznany klucz: strona", lambda d: d["subject_pages"][0].update(type="MAIN"), "type", "extra_forbidden"),
@@ -162,6 +161,90 @@ def test_repeated_labels_are_allowed_when_no_show_if_points_at_them() -> None:
     analysis = FormAnalysis.model_validate(data)
     labels = [f.label for s in analysis.subject_pages[0].sections for f in s.fields]
     assert labels.count("Kwota") == 2
+
+
+
+def test_show_if_accepts_source_on_an_earlier_page() -> None:
+    data = fields_json()
+    _dependents_on_second_page(data)
+    analysis = FormAnalysis.model_validate(data)
+    moved = analysis.subject_pages[1].sections[0].fields
+    assert {f.label: (f.show_if.field, f.show_if.equals) for f in moved if f.show_if} == FIXTURE_SHOW_IF
+
+
+@pytest.mark.parametrize("source_type", ["RADIO", "CHECKBOX", "SELECT"])
+def test_subject_fields_and_sections_accept_compound_conditions(source_type: str) -> None:
+    data = fields_json()
+    field(data, RADIO).update(type=source_type, options=[TO_ACCOUNT, TO_FUTURE_TAX, "Inny sposób"])
+    field(data, "Kwota").update(type="RADIO", options=["Potwierdzona", "Szacunkowa"])
+    alternatives = {"field": RADIO, "equals": TO_ACCOUNT, "any_of": ["Inny sposób"]}
+    confirmed = {"field": "Kwota", "equals": "Potwierdzona"}
+    field(data, "Numer rachunku").update(show_if=alternatives, show_if_all=[confirmed])
+    sections(data)[2].update(show_if=alternatives, show_if_all=[confirmed])
+
+    analysis = FormAnalysis.model_validate(data)
+    account = analysis.subject_pages[0].sections[1].fields[2]
+    correction = analysis.subject_pages[0].sections[2]
+    for item in (account, correction):
+        assert item.show_if.model_dump() == alternatives
+        assert item.show_if_all[0].equals == "Potwierdzona"
+
+
+@pytest.mark.parametrize(
+    ("options", "message"),
+    [
+        (["Nie ma takiej opcji"], "nie ma opcji 'Nie ma takiej opcji'"),
+        ([TO_ACCOUNT], "powtórzone opcje"),
+        ([TO_FUTURE_TAX, TO_FUTURE_TAX], "powtórzone opcje"),
+    ],
+)
+def test_show_if_rejects_invalid_alternatives(options: list[str], message: str) -> None:
+    data = fields_json()
+    field(data, "Numer rachunku")["show_if"]["any_of"] = options
+    with pytest.raises(ValidationError, match=message):
+        FormAnalysis.model_validate(data)
+
+
+@pytest.mark.parametrize("location", ["field", "section", "page"])
+def test_subject_show_if_rejects_source_after_dependent(location: str) -> None:
+    data = fields_json()
+    payment = sections(data)[1]["fields"]
+    if location == "field":
+        payment.reverse()
+    elif location == "section":
+        sections(data).insert(2, {"title": "Sposób rozliczenia", "fields": [payment.pop(0)]})
+    else:
+        _dependents_on_second_page(data)
+        data["subject_pages"].reverse()
+    with pytest.raises(ValidationError, match="źródło .* musi być przed elementem zależnym"):
+        FormAnalysis.model_validate(data)
+
+
+def test_section_show_if_rejects_source_inside_that_section() -> None:
+    data = fields_json()
+    sections(data)[1]["show_if"] = {"field": RADIO, "equals": TO_ACCOUNT}
+    with pytest.raises(ValidationError, match="leży wewnątrz ukrywanej sekcji"):
+        FormAnalysis.model_validate(data)
+
+
+def test_subject_show_if_rejects_ambiguous_source_across_pages() -> None:
+    data = fields_json()
+    _dependents_on_second_page(data)
+    data["subject_pages"][1]["sections"][0]["fields"].append({"label": RADIO, "type": "TEXT_FIELD"})
+    with pytest.raises(ValidationError, match="etykieta .* jest niejednoznaczna"):
+        FormAnalysis.model_validate(data)
+
+
+@pytest.mark.parametrize("target", ["field", "section"])
+def test_show_if_all_validates_each_condition(target: str) -> None:
+    data = fields_json()
+    dependent = field(data, "Numer rachunku") if target == "field" else sections(data)[2]
+    dependent["show_if_all"] = [
+        {"field": RADIO, "equals": TO_ACCOUNT},
+        {"field": RADIO, "equals": "Brak"},
+    ]
+    with pytest.raises(ValidationError, match=r"show_if_all\[1\] .* nie ma opcji 'Brak'"):
+        FormAnalysis.model_validate(data)
 
 
 def test_form_analysis_schema_is_json_for_the_model() -> None:
@@ -297,6 +380,25 @@ def test_applicant_show_if_rejects_invalid_reference(
 ) -> None:
     change(analysis_with_extra_fields["applicant"]["applicant_extra_fields"])
     with pytest.raises(ValidationError, match=message):
+        FormAnalysis.model_validate(analysis_with_extra_fields)
+
+
+def test_applicant_show_if_still_accepts_later_source_in_same_list(analysis_with_extra_fields: dict) -> None:
+    analysis_with_extra_fields["applicant"]["applicant_extra_fields"].reverse()
+    fields = FormAnalysis.model_validate(analysis_with_extra_fields).applicant.applicant_extra_fields
+    assert fields[0].show_if.field == fields[1].label
+
+
+@pytest.mark.parametrize("condition_key", ["any_of", "show_if_all"])
+def test_applicant_extra_fields_reject_compound_conditions(
+    analysis_with_extra_fields: dict, condition_key: str,
+) -> None:
+    dependent = analysis_with_extra_fields["applicant"]["applicant_extra_fields"][1]
+    if condition_key == "any_of":
+        dependent["show_if"]["any_of"] = ["Dowód osobisty"]
+    else:
+        dependent["show_if_all"] = [dependent.pop("show_if")]
+    with pytest.raises(ValidationError, match="tylko show_if z field i equals"):
         FormAnalysis.model_validate(analysis_with_extra_fields)
 
 

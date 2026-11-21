@@ -5,15 +5,18 @@ oraz dopowiedzenia lidera do P1 (warianty wnioskodawcy, unikalne nazwy, jsonata,
 Formaty jsonaty i układu są tu zapisane niezależnie od kodu generatora.
 """
 
+import ast
 import json
 import re
 import unicodedata
 import uuid
+from hashlib import sha256
 from itertools import pairwise, product
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
+from starlette.responses import JSONResponse
 
 from app import lint
 from app.generator import build_form, template
@@ -246,6 +249,88 @@ def test_subject_page_has_fixture_fields_and_conditions() -> None:
             expected = atom(subject_field.show_if.equals, source_field, page=subject.title, section=source_section)
             assert [squash(q) for q in states(item["field"])] == [squash(expected)]
     assert conditions == 2
+
+
+def test_subject_field_show_combines_alternatives_with_all_conditions() -> None:
+    data = _analysis_data("PERSON")
+    section = data["subject_pages"][0]["sections"][0]
+    section["fields"] = [
+        {"label": "Tryb", "type": "RADIO", "options": ["A", "B", "C"]},
+        {"label": "Dokumenty", "type": "CHECKBOX", "options": ["Rachunek", "Potwierdzenie"]},
+        {
+            "label": "Opis", "type": "TEXTAREA",
+            "show_if": {"field": "Tryb", "equals": "A", "any_of": ["B"]},
+            "show_if_all": [
+                {"field": "Dokumenty", "equals": "Rachunek"},
+                {"field": "Dokumenty", "equals": "Potwierdzenie"},
+            ],
+        },
+    ]
+    form = build_form(FormAnalysis.model_validate(data))
+    a = atom("A", "tryb", "Treść sprawy", "cel_wniosku")
+    b = atom("B", "tryb", "Treść sprawy", "cel_wniosku")
+    bill = atom("Rachunek", "dokumenty", "Treść sprawy", "cel_wniosku")
+    proof = atom("Potwierdzenie", "dokumenty", "Treść sprawy", "cel_wniosku")
+    assert states(by_tech_name(form)["opis"]) == [f"({a} or {b}) and {bill} and {proof}"]
+    assert lint.check(form) == []
+
+
+def test_subject_section_show_refers_to_source_on_renamed_page() -> None:
+    data = _analysis_data("PERSON")
+    data["subject_pages"] = [
+        {"title": "Dane", "sections": [{
+            "title": "Wybór",
+            "fields": [
+                {"label": "Imię", "type": "RADIO", "options": ["Wpiszę", "Z rejestru"]},
+                {"label": "Zakres", "type": "SELECT", "options": ["Pełny", "Skrócony"]},
+            ],
+        }]},
+        {"title": "DANE", "sections": [{
+            "title": "Dane sprawy",
+            "show_if": {"field": "Imię", "equals": "Wpiszę"},
+            "show_if_all": [{"field": "Zakres", "equals": "Pełny"}],
+            "fields": [{"label": "Opis", "type": "TEXTAREA"}],
+        }]},
+    ]
+    form = build_form(FormAnalysis.model_validate(data))
+    items = elements(form)
+    name = atom("Wpiszę", "imie_2", "Dane wniosku", "wybor")
+    scope = atom("Pełny", "zakres", "Dane wniosku", "wybor")
+    assert states(items[("DANE wniosku (2)", "dane_sprawy")]) == [f"{name} and {scope}"]
+    assert states(items[("DANE wniosku (2)", "opis")]) == []
+    assert lint.check(form) == []
+
+
+def test_subject_show_inherits_visibility_of_sources_transitively() -> None:
+    data = _analysis_data("PERSON")
+    data["subject_pages"] = [{"title": "Decyzja", "sections": [
+        {"title": "Wybory", "fields": [
+            {"label": "Tryb", "type": "RADIO", "options": ["A", "B", "C"]},
+            {"label": "Zakres", "type": "RADIO", "options": ["Pełny", "Skrócony"]},
+        ]},
+        {"title": "Szczegóły", "show_if": {"field": "Tryb", "equals": "A", "any_of": ["B"]}, "fields": [
+            {"label": "Złożono dokument", "type": "RADIO", "options": ["Tak", "Nie"],
+             "show_if": {"field": "Zakres", "equals": "Pełny"}},
+        ]},
+        {"title": "Potwierdzenie", "show_if_all": [{"field": "Złożono dokument", "equals": "Tak"}], "fields": [
+            {"label": "Potwierdzasz?", "type": "RADIO", "options": ["Tak", "Nie"]},
+        ]},
+        {"title": "Podsumowanie", "fields": [
+            {"label": "Opis decyzji", "type": "TEXTAREA", "show_if": {"field": "Potwierdzasz?", "equals": "Tak"}},
+        ]},
+    ]}]
+    form = build_form(FormAnalysis.model_validate(data))
+    items = by_tech_name(form)
+    a = atom("A", "tryb", "Decyzja", "wybory")
+    b = atom("B", "tryb", "Decyzja", "wybory")
+    scope = atom("Pełny", "zakres", "Decyzja", "wybory")
+    document = atom("Tak", "zlozono_dokument", "Decyzja", "szczegoly")
+    confirmation = atom("Tak", "potwierdzasz", "Decyzja", "potwierdzenie")
+    assert states(items["szczegoly"]) == [f"({a} or {b})"]
+    assert states(items["zlozono_dokument"]) == [scope]
+    assert states(items["potwierdzenie"]) == [f"{document} and ({a} or {b}) and {scope}"]
+    assert states(items["opis_decyzji"]) == [f"{confirmation} and {document} and ({a} or {b}) and {scope}"]
+    assert lint.check(form) == []
 
 
 # --- format (SZABLONY, rozdz. 0) ------------------------------------------------------------------
@@ -519,6 +604,92 @@ def test_form9_has_entity_role_and_additional_applicant_fields() -> None:
     assert lint.check(form) == []
 
 
+def test_form9_builds_one_configuration_with_resolvable_show_queries() -> None:
+    form = generated("analysis_form9.json")
+    assert [page["title"] for page in form["tabs"]] == [
+        "Dane", "Kandydat", "Osiągnięcia", "Zgody", "Kontakt i zgody", "Strona końcowa",
+    ]
+    first = form["tabs"][1]["questions"][0]["field"]["repeatingSectionGrid"][0]["field"]
+    assert (first["title"], first["type"]) == ("Rodzaj wniosku", "RADIO")
+    assert [option["id"] for option in first["options"]] == ["Stypendium", "Nagroda", "Wyróżnienie"]
+    items = by_tech_name(form)
+    assert all(item["type"] != "REPEATING_SECTION" for item in items.values())
+    assert [option["id"] for option in items["liczba_podopiecznych"]["options"]] == ["1", "2", "3", "4"]
+    queries = [query for item in items.values() for query in states(item)]
+    assert queries and all(lint._parse_query(query) for query in queries)
+    assert lint.check(form) == []
+
+
+def _boolean_value(expression: ast.expr) -> bool:
+    if isinstance(expression, ast.Constant) and isinstance(expression.value, bool):
+        return expression.value
+    assert isinstance(expression, ast.BoolOp), ast.dump(expression)
+    values = [_boolean_value(value) for value in expression.values]
+    return all(values) if isinstance(expression.op, ast.And) else any(values)
+
+
+def _visible_in_form9(item: dict, answers: dict[str, list[str]]) -> bool:
+    for query in states(item):
+        resolved = ATOM.sub(
+            lambda atom_match: str(decode(atom_match["option"]) in answers.get(decode(atom_match["field"]), [])),
+            query,
+        )
+        if not _boolean_value(ast.parse(resolved, mode="eval").body):
+            return False
+    return True
+
+
+@pytest.mark.parametrize("adult", [True, False, None], ids=["adult", "minor", "unanswered"])
+@pytest.mark.parametrize(("kind", "count"), [
+    ("Stypendium", 4), ("Nagroda", 4), ("Wyróżnienie", 1), ("Wyróżnienie", 2), ("Wyróżnienie", 3), ("Wyróżnienie", 4),
+], ids=["scholarship", "award", "distinction-1", "distinction-2", "distinction-3", "distinction-4"])
+def test_form9_every_route_has_visible_subject_pages_and_matching_consents(
+    kind: str, count: int, adult: bool | None,
+) -> None:
+    form = generated("analysis_form9.json")
+    # Ukryte odpowiedzi pozostają w danych, jak po zmianie rodzaju wniosku albo liczby podopiecznych.
+    ward_is_adult = {number: (number % 2 == 1) == adult for number in range(1, 5)} if adult is not None else {}
+    answers = {
+        "rodzaj_wniosku": [kind],
+        "liczba_podopiecznych": [str(count)],
+    }
+    if adult is not None:
+        answers["czy_kandydat_jest_pelnoletni"] = ["Tak" if adult else "Nie"]
+    for number, age in ward_is_adult.items():
+        answers[f"czy_podopieczny_{number}_jest_pelnoletni"] = ["Tak" if age else "Nie"]
+
+    visible = {}
+    for page in form["tabs"][1:-2]:
+        sections = [question["field"] for question in page["questions"]]
+        visible[page["title"]] = {
+            section["title"] for section in sections
+            if _visible_in_form9(section, answers)
+            and any(_visible_in_form9(item["field"], answers) for item in section["repeatingSectionGrid"])
+        }
+        assert visible[page["title"]], (page["title"], answers)
+
+    candidate_sections = {"Wybór wniosku", "Dane kandydata"}
+    achievement_sections = {"Opinia macierzystego klubu sportowego"}
+    if kind == "Stypendium":
+        candidate_sections.add("Dyscypliny sportowe kandydata")
+    consents = {"Przechowywanie zgód"}
+    if kind == "Wyróżnienie":
+        achievement_sections.update({"Podopieczni trenera", "Dokumenty podopiecznych"})
+        consents.add("Zgoda trenera")
+        for number in range(1, count + 1):
+            achievement_sections.add(f"Dane podopiecznego {number}")
+            if number in ward_is_adult:
+                role = "pełnoletniego podopiecznego" if ward_is_adult[number] else "opiekuna podopiecznego"
+                consents.add(f"Zgoda {role} {number}")
+    else:
+        achievement_sections.add("Osiągnięcia sportowca")
+        if adult is not None:
+            suffix = "stypendium" if kind == "Stypendium" else "nagrody"
+            role = "pełnoletniego kandydata" if adult else "opiekuna kandydata"
+            consents.add(f"Zgoda {role} do {suffix}")
+    assert visible == {"Kandydat": candidate_sections, "Osiągnięcia": achievement_sections, "Zgody": consents}
+
+
 @pytest.mark.parametrize("applicants", ["ENTITY", "BOTH"])
 def test_entity_without_proxy_reuses_only_available_show_conditions(applicants: str) -> None:
     data = _analysis_data(applicants, representative_proof=True, contact=["EMAIL"])
@@ -558,7 +729,9 @@ def test_applicant_extra_show_uses_local_names_after_global_collisions() -> None
     assert lint.check(form) == []
 
 
-def test_applicant_decision_matrix_passes_lint() -> None:
+@pytest.mark.parametrize(("applicants", "count"), [("PERSON", 96), ("ENTITY", 576), ("BOTH", 2304)])
+def test_applicant_decision_matrix_passes_lint(applicants: str, count: int) -> None:
+    """Sprawdza też cykle SHOW w sekcjach i polach standardowej strony Dane."""
     extra_fields = [
         {"label": "Kanał kontaktu", "type": "RADIO", "options": ["ePUAP", "Poczta"]},
         {"label": "Adres skrzynki ePUAP", "type": "TEXT_FIELD", "show_if": {"field": "Kanał kontaktu", "equals": "ePUAP"}},
@@ -575,8 +748,8 @@ def test_applicant_decision_matrix_passes_lint() -> None:
         "contact": ([], ["PHONE"], ["PHONE", "EMAIL"]),
         "applicant_extra_fields": ([], extra_fields),
     }
-    checked = dict.fromkeys(["PERSON", "ENTITY", "BOTH"], 0)
-    for applicants, combination in product(checked, product(*values.values())):
+    checked = 0
+    for combination in product(*values.values()):
         decisions = dict(zip(values, combination, strict=True))
         try:
             a = FormAnalysis.model_validate(_analysis_data(applicants, **decisions))
@@ -589,8 +762,8 @@ def test_applicant_decision_matrix_passes_lint() -> None:
                 assert len(item["options"]) >= 2, (applicants, decisions, item["techName"])
             if item["type"] == "SECTION":
                 assert item["repeatingSectionGrid"], (applicants, decisions, item["techName"])
-        checked[applicants] += 1
-    assert checked == {"PERSON": 96, "ENTITY": 576, "BOTH": 2304}
+        checked += 1
+    assert checked == count
 
 
 # --- przypadki brzegowe ---------------------------------------------------------------------------
@@ -805,6 +978,19 @@ def test_same_analysis_gives_identical_json(name: str) -> None:
     assert json.dumps(generated(name), ensure_ascii=False) == json.dumps(generated(name), ensure_ascii=False)
 
 
+
+# Bajty JSONResponse z build_form na origin/main (6945cc1), przed zmianami P1.4.
+@pytest.mark.parametrize(("name", "digest"), [
+    ("analysis_edge_cases.json", "644c19161a35498996b21391cdc8fa05379fdc20d88d21f1a15f97f8cc4b2ea6"),
+    ("analysis_entity.json", "e7d1a7cdabc041662aab19b416c27a12ee53ecb245b58acc79fb59359a97f74a"),
+    ("analysis_form3.json", "a49e50927df19637423660fa9d8ff4f8b412880a029b39ac88383c3a0bdcbc5b"),
+    ("analysis_person.json", "9809cc667fdb9cff0245e503aca590ffef13170956dadeabef0ee129010d9bf5"),
+    ("fields.json", "67083bb0603c207fa49b96cd966ad3b9af9498e28c457cc60dca0727a785456b"),
+], ids=["edge_cases", "entity", "form3", "person", "fields"])
+def test_legacy_form_bytes_match_origin_main(name: str, digest: str) -> None:
+    assert sha256(JSONResponse(generated(name)).body).hexdigest() == digest
+
+
 def _ids(form: dict) -> set[str]:
     return {item["id"] for item in elements(form).values()} | {page["id"] for page in form["tabs"]}
 
@@ -815,7 +1001,7 @@ def test_different_analyses_do_not_share_ids() -> None:
 
 def test_ids_derive_from_canonical_analysis_json() -> None:
     a = analysis("fields.json")
-    canonical = json.dumps(a.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
+    canonical = generator_form.canonical_json(a)
     form_namespace = uuid.uuid5(generator_form.ID_NAMESPACE, canonical)
     form = build_form(a)
     assert form["tabs"][0]["id"] == str(uuid.uuid5(form_namespace, "tab/0"))
