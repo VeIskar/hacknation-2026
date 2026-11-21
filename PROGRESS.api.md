@@ -106,6 +106,40 @@ Krok M1.5 (Marcin): model w compose (DELEGACJA M1.5, ustalenia K1 w DECISIONS).
 - `backend/tests/test_config.py`, `test_docker.py`: domyślna wartość w compose, serwis `ollama` (statycznie).
 - Dowód: `pull_model.sh`, z kontenera `api` zapytanie `/v1/chat/completions` do `ollama` → odpowiedź modelu.
 
+Krok K3 (Mikołaj, gałąź `mikolaj/k3`): `ExtractedDocument` → `FormAnalysis` przez lokalny model.
+
+- `backend/app/llm.py`: `settings` wymagane (bez `get_settings()`); `LLM_FIXTURE` zwraca plik bez sieci, nieczytelny → `LLMUnavailable`.
+- `backend/app/analysis.py`: `analyze(doc, *, settings)`; prompt z kontraktem `applicant` i zasadą podstawy w treści; lekkie uporządkowanie tekstu; budżet kontekstu; 2 próby z błędami walidatora, potem 503.
+- Testy bez modelu i bez K2 (przykładowy `ExtractedDocument`): `backend/tests/test_analysis.py` (nowy), `backend/tests/test_llm.py`.
+- `DECISIONS.md` (api): K3. Requests: Marcin (M1.4, kontekst), lider (DELEGACJA 2.2, SPEC, nowe zadania).
+- Dowód: mutacje, `bash scripts/gate.sh api -rs`, ręcznie DOCX nadpłaty → `FormAnalysis` na `qwen3.5:4b`.
+
+Krok K2.1 (Mikołaj): pierwszy odczyt przez `extract(data, ext)` dla DOCX z tekstem.
+
+- `backend/app/extract/`: odczyt akapitów, tabel i podziałów stron z głównego XML w pamięci.
+- `backend/tests/test_extract.py`: syntetyczne DOCX, błędy odczytu i próbki COI z folderów 1 i 5.
+- Dowód: zaobserwowany RED, przywrócenie bajtów po mutacjach i `bash scripts/gate.sh api -rs`.
+
+Krok K2.2 (Mikołaj): lokalny OCR dla JPG i PNG, w tym aliasów normalizowanych podczas uploadu.
+
+- `backend/app/extract/`: przekazanie bajtów przez stdin do Tesseract, `OCR_LANG`, limit czasu i tekst w `ExtractedDocument`.
+- `backend/tests/test_extract.py`: wybór języka, przekazanie bajtów, brak tekstu i błędy OCR bez procesu zewnętrznego.
+- Dowód: RED/GREEN, `bash scripts/gate.sh api -rs` oraz Tesseract `pol` na skanach z folderów 1 i 5.
+
+Krok K2.3 (Mikołaj): odczyt warstwy tekstowej PDF przez `pypdf`, bez OCR.
+
+- `backend/app/extract/`: strony z bajtów w pamięci, kolejność stron, separator `\f`, ostrzeżenie o stronach bez tekstu, błędy odczytu jako `ExtractionError`.
+- `backend/tests/test_extract.py`: PDF wielostronicowy, pusta strona, PDF bez tekstu, pliki uszkodzone, polskie znaki, próbki COI z folderów 1 i 5; OCR nie jest wołany.
+- Zależność `pypdf==7.1.1` (BSD-3-Clause): wpis w `DECISIONS.md`, a linia w `requirements.txt` to Request do Marcina.
+- Dowód: RED/GREEN każdego testu i `bash scripts/gate.sh api -rs`.
+
+Krok M1.4 (Marcin): sklejenie `POST /api/forms` (DELEGACJA M1.4; K2 z K2.3 i K3 są na `main`).
+- `backend/app/main.py`: `process_file` = `extract` → `analyze` → `build_form` → `lint.check`, w wątku
+  (`run_in_threadpool`), bo `analyze` trwa minuty i blokowałby `/health`. Błędy lintera → 500 + log (tymczasowo, pytanie do lidera).
+- `backend/tests/test_api.py`: prawdziwy łańcuch z `LLM_FIXTURE` (PDF i DOCX → JSON, linter 0 błędów), 400 z odczytu,
+  503 z analizy, 500 z lintera, `/health` odpowiada w trakcie analizy; testy warstwy uploadu i JWT podmieniają `process_file`.
+- Bez zmian: `LLM_TIMEOUT_S` i model (czekają na pomiar Qwen3.5-9B i decyzję lidera).
+
 ## Requests
 
 (one line per change you need from another area: who asks, what, why)
@@ -114,14 +148,25 @@ Krok M1.5 (Marcin): model w compose (DELEGACJA M1.5, ustalenia K1 w DECISIONS).
 - lider → Marcin (M1.1): endpoint zwraca na razie stały szkielet JSON, bo wzorców COI nie ma już w `backend/tests/fixtures/` (D5).
 - lider → Mikołaj (K3, `analysis.py`): `ValidationError` z `FormAnalysis.model_validate` po ponowieniach zamień na `LLMUnavailable` (D4).
 - lider → Mikołaj (K2, `extract`): przytnij `images` do 20 sztuk i 40 MB przed utworzeniem `ExtractedDocument` i dopisz ostrzeżenie (D3).
+- Mikołaj → Marcin (K2, `backend/Dockerfile` i `backend/requirements.txt`): uzgodnić instalację Tesseract z `pol` i wersję `pypdf` do odczytu PDF.
+- Mikołaj → Marcin (K2.3, `backend/requirements.txt`): dopisać `pypdf==7.1.1` (BSD-3-Clause, bez wymaganych zależności, Python ≥ 3.10). Bez tej linii `import app.extract` kończy się `ModuleNotFoundError` w obrazie API i w świeżym `.venv`, więc K2.3 nie może wejść na `main` przed nią.
 - Marcin → lider (`SPEC.md`, Must 1 i „API contract”): dopisać wyjątek od zgodności typu z rozszerzeniem, np. „Plik `.doc`, który w środku jest DOCX, jest przyjmowany i czytany jak DOCX (tak są zapisane pliki `.DOC` z folderów 5 i 7). `.jpe` jest przyjmowane jak `.jpg` (plik `.JPE` w folderze 7).” Kod już tak działa (DECISIONS, M1.1); uwaga Pawła z recenzji M1.1.
 - Paweł → lider (P1.2a, `SZABLONY_SEKCJI.md`, rozdz. 1): dodać tabelę „decyzja → sekcja” dla `ApplicantData` z zaznaczeniem, że dobór obowiązuje od P1.2b.
 - Paweł → lider (P1.2a, `DELEGACJA.md`, rozdz. 2.1): dopisać wymagane `applicants` i `applicant: ApplicantData`, walidację i niezależność od ekstraktora oraz kolejność P1.2a → P1.2b/P1.2c.
 - Mikołaj → lider (`SPEC.md`, „Model”): zamień `think: false` na `reasoning_effort: "none"`, bo `/v1` ignoruje `think` (pomiar K1 w `DECISIONS.md`).
 - Mikołaj → Marcin (M1.5, `docker-compose.yml`): serwis `ollama/ollama:0.40.15` z `OLLAMA_CONTEXT_LENGTH=16384` i `OLLAMA_NO_CLOUD=1`, bez portu na hoście (API Ollamy nie ma haseł).
 - Mikołaj → Marcin (`config.py`, `env.example`): `LLM_TIMEOUT_S=120` jest za małe na CPU (K1: 238–344 s na formularz); podnieś do 600 albo zmierz na maszynie demo.
-- Mikołaj → web (`frontend/playwright.config.ts`): ustaw `LLM_FIXTURE` dla API, jak mówi SPEC „Real and mocked”. Dziś go nie ma, więc po K3 e2e wołałoby prawdziwy model (recenzja K1-fix2).
+- Mikołaj → web (`frontend/playwright.config.ts`): ustaw `LLM_FIXTURE` dla API, jak mówi SPEC „Real and mocked”. Dziś go nie ma, więc po K3 e2e wołałoby prawdziwy model (recenzja K1-fix2). Ścieżka względna liczy się od `frontend/` (cwd Playwrighta), np. `../backend/tests/fixtures/fields.json`. Przy `reuseExistingServer: true` już działające API bez tej zmiennej też wołałoby model.
 - Marcin (M1.3) → web (`frontend/Dockerfile`, `frontend/nginx.conf`): nginx bez roota (`nginxinc/nginx-unprivileged:<jawna wersja>` albo `USER nginx`), nasłuch na 8080, `EXPOSE 8080`; Treść pkt 5. Potem Marcin zmienia w compose `5173:80` na `5173:8080`.
+- Mikołaj → Marcin (M1.4, `main.py`): wołaj `analysis.analyze(doc, settings=settings)` z `settings` trasy (`Depends(get_settings)`). Funkcja jest synchroniczna i na CPU trwa minuty, więc przez `run_in_threadpool`. Dokument bez tekstu i obrazów → `ExtractionError` (400), reszta błędów → `LLMUnavailable` (503).
+- Mikołaj → lider (`DELEGACJA.md`, rozdz. 2.2): sygnatura `analysis.analyze(doc, *, settings) -> FormAnalysis`, `settings` wymagane też w `llm.chat_json`; `analyze` rzuca `ExtractionError` dla dokumentu bez tekstu i obrazów (K3).
+- Mikołaj → Marcin (M1.5, `docker-compose.yml`, `config.py`): budżet K3 zakłada `OLLAMA_CONTEXT_LENGTH=16384` (stała `CONTEXT_TOKENS` w `analysis.py`). Tekst z folderu 8 (ok. 31 tys. znaków) się nie mieści, a folder 9 mieści się bez miejsca na ponowienie. Rozważ 32768 i zmienną `LLM_CONTEXT_TOKENS` w `Settings`, żeby serwer i analiza znały tę samą liczbę. Recenzja Codexa (P1): bez tej zmiennej większy kontekst serwera nie pomoże folderowi 8, bo K3 liczy budżet od stałej; po jej dodaniu K3 przełączy `CONTEXT_TOKENS` na `settings`.
+- Mikołaj → lider (`SPEC.md`, „API contract”): dokument za długi do analizy daje dziś 503 „Model AI nie odpowiada…”, a ponowienie nic nie da. Propozycja: osobny komunikat, np. 400 „Formularz jest za długi do analizy.”.
+- Mikołaj → lider (`DELEGACJA.md`, rozdz. 3): zadania po K3: (a) analiza długich dokumentów fragmentami z kontrolą kompletności (foldery 8 i 9), (b) strojenie promptu (Q1) z pomiarem na folderze 5, (c) porównanie `qwen3.5:4b` z wersją 9B: czas, pamięć, poprawność `FormAnalysis`.
+- Mikołaj → lider (mentor, kontrakt P0): uzasadnienie pól w K3 jest tylko regułą promptu. Sprawdzalne uzasadnienie wymaga pola ze źródłem w `SubjectField`, np. cytatu z papieru. To zmiana kontraktu, więc decyzja lidera.
+- Mikołaj → lider (`DELEGACJA.md`, rozdz. 3, Q1): pomiar K3 pokazał elementy bez podstawy w papierze (oświadczenie, pole „Inne dokumenty”, REGON) i dane wnioskodawcy powtórzone w `subject_pages`. Proponuję zadanie: deterministyczna kontrola podstawy w treści po analizie, z ponowieniem jak przy błędzie walidatora, bez zmiany kontraktu. Do tego poprawa `fields.json`, bo jego `applicant` opisuje wzorzec COI zamiast papieru (Paweł).
+- Mikołaj → lider (`DELEGACJA.md`, rozdz. 3, Q1, szybkość): na CPU czas zależy od tokenów odpowiedzi (2–4,6 tokenu/s). Kolejno: (1) pierwsza próba bez błędu oszczędza ok. połowę czasu, więc w logu warto zapisywać miejsca błędów; (2) zwarty JSON bez wcięć, bo w K1 135 przejść linii to ok. 12% z 1088 tokenów; (3) GPU albo mniej obciążona maszyna, bo ten sam prompt trwał w K1 238–344 s; (4) porównanie 4B z mniejszym i większym modelem (zadanie c). Qwen 4B nie jest gotowy do demo: K3 dało wynik dopiero w 2. próbie po 1121 s, z polami bez podstawy w papierze.
+- Marcin → lider (`SPEC.md`, „API contract”): jaki kod, gdy wygenerowany JSON nie przechodzi lintera? M1.4 daje tymczasowo 500 „Coś poszło nie tak. Spróbuj ponownie.” z błędami w logu (błąd po naszej stronie, nie użytkownika).
 
 ## Log
 
@@ -153,3 +198,13 @@ Krok M1.5 (Marcin): model w compose (DELEGACJA M1.5, ustalenia K1 w DECISIONS).
 - M1.5 recenzja testów compose (`c62614a`, subagent `reviewer`, werdykt SHIP): 0 CONFIRMED, 5 LATER (REVIEW.md): PyYAML w obrazie produkcyjnym (jak pytest/ruff; `requirements-dev.txt` – lider), `safe_load` przy imporcie, anonimowe wolumeny i `- FOO` w `environment` w normalizatorach, `read_only is True` / next merge `origin/main`, PR M1.5 / blocker brak.
 - pypdf (Marcin, prośba Mikołaja do K2.3): done `pypdf==7.1.1` (BSD-3-Clause) w `requirements.txt` + `DECISIONS.md`; Docker bez zmian (czysty Python); Tesseract `pol` potwierdzony w obrazie `api` tak, jak woła go K2.2 (`tesseract stdin stdout -l pol`, `app`, `read_only`) na skanie z folderu 5 / next M1.4 na K2 + K3 / blocker brak.
 - P1.4: done F9 lint `[]`, 5/5 wyjść identycznych, 6/6 mutacji wykrytych, API 602/0, K3 49/0, schemat promptu +9,11% / next commit człowieka / blocker brak.
+- K3: done `llm.py` (`settings` wymagane, `LLM_FIXTURE` bez sieci), `analysis.py` (prompt z kontraktem `applicant` i zasadą podstawy w treści, lekkie uporządkowanie tekstu, budżet kontekstu i kontrola przycięcia przez serwer, 2 próby, potem 503); 31/31 mutacji i mutacja D5 wykryte, 5 przebiegów bez niestabilności; ręcznie `qwen3.5:4b` na CPU: DOCX nadpłaty → poprawny `FormAnalysis` w 2. próbie, 1121 s, jakość pól do poprawy (Requests); recenzja `reviewer`: FIX (1, 2), naniesione 1–4; `bash scripts/gate.sh api -rs` → 566 passed, 0 pominiętych, `GATE: PASS (api)` / next commit człowieka, M1.4 (Marcin) z `analyze(doc, settings=settings)`, Q1 kontrola podstawy w treści / blocker `LLM_TIMEOUT_S=120` przy 537–584 s na próbę na CPU; folder 8 nie mieści się w kontekście 16384.
+- K3 recenzja (Codex `--uncommitted`, baza `4e9603e`; `origin/main` = `7788a2f` z M1.3): done 2/5 CONFIRMED naprawione w obszarze: ponowienie bez długiej odpowiedzi, gdy z nią nie mieści się w kontekście (folder 9), i `json.loads` przed walidacją (samotny surogat jak w P1.2a, `RecursionError` → ponowienie); 1 CONFIRMED poza obszarem (`LLM_CONTEXT_TOKENS`, prośba do Marcina), 2 LATER, 1 FALSE (REVIEW.md); 36/36 mutacji i mutacja D5 wykryte; K3 na `origin/main` → 575 passed, konflikty tylko w dopiskach `DECISIONS.md` i `PROGRESS.api.md`; `bash scripts/gate.sh api -rs` → 569 passed, 0 pominiętych, `GATE: PASS (api)` / next commit człowieka, scalenie z `main` z zachowaniem obu dopisków, Q1 szybkość i podstawa w treści / blocker: Qwen 4B niegotowy do demo (2. próba, 1121 s, pola bez podstawy).
+- K2.1 (`mikolaj/k2`, baza `4e9d228`): done tekst akapitów i tabel DOCX w pamięci, w tym próbki COI 1/5 oraz `.DOC` wykryty jako DOCX. 9/9 nowych przypadków widzianych na czerwono, po przywróceniu kodu `gate.sh api -rs` → 237 passed, a na kopii `c7d6cf1` z tym samym kodem → 406 passed, bez pominiętych / next PDF, arkusze, OCR i binarny DOC / blocker dla OCR: Tesseract z `pol` w obrazie API.
+- K2.2 (`mikolaj/k2`): done lokalny OCR JPG/PNG przez Tesseract `pol`; 8 nowych przypadków RED/GREEN, 7/7 skanów COI z wymaganymi słowami (foldery 1, 5, `.JPE` z 7), 0,64–5,44 s. `gate.sh api -rs` → 245 passed w worktree, 444 passed na kopii `d0c07fd` z P1.2a, bez pominiętych / next tekst PDF, arkusze i binarny DOC / blocker wdrożenia OCR: Tesseract z `pol` w obrazie API.
+- K2.1/K2.2 po recenzji: done odczyt `w:sdt` i kontrolowane 500 przy braku programu Tesseract, 3 przypadki RED/GREEN, 7/7 rzeczywistych skanów; `gate.sh api -rs` → 248 passed na bazie K2 i 558 passed na `4e9603e` z kodem K2, 0 pominiętych / next pierwszy commit po decyzji lidera / blocker integracji: konflikty w `DECISIONS.md` i `PROGRESS.api.md`, uwagi w `REVIEW.md`.
+- K2.3 (`mikolaj/k2`, baza `2892e6a`): done warstwa tekstowa PDF przez `pypdf` 7.1.1: kolejność stron, separator `\f`, ostrzeżenie o stronach bez tekstu, każdy błąd odczytu jako 400, bez OCR. 13 nowych przypadków, każdy widziany na czerwono (RED albo mutacja kodu); fuzz 5877 uszkodzonych PDF-ów: 0 zawieszeń, wyjątki spoza `PyPdfError` potwierdzone; 9/9 PDF-ów COI ma tekst na każdej stronie, odczyt do 0,39 s. `gate.sh api -rs` → 261 passed, 0 pominiętych / next OCR stron PDF bez tekstu (wymaga decyzji o rendererze), obrazy w DOCX, XLSX, ODS, binarny DOC / blocker: `pypdf` w `requirements.txt` (Request do Marcina) i synchronizacja z `main`.
+- K2.3 recenzja (Codex, `--uncommitted`, kopia bez `.env` i materiałów): 3 ustalenia, 0 do poprawy w K2 (brak `pypdf` w `requirements.txt` rozwiązany na `main` przez PR #13; budżet zasobów i PDF z AES jako LATER w `REVIEW.md`). Własne sondy: 1 CONFIRMED – font PDF oddawał NUL, `\f` i niesparowany surogat jako tekst (fałszywy podział stron, tekst nie do zapisania w UTF-8); poprawione, test czerwony przed poprawką. `gate.sh api -rs` → 262 passed, 0 pominiętych / next commit lidera, potem scalenie `main` / blocker brak.
+- K2-merge: scalenie `main` `cb3daaa` (P2, JWT, K1, M1.3, M1.5, pypdf, K3) do `mikolaj/k2` po K2.3 `6bcbf75`; konflikty tylko w `DECISIONS.md` i `PROGRESS.api.md`, rozwiązane przez zachowanie wpisów obu stron; `gate.sh api -rs` → 616 passed, 0 pominiętych / next merge PR #12, potem pozostałe formaty K2 (XLSX, ODS, binarny DOC, OCR stron PDF i obrazów DOCX) / blocker brak.
+- M1.4: done `process_file` = `extract` → `analyze` → `build_form` → `lint.check` w `run_in_threadpool`; błędy lintera → 500 + log (tymczasowo); testy: PDF i DOCX z `LLM_FIXTURE` → JSON równy `build_form(fields.json)`, linter 0 błędów; PDF bez tekstu i XLSX (brak czytnika) → 400, brak atrapy → 503, JSON odrzucony przez linter → 500, `/health` odpowiada w trakcie analizy; testy uploadu i JWT z atrapą `process_file`; 4/4 mutacje wykryte; `gate.sh api -rs` → 622 passed, 1 failed (test K3 czerwony już na `main`, Request do Mikołaja) / next pomiar Qwen3.5-9B przez API i `LLM_TIMEOUT_S` (lider), DOC/XLSX/ODS w K2 / blocker: czerwona bramka `main` przez test K3.
+- K3-fix (Marcin, w uzgodnieniu z Mikołajem, plik K3): `test_deeply_nested_answer_is_a_validation_error_not_a_crash` czerwony na `main` od `cb3daaa`, bo na Pythonie 3.14 (venv i obraz `api`) `json.loads` nie rzuca `RecursionError` (sprawdzone do 100 000 poziomów) i błąd to `model_type`, nie „recursion limit exceeded”; test sprawdza teraz zachowanie niezależne od wersji (błąd walidacji całego JSON-a, ponowienie, bez 500), nowy `test_recursion_error_from_json_loads_falls_back_to_pydantic_parser` pilnuje gałęzi `RecursionError` na każdym Pythonie; `analysis.py` bez zmian; 2/2 mutacje wykryte; `gate.sh api -rs` zielony / next merge do `main`, M1.4 / blocker brak.

@@ -1,22 +1,47 @@
 import asyncio
 import json
+import logging
 import tempfile
+import threading
 from collections.abc import Iterator
+from pathlib import Path
 
+import httpx
 import pytest
 from fastapi.exceptions import RequestValidationError
 from fastapi.testclient import TestClient
-from samples import PDF, PNG, VALID
+from samples import PDF, PNG, VALID, XLSX
+from test_extract import docx, pdf
 
+from app import lint
+from app import main as main_module
 from app.config import Settings, get_settings
 from app.files import MSG_NAME, MSG_NO_FILE, MSG_TYPE
+from app.generator import build_form
+from app.llm import UNAVAILABLE_DETAIL
 from app.main import MSG_SERVER_ERROR, app, request_validation_handler
+from app.models import FormAnalysis
 
-SKELETON = {"title": "Formularz", "tabs": [], "flow": {"links": []}}
+# Warstwa uploadu (M1.1) jest testowana bez łańcucha analizy: process_file to atrapa.
+STUB_FORM = {"title": "Atrapa", "tabs": [], "flow": {"links": []}}
+FIELDS = Path(__file__).parent / "fixtures" / "fields.json"
+MSG_UNREADABLE = "Nie udało się odczytać treści pliku."
 
 
 @pytest.fixture
-def client() -> Iterator[TestClient]:
+def processed(monkeypatch: pytest.MonkeyPatch) -> list[tuple[bytes, str]]:
+    calls: list[tuple[bytes, str]] = []
+
+    def stub(data: bytes, ext: str, settings: Settings) -> dict:
+        calls.append((data, ext))
+        return STUB_FORM
+
+    monkeypatch.setattr(main_module, "process_file", stub)
+    return calls
+
+
+@pytest.fixture
+def client(processed: list[tuple[bytes, str]]) -> Iterator[TestClient]:
     app.dependency_overrides[get_settings] = lambda: Settings(max_file_size_mb=1)
     yield TestClient(app)
     app.dependency_overrides.clear()
@@ -27,10 +52,14 @@ def post(client: TestClient, filename: str, data: bytes):
 
 
 @pytest.mark.parametrize("filename", VALID)
-def test_each_format_returns_form_json(client: TestClient, filename: str) -> None:
-    response = post(client, filename, VALID[filename][0])
+def test_each_format_reaches_the_pipeline_with_its_format(
+    client: TestClient, processed: list[tuple[bytes, str]], filename: str
+) -> None:
+    data, ext = VALID[filename]
+    response = post(client, filename, data)
     assert response.status_code == 200, response.text
-    assert response.json() == SKELETON
+    assert response.json() == STUB_FORM
+    assert processed == [(data, ext)]
 
 
 def test_bad_name_is_400(client: TestClient) -> None:
@@ -185,3 +214,86 @@ def test_default_limit_comes_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert Settings.from_env().max_file_bytes == 7 * 1024 * 1024
     monkeypatch.delenv("MAX_FILE_SIZE_MB")
     assert Settings.from_env().max_file_size_mb == 10
+
+
+# M1.4: prawdziwy łańcuch extract → analyze → build_form → lint.check, model zastępuje LLM_FIXTURE.
+PDF_WITH_TEXT = pdf("WNIOSEK O STWIERDZENIE NADPLATY PODATKU\nDane wnioskodawcy\nKwota nadplaty")
+DOCX_WITH_TEXT = docx("<w:p><w:r><w:t>Wniosek o stwierdzenie nadpłaty podatku</w:t></w:r></w:p>")
+EXPECTED_FORM = build_form(FormAnalysis.model_validate_json(FIELDS.read_text(encoding="utf-8")))
+
+
+@pytest.fixture
+def pipeline() -> Iterator[TestClient]:
+    app.dependency_overrides[get_settings] = lambda: Settings(llm_fixture=str(FIELDS))
+    yield TestClient(app, raise_server_exceptions=False)
+    app.dependency_overrides.clear()
+
+
+@pytest.mark.parametrize(("filename", "data"), [("wniosek.pdf", PDF_WITH_TEXT), ("wniosek.docx", DOCX_WITH_TEXT)])
+def test_document_becomes_coi_json_that_passes_linter(pipeline: TestClient, filename: str, data: bytes) -> None:
+    response = post(pipeline, filename, data)
+    assert response.status_code == 200, response.text
+    form = response.json()
+    assert lint.check(form) == []
+    assert form == EXPECTED_FORM
+
+
+def test_document_without_text_is_400(pipeline: TestClient) -> None:
+    response = post(pipeline, "wniosek.pdf", pdf(""))
+    assert (response.status_code, response.json()) == (400, {"detail": MSG_UNREADABLE})
+
+
+def test_format_without_reader_yet_is_400(pipeline: TestClient) -> None:
+    """XLSX przechodzi kontrolę pliku, ale K2 nie ma jeszcze czytnika: 400, nie 500."""
+    response = post(pipeline, "wniosek.xlsx", XLSX)
+    assert (response.status_code, response.json()) == (400, {"detail": MSG_UNREADABLE})
+
+
+def test_model_unavailable_is_503(pipeline: TestClient) -> None:
+    app.dependency_overrides[get_settings] = lambda: Settings(llm_fixture="/brak/atrapy.json")
+    response = post(pipeline, "wniosek.pdf", PDF_WITH_TEXT)
+    assert (response.status_code, response.json()) == (503, {"detail": UNAVAILABLE_DETAIL})
+
+
+def test_form_rejected_by_linter_is_500_with_errors_in_log(
+    pipeline: TestClient, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Zły JSON z generatora to nasz błąd, nie użytkownika (tymczasowo 500, decyzja lidera w toku)."""
+    monkeypatch.setattr(main_module, "build_form", lambda _: {"title": "x", "tabs": [], "flow": {"links": []}})
+    with caplog.at_level(logging.ERROR, logger="app.main"):
+        response = post(pipeline, "wniosek.pdf", PDF_WITH_TEXT)
+    assert (response.status_code, response.json()) == (500, {"detail": MSG_SERVER_ERROR})
+    assert "linter" in caplog.text.lower()
+    assert lint.check({"title": "x", "tabs": [], "flow": {"links": []}})[0] in caplog.text
+
+
+def test_health_answers_while_form_is_analysed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """analyze trwa minuty: musi działać poza pętlą zdarzeń, inaczej /health i compose widzą martwe api."""
+    started, release = threading.Event(), threading.Event()
+    real_analyze = main_module.analyze
+
+    def slow_analyze(doc, *, settings):
+        started.set()
+        assert release.wait(2), "analiza zablokowała pętlę zdarzeń"
+        return real_analyze(doc, settings=settings)
+
+    monkeypatch.setattr(main_module, "analyze", slow_analyze)
+    app.dependency_overrides[get_settings] = lambda: Settings(llm_fixture=str(FIELDS))
+
+    async def scenario() -> tuple[httpx.Response, httpx.Response]:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            files = {"file": ("wniosek.pdf", PDF_WITH_TEXT, "application/pdf")}
+            form = asyncio.create_task(client.post("/api/forms", files=files))
+            await asyncio.to_thread(started.wait, 2)
+            health = await client.get("/health")
+            release.set()
+            return health, await form
+
+    try:
+        health, form = asyncio.run(scenario())
+    finally:
+        release.set()
+        app.dependency_overrides.clear()
+    assert health.status_code == 200
+    assert form.status_code == 200, form.text

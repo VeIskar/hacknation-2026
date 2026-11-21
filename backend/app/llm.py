@@ -1,21 +1,27 @@
 """Jedyne miejsce, które woła model (AGENTS.md): klient OpenAI-compatible `/v1/chat/completions`.
 
 Adres, model, klucz i limit czasu bierze z config.Settings (LLM_BASE_URL, LLM_MODEL, LLM_API_KEY,
-LLM_TIMEOUT_S; DELEGACJA.md, rozdz. 5).
+LLM_TIMEOUT_S; DELEGACJA.md, rozdz. 5) podanych przez wołającego. Sam nie czyta env ani get_settings(),
+więc app.dependency_overrides[get_settings] w testach dociera aż tutaj.
+Przy LLM_FIXTURE zwraca treść tego pliku bez łączenia się z modelem (SPEC „Real and mocked”).
 Ollama na tym endpoincie ignoruje pole `think` z natywnego API. Tryb myślenia wyłącza
 `reasoning_effort: "none"` (docs.ollama.com/api/openai-compatibility). Rozmiaru kontekstu nie da się
 tu ustawić: ustala go serwer (`OLLAMA_CONTEXT_LENGTH`, domyślnie 4096 tokenów).
 """
 
 import base64
+import logging
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import httpx
 
-from app.config import Settings, get_settings
+from app.config import Settings
 from app.errors import LLMUnavailable
+
+log = logging.getLogger(__name__)
 
 UNAVAILABLE_DETAIL = "Model AI nie odpowiada. Spróbuj ponownie za chwilę."
 
@@ -61,17 +67,36 @@ def _typed(value: Any, kind: type) -> Any:
     return value if isinstance(value, kind) and not isinstance(value, bool) else None
 
 
+def _fixture_result(path: str) -> ChatResult:
+    started = time.perf_counter()
+    try:
+        content = Path(path).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        # Atrapa zastępuje model, więc jej brak to brak modelu (503). Przyczyna zostaje w logu.
+        log.error("LLM_FIXTURE: nie można odczytać pliku %s: %s", path, exc)
+        raise LLMUnavailable(detail=UNAVAILABLE_DETAIL) from exc
+    return ChatResult(
+        content=content,
+        reasoning="",
+        prompt_tokens=None,
+        completion_tokens=None,
+        finish_reason="stop",
+        elapsed_s=time.perf_counter() - started,
+    )
+
+
 def chat_json(
     messages: list[Message],
     schema: dict[str, Any],
     *,
+    settings: Settings,
     schema_name: str = "FormAnalysis",
     max_tokens: int = 4096,
-    settings: Settings | None = None,
     transport: httpx.BaseTransport | None = None,
 ) -> ChatResult:
     """Jedno zapytanie z odpowiedzią wymuszoną schematem. Treści nie waliduje: to robi wywołujący."""
-    settings = settings or get_settings()
+    if settings.llm_fixture:
+        return _fixture_result(settings.llm_fixture)
     body = build_request(messages, schema, model=settings.llm_model, schema_name=schema_name, max_tokens=max_tokens)
     url = settings.llm_base_url.rstrip("/") + "/chat/completions"
     headers = {"Authorization": f"Bearer {settings.llm_api_key}"}

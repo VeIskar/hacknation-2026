@@ -134,6 +134,27 @@ pypdf (Marcin, na prośbę Mikołaja do K2.3):
 
 - Bez dodatku `crypto`: zaszyfrowane PDF-y (AES) wymagają `cryptography` – decyzja przy K2.3, jeśli trafią się w materiałach.
 
+K3 (Mikołaj):
+
+- **K3 – ustawienia.** `analysis.analyze(doc, *, settings)` i `llm.chat_json(..., settings=...)` wymagają ustawień od wołającego. Żaden z nich nie czyta env, więc `dependency_overrides[get_settings]` obejmuje model i `LLM_FIXTURE` (uwaga R2 z recenzji K1).
+- **K3 – atrapa.** Przy `LLM_FIXTURE` `llm.py` zwraca treść pliku bez sieci. Dalej idą ta sama walidacja i budżet co dla modelu. Nieczytelny plik daje 503, a ścieżka trafia do logu.
+- **K3 – ponowienia.** Dwie próby (decyzja 2026-11-21: na CPU jedna próba to 240–344 s). Druga dostaje swoją odpowiedź i do 10 błędów walidatora z miejscem, np. `subject_pages[0]`. Ucięta odpowiedź (`finish_reason=length`) dostaje uwagę o długości. Gdy z poprzednią odpowiedzią ponowienie nie mieści się w kontekście, druga próba dostaje cały dokument i same błędy (recenzja Codexa, folder 9). Timeout i błąd sieci nie są ponawiane. Po drugiej złej odpowiedzi jest 503 (D4).
+- **K3 – budżet kontekstu.** Szacunek: 2,5 znaku na token (K1 zmierzyło 3,6), 2500 tokenów na obraz strony, 4096 na odpowiedź, kontekst 16384. Budżet jest sprawdzany przed każdą próbą. Za długiego zapytania nie wysyłamy: 503 i ostrzeżenie w logu, bez przycinania i bez częściowej analizy (decyzja 2026-11-21).
+- **K3 – przycięcie przez serwer.** Serwer z mniejszym kontekstem (domyślnie 4096) przycina prompt bez błędu. Dlatego `prompt_tokens` z odpowiedzi poniżej liczby znaków / 5 daje 503 (zmierzone: K1 3,6, K3 3,5 znaku na token). Wykrywa utratę ponad ok. 30% promptu. Bez `usage` w odpowiedzi kontrola jest pomijana (recenzja K3). Cache prefiksu nie zaniża licznika: w K1 trzy identyczne zapytania z rzędu dały po 2034 `prompt_tokens` (Ollama 0.40.15).
+- **K3 – odczyt odpowiedzi.** `json.loads`, potem `FormAnalysis.model_validate`. Parser Pydantic (`model_validate_json`) odrzuca samotny surogat, zanim `models.py` zamieni go na U+FFFD (P1.2a). Błąd składni nadal opisuje Pydantic.
+- **K3 – tekst dla modelu.** 4 i więcej kropek, podkreśleń lub wielokropków zamieniamy na „…”, scalamy spacje, usuwamy puste linie, dodajemy nagłówki stron. Litery i cyfry zostają wszystkie i w tej samej kolejności (test). Obrazy stron idą do modelu tylko bez tekstu (K1: skan wolniejszy i gorszy). Dokument bez tekstu i obrazów daje `ExtractionError` (400) bez zapytania.
+- **K3 – prompt.** Zasady z SZABLONY rozdz. 6, kontrakt `applicant` i schemat `FormAnalysis` bez adnotacji `title` z Pydantic (opisy pól to instrukcje dla modelu). Zasada mentora: każdy element JSON-a ma podstawę w tekście formularza, a przy braku informacji jest `false` albo pusta lista. Kontraktu nie rozszerzamy. Test D5 sprawdza prompt tak samo jak schemat.
+- **K3 – pomiar.** `qwen3.5:4b`, `ollama/ollama:0.40.15`, sam CPU (limit 6 GB), DOCX nadpłaty z folderu 5, tekst przez `docx_text` z `bench_model.py` (zastępstwo K2), jeden przebieg 2026-11-21. Próba 1: 2765 tokenów promptu (szacunek 3908), 1167 odpowiedzi, 584 s, 1 błąd walidatora. Próba 2 z błędem: 4022 i 1185 tokenów, 537 s, poprawny `FormAnalysis`. Razem 1121 s. Tytuł, adresat, `applicants` i `signature` zgodne z `fields.json`.
+  Jakość: model powtórzył dane wnioskodawcy w `subject_pages` i rozbił wybór rozliczenia na dwa RADIO. Dodał też oświadczenie, pole „Inne dokumenty” i REGON, których nie ma w tekście papieru. `contact: []` i `proxy: false` zgadzają się z papierem, a `fields.json` opisuje wzorzec COI. Wniosek: zasada podstawy w treści w samym prompcie nie wystarcza modelowi 4B (Requests). Pomiar przeszedł przed dwiema poprawkami promptu z recenzji (`false` tylko w `applicant`, domyślny podpis). Wynik leży poza repozytorium.
+
+K2.2 (Mikołaj): Tesseract CLI i dane językowe `pol` (Apache-2.0) do lokalnego OCR skanów JPG/PNG.
+Stdin i stdout pozwalają odczytać obraz bez tworzenia pliku tymczasowego.
+
+K2.3 (Mikołaj): `pypdf` 7.1.1 (BSD-3-Clause, bez wymaganych zależności) czyta warstwę tekstową PDF
+z bajtów w pamięci. Odczyt K2 zostaje lokalny i deterministyczny: COI dopuściło Eden AI, ale K2 nie
+używa zewnętrznego OCR ani kluczy API (decyzja lidera). Strona bez tekstu zostaje pusta między
+separatorami `\f` i trafia do `warnings`; jej OCR to osobny krok.
+
 ## Event: whole project
 
 - **D7 – odpowiedzialność.** Lider rozstrzyga kontrakty, zakres i integrację. `SPEC.md` określa kontrakty, `DECISIONS.md` zapisuje decyzje, `DELEGACJA.md` wyznacza wykonawców, a `PROGRESS*.md` rejestruje postęp i wyniki bramek.
