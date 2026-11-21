@@ -133,6 +133,13 @@ Krok K2.3 (Mikołaj): odczyt warstwy tekstowej PDF przez `pypdf`, bez OCR.
 - Zależność `pypdf==7.1.1` (BSD-3-Clause): wpis w `DECISIONS.md`, a linia w `requirements.txt` to Request do Marcina.
 - Dowód: RED/GREEN każdego testu i `bash scripts/gate.sh api -rs`.
 
+Krok M1.4 (Marcin): sklejenie `POST /api/forms` (DELEGACJA M1.4; K2 z K2.3 i K3 są na `main`).
+- `backend/app/main.py`: `process_file` = `extract` → `analyze` → `build_form` → `lint.check`, w wątku
+  (`run_in_threadpool`), bo `analyze` trwa minuty i blokowałby `/health`. Błędy lintera → 500 + log (tymczasowo, pytanie do lidera).
+- `backend/tests/test_api.py`: prawdziwy łańcuch z `LLM_FIXTURE` (PDF i DOCX → JSON, linter 0 błędów), 400 z odczytu,
+  503 z analizy, 500 z lintera, `/health` odpowiada w trakcie analizy; testy warstwy uploadu i JWT podmieniają `process_file`.
+- Bez zmian: `LLM_TIMEOUT_S` i model (czekają na pomiar Qwen3.5-9B i decyzję lidera).
+
 ## Requests
 
 (one line per change you need from another area: who asks, what, why)
@@ -159,6 +166,8 @@ Krok K2.3 (Mikołaj): odczyt warstwy tekstowej PDF przez `pypdf`, bez OCR.
 - Mikołaj → lider (mentor, kontrakt P0): uzasadnienie pól w K3 jest tylko regułą promptu. Sprawdzalne uzasadnienie wymaga pola ze źródłem w `SubjectField`, np. cytatu z papieru. To zmiana kontraktu, więc decyzja lidera.
 - Mikołaj → lider (`DELEGACJA.md`, rozdz. 3, Q1): pomiar K3 pokazał elementy bez podstawy w papierze (oświadczenie, pole „Inne dokumenty”, REGON) i dane wnioskodawcy powtórzone w `subject_pages`. Proponuję zadanie: deterministyczna kontrola podstawy w treści po analizie, z ponowieniem jak przy błędzie walidatora, bez zmiany kontraktu. Do tego poprawa `fields.json`, bo jego `applicant` opisuje wzorzec COI zamiast papieru (Paweł).
 - Mikołaj → lider (`DELEGACJA.md`, rozdz. 3, Q1, szybkość): na CPU czas zależy od tokenów odpowiedzi (2–4,6 tokenu/s). Kolejno: (1) pierwsza próba bez błędu oszczędza ok. połowę czasu, więc w logu warto zapisywać miejsca błędów; (2) zwarty JSON bez wcięć, bo w K1 135 przejść linii to ok. 12% z 1088 tokenów; (3) GPU albo mniej obciążona maszyna, bo ten sam prompt trwał w K1 238–344 s; (4) porównanie 4B z mniejszym i większym modelem (zadanie c). Qwen 4B nie jest gotowy do demo: K3 dało wynik dopiero w 2. próbie po 1121 s, z polami bez podstawy w papierze.
+- Marcin → Mikołaj (`test_analysis.py`, K3): `test_deeply_nested_answer_is_a_validation_error_not_a_crash` pada na `main` od `cb3daaa` (także na `6b9b33c`). Przyczyna: Python 3.14 (venv i obraz `api`, M1.3) – `json.loads` nie rzuca już `RecursionError` (sprawdzone do 100 000 poziomów), więc `_validate` daje `model_type` zamiast „recursion limit exceeded”. Zachowanie bezpieczne (ponowienie, bez 500), różni się tylko tekst błędu. Bramka `main` czerwona do poprawki testu albo `_validate`.
+- Marcin → lider (`SPEC.md`, „API contract”): jaki kod, gdy wygenerowany JSON nie przechodzi lintera? M1.4 daje tymczasowo 500 „Coś poszło nie tak. Spróbuj ponownie.” z błędami w logu (błąd po naszej stronie, nie użytkownika).
 
 ## Log
 
@@ -197,3 +206,4 @@ Krok K2.3 (Mikołaj): odczyt warstwy tekstowej PDF przez `pypdf`, bez OCR.
 - K2.3 (`mikolaj/k2`, baza `2892e6a`): done warstwa tekstowa PDF przez `pypdf` 7.1.1: kolejność stron, separator `\f`, ostrzeżenie o stronach bez tekstu, każdy błąd odczytu jako 400, bez OCR. 13 nowych przypadków, każdy widziany na czerwono (RED albo mutacja kodu); fuzz 5877 uszkodzonych PDF-ów: 0 zawieszeń, wyjątki spoza `PyPdfError` potwierdzone; 9/9 PDF-ów COI ma tekst na każdej stronie, odczyt do 0,39 s. `gate.sh api -rs` → 261 passed, 0 pominiętych / next OCR stron PDF bez tekstu (wymaga decyzji o rendererze), obrazy w DOCX, XLSX, ODS, binarny DOC / blocker: `pypdf` w `requirements.txt` (Request do Marcina) i synchronizacja z `main`.
 - K2.3 recenzja (Codex, `--uncommitted`, kopia bez `.env` i materiałów): 3 ustalenia, 0 do poprawy w K2 (brak `pypdf` w `requirements.txt` rozwiązany na `main` przez PR #13; budżet zasobów i PDF z AES jako LATER w `REVIEW.md`). Własne sondy: 1 CONFIRMED – font PDF oddawał NUL, `\f` i niesparowany surogat jako tekst (fałszywy podział stron, tekst nie do zapisania w UTF-8); poprawione, test czerwony przed poprawką. `gate.sh api -rs` → 262 passed, 0 pominiętych / next commit lidera, potem scalenie `main` / blocker brak.
 - K2-merge: scalenie `main` `cb3daaa` (P2, JWT, K1, M1.3, M1.5, pypdf, K3) do `mikolaj/k2` po K2.3 `6bcbf75`; konflikty tylko w `DECISIONS.md` i `PROGRESS.api.md`, rozwiązane przez zachowanie wpisów obu stron; `gate.sh api -rs` → 616 passed, 0 pominiętych / next merge PR #12, potem pozostałe formaty K2 (XLSX, ODS, binarny DOC, OCR stron PDF i obrazów DOCX) / blocker brak.
+- M1.4: done `process_file` = `extract` → `analyze` → `build_form` → `lint.check` w `run_in_threadpool`; błędy lintera → 500 + log (tymczasowo); testy: PDF i DOCX z `LLM_FIXTURE` → JSON równy `build_form(fields.json)`, linter 0 błędów; PDF bez tekstu i XLSX (brak czytnika) → 400, brak atrapy → 503, JSON odrzucony przez linter → 500, `/health` odpowiada w trakcie analizy; testy uploadu i JWT z atrapą `process_file`; 4/4 mutacje wykryte; `gate.sh api -rs` → 622 passed, 1 failed (test K3 czerwony już na `main`, Request do Mikołaja) / next pomiar Qwen3.5-9B przez API i `LLM_TIMEOUT_S` (lider), DOC/XLSX/ODS w K2 / blocker: czerwona bramka `main` przez test K3.
