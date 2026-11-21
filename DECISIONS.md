@@ -52,6 +52,16 @@ M1.1 (Marcin):
 | ----------------------- | ----------------------------------------------------------- | ---------- |
 | python-multipart 0.0.34 | Starlette's multipart parser needs it for `POST /api/forms` | Apache-2.0 |
 
+M1.2 (Marcin):
+
+| What          | Why                                             | Licence |
+| ------------- | ----------------------------------------------- | ------- |
+| PyJWT 2.15.1  | JWT na `POST /api/forms` (Treść pkt 5, SPEC 401) | MIT     |
+
+- Tylko algorytmy HMAC (HS256/384/512) i wymagany `exp`: sekret jest wspólny, token nie żyje wiecznie.
+  Sekret ma co najmniej 32/48/64 bajty (RFC 7518, 3.2); krótszy albo inny algorytm to 500 i wpis w logu.
+- Token sprawdzamy przed odczytem pliku, więc bez tokenu serwer nie czyta treści żądania.
+
 - Plik tylko w pamięci: treść żądania czytamy sami do `MAX_FILE_SIZE_MB` + 64 KB (potem 413), a parser
   dostaje bufor większy niż żądanie, więc nie powstaje plik tymczasowy (Treść pkt 5).
 - `.jpe` przyjmujemy jako `jpg` (DELEGACJA rozdz. 2.2), bo folder 7 materiałów COI ma plik `.JPE`.
