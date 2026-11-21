@@ -24,6 +24,21 @@ ODS = _zip(
         "content.xml": b"<office:document-content/>",
     }
 )
+
+
+def _broken_ods() -> bytes:
+    """ODS, którego skompresowany wpis mimetype ma uszkodzone dane (zlib.error przy odczycie)."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("mimetype", b"application/vnd.oasis.opendocument.spreadsheet" * 4)
+    raw = bytearray(buffer.getvalue())
+    start = 30 + len("mimetype")  # dane zaraz za nagłówkiem lokalnym wpisu
+    for i in range(start, start + 10):
+        raw[i] ^= 0xFF
+    return bytes(raw)
+
+
+BROKEN_ODS = _broken_ods()
 ODT = _zip({"mimetype": b"application/vnd.oasis.opendocument.text", "content.xml": b"<x/>"})
 PLAIN_ZIP = _zip({"readme.txt": b"to nie jest dokument"})
 

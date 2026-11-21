@@ -1,7 +1,19 @@
 from pathlib import Path
 
 import pytest
-from samples import DOC, DOCX, JPG, ODS, ODT, PDF, PLAIN_ZIP, PNG, VALID, XLSX
+from samples import (
+    BROKEN_ODS,
+    DOC,
+    DOCX,
+    JPG,
+    ODS,
+    ODT,
+    PDF,
+    PLAIN_ZIP,
+    PNG,
+    VALID,
+    XLSX,
+)
 
 from app.errors import UploadError
 from app.files import MSG_NAME, MSG_TYPE, validate_upload
@@ -82,6 +94,7 @@ def test_unsupported_type(filename: str) -> None:
         ("fałszywy.xlsx", b"PK\x03\x04 uszkodzony zip"),
         ("fałszywy.ods", ODT),
         ("fałszywy.ods", XLSX),
+        ("uszkodzony.ods", BROKEN_ODS),
         ("fałszywy.docx", DOC),
     ],
 )

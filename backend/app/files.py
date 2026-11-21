@@ -7,6 +7,7 @@ Komunikaty błędów: SPEC.md, rozdz. „API contract”.
 
 import io
 import zipfile
+import zlib
 from collections.abc import AsyncIterator
 
 from starlette.datastructures import UploadFile
@@ -50,7 +51,7 @@ def _is_ods(data: bytes) -> bool:
     try:
         with opened[0].open("mimetype") as entry:
             return entry.read(len(ODS_MIMETYPE) + 1).strip() == ODS_MIMETYPE
-    except (zipfile.BadZipFile, OSError, RuntimeError):
+    except (zipfile.BadZipFile, zlib.error, EOFError, OSError, RuntimeError):
         return False
 
 
@@ -138,8 +139,8 @@ async def read_single_file(request: Request, max_bytes: int) -> tuple[str, bytes
         raise UploadError(detail=MSG_NO_FILE, status_code=400) from exc
     try:
         upload = form.get("file")
-        if not isinstance(upload, UploadFile):
+        if not isinstance(upload, UploadFile) or not upload.filename:
             raise UploadError(detail=MSG_NO_FILE, status_code=400)
-        return upload.filename or "", await upload.read()
+        return upload.filename, await upload.read()
     finally:
         await form.close()

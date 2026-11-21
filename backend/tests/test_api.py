@@ -65,6 +65,18 @@ def test_missing_file_is_400(client: TestClient) -> None:
     assert (response.status_code, response.json()) == (400, {"detail": MSG_NO_FILE})
 
 
+def test_empty_file_part_is_400_no_file(client: TestClient) -> None:
+    """Formularz HTML bez wybranego pliku wysyła część z filename="" i pustą treścią."""
+    body = (
+        b'--b\r\nContent-Disposition: form-data; name="file"; filename=""\r\n'
+        b"Content-Type: application/octet-stream\r\n\r\n\r\n--b--\r\n"
+    )
+    response = client.post(
+        "/api/forms", content=body, headers={"content-type": "multipart/form-data; boundary=b"}
+    )
+    assert (response.status_code, response.json()) == (400, {"detail": MSG_NO_FILE})
+
+
 def test_not_multipart_is_400(client: TestClient) -> None:
     response = client.post("/api/forms", content=PDF, headers={"content-type": "application/pdf"})
     assert (response.status_code, response.json()) == (400, {"detail": MSG_NO_FILE})
