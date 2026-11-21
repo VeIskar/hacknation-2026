@@ -3,6 +3,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from compose import environment, interpolation
 from fastapi.testclient import TestClient
 
 from app.config import Settings, get_settings
@@ -54,24 +55,15 @@ def _env_example_names() -> set[str]:
 
 
 def _compose_api_environment() -> set[str]:
-    """Nazwy z listy `environment:` serwisu `api` (bez parsera YAML, który nie jest zależnością)."""
-    lines = (ROOT / "docker-compose.yml").read_text(encoding="utf-8").splitlines()
-    start = lines.index("  api:")
-    names: set[str] = set()
-    in_env = False
-    for line in lines[start + 1 :]:
-        if re.match(r"^  \S", line):  # następny serwis
-            break
-        if re.match(r"^    \S", line):
-            in_env = line.strip() == "environment:"
-            continue
-        # Forma `NAZWA: ${NAZWA:-}`: wartość z powłoki albo .env, a gdy brak, pusta (domyślna).
-        # Wyjątki z wartością domyślną compose: COMPOSE_DEFAULTS.
-        match = re.match(r"^      ([A-Z][A-Z0-9_]*): \$\{([A-Z][A-Z0-9_]*):-([^}]*)\}\s*$", line)
-        if match and match.group(3) != COMPOSE_DEFAULTS.get(match.group(1), ""):
-            continue
-        if in_env and match and match.group(1) == match.group(2):
-            names.add(match.group(1))
+    """Zmienne `api`, które compose bierze z powłoki albo .env: `NAZWA: ${NAZWA:-}`.
+
+    Pusta domyślna daje domyślną wartość z config.py. Wyjątki z inną domyślną: COMPOSE_DEFAULTS.
+    """
+    names = set()
+    for key, value in environment("api").items():
+        parsed = interpolation(value)
+        if parsed == (key, COMPOSE_DEFAULTS.get(key, "")):
+            names.add(key)
     return names
 
 
