@@ -49,8 +49,8 @@ papierowego wniosku na eUsługę to kilka dni analizy i konfiguracji.
 
 ## Later (only if every Must is green)
 
-JWT na API (parametry z pkt 5) · nowy słownik (rozszerzenie II) · wiele plików naraz w UI ·
-strony alternatywne (przepływ nieliniowy).
+Nowy słownik (rozszerzenie II) · wiele plików naraz w UI · strony alternatywne (przepływ
+nieliniowy).
 
 ## Out (said out loud, so nobody builds it)
 
@@ -59,7 +59,7 @@ wypełnionego formularza i integracja z systemem docelowym · wersja w Javie · 
 
 ## API contract
 
-`GET /health` → 200 `{"status": "ok"}` (już jest).
+`GET /health` → 200 `{"status": "ok"}` (już jest). Działa bez tokenu, także przy `JWT_ENABLED=true`.
 
 `POST /api/forms`: `multipart/form-data`, jedno pole `file`.
 
@@ -67,7 +67,12 @@ wypełnionego formularza i integracja z systemem docelowym · wersja w Javie · 
 curl -F "file=@Wniosek o wydanie zaświadczenia.pdf" http://localhost:8000/api/forms
 ```
 
+JWT (Treść pkt 5): przy `JWT_ENABLED=true` żądanie ma nagłówek `Authorization: Bearer <JWT_TOKEN>`.
+Token podpisuje `JWT_SECRET` algorytmem `JWT_ALGORITHM`. Przy `JWT_ENABLED=false` nagłówek nie jest wymagany.
+
 - 200: ciało to sam JSON formularza (Field contract), bez opakowania.
+- 401 `{"detail": "Brak tokenu dostępu albo token jest nieważny."}`, gdy `JWT_ENABLED=true`
+  i nagłówka brak albo token jest zły lub wygasł. Sprawdzany przed plikiem.
 - 400 `{"detail": "Nazwa pliku jest za długa albo ma niedozwolone znaki."}`, bez pliku w żądaniu
   `{"detail": "Wybierz plik formularza."}`, a gdy treści nie da się odczytać
   `{"detail": "Nie udało się odczytać treści pliku."}`
