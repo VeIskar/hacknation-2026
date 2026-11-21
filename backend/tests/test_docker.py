@@ -5,9 +5,20 @@ Budowę i uruchomienie sprawdza się ręcznie: `docker compose build api`, `whoa
 """
 
 import re
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
+from compose import (
+    COMPOSE,
+    ROOT,
+    as_list,
+    build_context,
+    environment,
+    interpolation,
+    security_opts,
+    service,
+    tmpfs_paths,
+    volume_mounts,
+)
+
 DOCKERFILE = (ROOT / "backend" / "Dockerfile").read_text(encoding="utf-8")
 
 
@@ -18,16 +29,15 @@ def _instructions(name: str) -> list[str]:
     return [line.split(None, 1)[1] for line in lines if line.upper().startswith(name + " ")]
 
 
-def _compose_api_block() -> list[str]:
-    """Linie serwisu `api` z docker-compose.yml (bez parsera YAML, który nie jest zależnością)."""
-    lines = (ROOT / "docker-compose.yml").read_text(encoding="utf-8").splitlines()
-    start = lines.index("  api:")
-    block = []
-    for line in lines[start + 1 :]:
-        if re.match(r"^  \S", line):  # następny serwis
-            break
-        block.append(line)
-    return block
+def _assert_locked_down(name: str) -> None:
+    """Treść pkt 5: bez uprawnień roota i bez zapisu poza /tmp w pamięci (i wolumenami)."""
+    svc = service(name)
+    assert svc.get("read_only") is True, f"{name}: read_only"
+    assert "/tmp" in tmpfs_paths(name), f"{name}: /tmp w tmpfs"
+    assert "ALL" in as_list(svc.get("cap_drop")), f"{name}: cap_drop ALL"
+    assert "no-new-privileges" in security_opts(name), f"{name}: no-new-privileges"
+    assert not svc.get("privileged"), f"{name}: privileged"
+    assert "user" not in svc, f"{name}: user nadpisuje USER z Dockerfile"
 
 
 def test_base_image_is_python_314_with_explicit_patch_version() -> None:
@@ -66,9 +76,46 @@ def test_ocr_with_polish_data_is_installed() -> None:
 
 
 def test_compose_api_has_no_persistent_writes_and_no_privileges() -> None:
-    block = "\n".join(_compose_api_block())
-    assert re.search(r"^    read_only: true$", block, flags=re.MULTILINE)
-    assert re.search(r"^    tmpfs:\n      - /tmp$", block, flags=re.MULTILINE)
-    assert re.search(r"^    cap_drop:\n      - ALL$", block, flags=re.MULTILINE)
-    assert "no-new-privileges:true" in block
-    assert not re.search(r"^    (volumes|privileged|user):", block, flags=re.MULTILINE)
+    _assert_locked_down("api")
+    assert not service("api").get("volumes"), "api: bez wolumenów (pliki tylko w pamięci)"
+
+
+# M1.5: model w compose.
+OLLAMA_DOCKERFILE = (ROOT / "ollama" / "Dockerfile").read_text(encoding="utf-8")
+
+
+def test_ollama_image_is_pinned_and_runs_without_root() -> None:
+    (image,) = re.findall(r"^FROM (\S+)", OLLAMA_DOCKERFILE, flags=re.MULTILINE)
+    assert re.fullmatch(r"(docker\.io/)?ollama/ollama:\d+\.\d+\.\d+", image), image
+    users = re.findall(r"^USER (\d+):(\d+)$", OLLAMA_DOCKERFILE, flags=re.MULTILINE)
+    assert users and all(int(n) > 0 for n in users[-1]), users
+    assert f"--uid {users[-1][0]}" in OLLAMA_DOCKERFILE
+
+
+def test_ollama_keeps_models_in_volume_and_is_not_published() -> None:
+    assert build_context("ollama") == "ollama"
+    assert volume_mounts("ollama") == {"/home/ollama/.ollama": "ollama-models"}
+    assert "ollama-models" in (COMPOSE.get("volumes") or {}), "wolumen nazwany, nie katalog hosta"
+    assert "OLLAMA_MODELS=/home/ollama/.ollama/models" in OLLAMA_DOCKERFILE
+    assert not service("ollama").get("ports"), "model tylko w sieci compose"
+
+
+def test_ollama_context_fits_prompt_and_answer() -> None:
+    """K1: prompt i odpowiedź to do ok. 4100 tokenów, a domyślny kontekst ma 4096."""
+    parsed = interpolation(environment("ollama")["OLLAMA_CONTEXT_LENGTH"])
+    assert parsed and parsed[0] == "OLLAMA_CONTEXT_LENGTH" and int(parsed[1]) >= 16384, parsed
+
+
+def test_ollama_has_no_root_privileges_or_persistent_writes_outside_volume() -> None:
+    _assert_locked_down("ollama")
+
+
+def test_ollama_cloud_is_off() -> None:
+    assert environment("ollama")["OLLAMA_NO_CLOUD"].lower() in {"1", "true"}
+
+
+def test_api_talks_to_ollama_service_by_default() -> None:
+    assert interpolation(environment("api")["LLM_BASE_URL"]) == (
+        "LLM_BASE_URL",
+        "http://ollama:11434/v1",
+    )

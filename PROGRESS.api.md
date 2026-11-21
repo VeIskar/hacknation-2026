@@ -2,7 +2,9 @@
 
 ## State
 
-(rewritten by /hn-stan before sleep, at a usage limit, before switching agents)
+2026-11-21 19:00 · M1.5 gotowe do commita na `marcin/m1.5` (worktree `.claude/worktrees/m1.5`, baza `marcin/m1.3`,
+już na `main` jako #9). Przed PR: scalić `origin/main` (konflikty w `PROGRESS.api.md`, `DECISIONS.md`).
+Next: M1.4 (czeka na K2/K3; można zacząć z zaślepkami), `LLM_TIMEOUT_S` (prośba Mikołaja), M1.6 README.
 
 ## Plan
 
@@ -96,6 +98,14 @@ Krok M1.3 (Marcin): obraz `api` zgodny z Treść pkt 5 (bez roota, jawne wersje,
 - Dowód: `test_docker.py` (statycznie: wersja obrazu, USER, port, compose); `docker compose build api`,
   `whoami` → `app`, `tesseract --list-langs` ma `pol`, `/health` 200, zapis poza `/tmp` odrzucony.
 
+Krok M1.5 (Marcin): model w compose (DELEGACJA M1.5, ustalenia K1 w DECISIONS).
+- `ollama/Dockerfile`: `ollama/ollama:0.40.15` (wersja z K1), użytkownik `ollama` (10002) bez roota.
+- `docker-compose.yml`: serwis `ollama` bez portu na hoście, wolumen `ollama-models`, `OLLAMA_CONTEXT_LENGTH=16384`,
+  `OLLAMA_KEEP_ALIVE`; `api` dostaje domyślnie `LLM_BASE_URL=http://ollama:11434/v1`.
+- `scripts/pull_model.sh`: uruchamia `ollama` i pobiera `LLM_MODEL` (domyślnie `qwen3.5:4b`) do wolumenu.
+- `backend/tests/test_config.py`, `test_docker.py`: domyślna wartość w compose, serwis `ollama` (statycznie).
+- Dowód: `pull_model.sh`, z kontenera `api` zapytanie `/v1/chat/completions` do `ollama` → odpowiedź modelu.
+
 ## Requests
 
 (one line per change you need from another area: who asks, what, why)
@@ -137,3 +147,7 @@ Krok M1.3 (Marcin): obraz `api` zgodny z Treść pkt 5 (bez roota, jawne wersje,
 - P1.3a: done walidatory z etykiet w obu ścieżkach analizy, 16 czerwonych przypadków przed zmianą, 17/17 mutacji wykrytych, 5 fixture’ów identycznych z `origin/main`, pełna macierz 2 976 kombinacji (1,71 s), `bash scripts/gate.sh api -rs` → `516 passed`, 0 pominiętych, 1 ostrzeżenie Starlette, `GATE: PASS (api)` / next commit człowieka / blocker brak.
 - P1.3a po recenzji: done etykieta złożona bez walidatora typu, 13 błędów odtworzonych przed zmianą i po wyłączeniu reguły, 5 fixture’ów identycznych z `origin/main`, `bash scripts/gate.sh api -rs` → `538 passed`, 0 pominiętych, 1 ostrzeżenie Starlette, `GATE: PASS (api)` / next commit człowieka / blocker brak.
 - M1.3 (api): done obraz `python:3.14.10-slim-trixie`, tesseract 5.5.0 + `pol`, użytkownik `app` (10001), compose `read_only`/`tmpfs /tmp`/`cap_drop ALL`/`no-new-privileges`; `docker compose build api` OK, `whoami` → `app`, `/health` 200, PDF → 200, fałszywy PDF → 415, JWT 401/200 w kontenerze, zapis poza `/tmp` odrzucony; `test_docker.py` 7/7 mutacji wykrytych; `gate.sh` → 403 passed / next web: nginx bez roota na 8080 (Request), M1.4 / blocker: licencje LGPL bibliotek tesseracta – decyzja lidera/mentora (DECISIONS M1.3).
+- M1.5: done `ollama/Dockerfile` (0.40.15, UID 10002), serwis `ollama` bez portu na hoście, wolumen `ollama-models`, `read_only`/`cap_drop ALL`, `OLLAMA_CONTEXT_LENGTH=16384`, `OLLAMA_KEEP_ALIVE=24h`, `OLLAMA_NO_CLOUD=1` (prośba Mikołaja), `name: hacknation-2026` w compose (ten sam wolumen w każdym katalogu), `LLM_BASE_URL` domyślnie `http://ollama:11434/v1`, `scripts/pull_model.sh`; ręcznie: `id` → 10002, zapis poza wolumenem odrzucony, `pull_model.sh` → `qwen3.5:4b` 3,3 GB, z kontenera `api` `/v1/chat/completions` → poprawny JSON w 10,5 s, 0 znaków myślenia, `ollama ps` 16384 / 100% CPU; `gate.sh` → 409 passed / next merge `origin/main`, M1.4 / blocker: kryterium „curl na plik z folderu 3 → JSON < 2 min” dopiero po M1.4 (K2, K3).
+- M1.5 recenzja (subagent `reviewer`, werdykt FIX): 1 CONFIRMED – `env.example` miał `LLM_BASE_URL=http://localhost:11434/v1`, więc `cp env.example .env` kierował `api` w compose na samego siebie (503); teraz pusty, test `test_env_example_does_not_override_compose_defaults` czerwony przed poprawką; 6 LATER (REVIEW.md): `LLM_TIMEOUT_S` 120 < 238–344 s na CPU → z M1.4, skutki `name:`, `depends_on`, sieć tylko api–ollama, komentarz w `.env` w `pull_model.sh`, kruchy `_compose_block` / next commit M1.5, merge `origin/main` / blocker brak.
+- M1.5 testy compose: done regexy po wcięciach zastąpione parserem YAML (`backend/tests/compose.py`, PyYAML 6.0.4, MIT, wpis w DECISIONS) w `test_docker.py` i `test_config.py`; 5 równoważnych zapisów compose przechodzi (tmpfs skalarnie i z opcjami, `no-new-privileges` bez `:true`, komentarze w serwisie, cały plik z wcięciem 4 i posortowanymi kluczami), 8 regresji wykrytych; `gate.sh` → 410 passed / next commit M1.5 / blocker brak.
+- M1.5 recenzja testów compose (`c62614a`, subagent `reviewer`, werdykt SHIP): 0 CONFIRMED, 5 LATER (REVIEW.md): PyYAML w obrazie produkcyjnym (jak pytest/ruff; `requirements-dev.txt` – lider), `safe_load` przy imporcie, anonimowe wolumeny i `- FOO` w `environment` w normalizatorach, `read_only is True` / next merge `origin/main`, PR M1.5 / blocker brak.

@@ -3,6 +3,9 @@
 # Every variable in env.example is listed under api.environment as ${NAME:-}: an unset one
 # arrives empty and keeps its default from backend/app/config.py. The explicit form works in
 # both Docker Compose and podman-compose (backend/tests/test_config.py checks the list).
+# LLM_BASE_URL defaults to the `ollama` service. Download the model once: scripts/pull_model.sh
+# Stała nazwa projektu: wolumen z modelem jest ten sam w każdym katalogu (klon, worktree).
+name: hacknation-2026
 services:
   api:
     build: ./backend
@@ -21,7 +24,7 @@ services:
       JWT_ENABLED: ${JWT_ENABLED:-}
       JWT_SECRET: ${JWT_SECRET:-}
       JWT_ALGORITHM: ${JWT_ALGORITHM:-}
-      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-http://ollama:11434/v1}
       LLM_MODEL: ${LLM_MODEL:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_TIMEOUT_S: ${LLM_TIMEOUT_S:-}
@@ -47,3 +50,31 @@ services:
     depends_on:
       api:
         condition: service_healthy
+
+  # Model lokalny (SPEC „Model”). Bez portu na hoście: woła go tylko `api` w sieci compose.
+  ollama:
+    build: ./ollama
+    volumes:
+      - ollama-models:/home/ollama/.ollama
+    environment:
+      # K1: /v1 nie ustawia num_ctx, a domyślne 4096 tokenów nie mieści promptu z odpowiedzią.
+      OLLAMA_CONTEXT_LENGTH: ${OLLAMA_CONTEXT_LENGTH:-16384}
+      # Model zostaje w pamięci, więc demo nie czeka na ponowne ładowanie.
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-24h}
+      # Bez modeli i usług w chmurze Ollamy (Treść pkt 5: zakaz zewnętrznych API; prośba Mikołaja).
+      OLLAMA_NO_CLOUD: "1"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  ollama-models:
