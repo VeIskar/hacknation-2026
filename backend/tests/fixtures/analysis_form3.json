@@ -1,0 +1,56 @@
+{
+  "title": "Wniosek o wydanie zaświadczenia",
+  "addressee": {"type": "URZAD", "name": "Urząd Miasta i Gminy Młynary"},
+  "applicants": "PERSON",
+  "applicant": {
+    "proxy": false,
+    "applicant_pesel": true,
+    "person_address": true,
+    "entity_ids": [],
+    "entity_ids_one_of": false,
+    "entity_address": false,
+    "representative_proof": false,
+    "correspondence_address": false,
+    "contact": ["PHONE"],
+    "applicant_extra_fields": []
+  },
+  "signature": true,
+  "subject_pages": [
+    {
+      "title": "Zaświadczenie",
+      "sections": [
+        {
+          "title": "Informacje o zaświadczeniu",
+          "fields": [
+            {
+              "label": "Temat zaświadczenia",
+              "type": "CHECKBOX",
+              "required": true,
+              "options": [
+                "Ilość posiadanych użytków rolnych w hektarach fizycznych i przeliczeniowych",
+                "Ilość dzierżawionych użytków rolnych w hektarach fizycznych i przeliczeniowych",
+                "Okres posiadania gospodarstwa rolnego",
+                "Nieposiadanie użytków rolnych lub gospodarstwa rolnego na terenie Gminy Młynary",
+                "Inny temat"
+              ]
+            },
+            {
+              "label": "Podaj inny temat zaświadczenia",
+              "type": "TEXTAREA",
+              "required": true,
+              "show_if": {"field": "Temat zaświadczenia", "equals": "Inny temat"}
+            },
+            {"label": "Gdzie przedłożysz zaświadczenie?", "type": "TEXT_FIELD", "required": true},
+            {
+              "label": "Opłata za zaświadczenie",
+              "type": "TEXT_BLOCK",
+              "required": false,
+              "description": "Opłata za wydanie zaświadczenia wynosi 17 zł od każdego egzemplarza. Wnieś ją w kasie urzędu lub przelewem przed złożeniem wniosku."
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "statements": []
+}

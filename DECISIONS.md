@@ -49,6 +49,12 @@ Decyzje lidera po recenzji P0 (2026-11-21). Kod: `backend/app/errors.py`, `backe
 
 - **P2 – linter** (`backend/app/lint.py`). Kontrolujemy `repeatingSectionGrid` zgodnie z eksportami COI, dopuszczamy dodatkowe klucze, `defaultValue` jako tekst lub tablicę, pusty `validation: {}`, brak `states` i `options[].techName` oraz `TEXT_BLOCK` obok `INFO_SECTION` na `FINISH` (Reguły, ak. 12, wymieniają wyłącznie `INFO_SECTION`). Opis importu, ak. 71, określa `validation` jako „tablica stringów przyjmująca nazwy predefiniowanych walidacji”. Przyjmujemy dziewięć nazw z Reguł, pola informacyjne mają pustą konfigurację walidatorów. Opis importu, ak. 96–98, i schemat, w. 109–111, umieszczają `required` w `consentSectionConfig`. Reguły, ak. 575–582, i oba wzorce umieszczają flagę przy każdej zgodzie, więc tam jest wymagana. Na poziomie konfiguracji sprawdzamy jej typ, gdy występuje. `techName` sekcji i pól są unikalne w formularzu. Różne pola mogą używać tych samych identyfikatorów i nazw technicznych opcji. JSONata dopasowuje literał do `id` lub `name` opcji, a pole słownikowe pomija kontrolę wartości. Sprawdzamy osiągalność stron od pierwszej i drogę z każdej `MAIN` do `FINISH`. Odwołanie JSONata musi wskazywać pole wyboru, siatka wymaga `x/y/rows/cols`, strona wymaga niepustych `id` i `title`, pole niepustych `id` i `type`, link niepustego `id`, a lista `consents` co najmniej jednej zgody, przy czym `id` stron, pól (w tym sekcji) i linków należą do jednej przestrzeni, a typy sprawdzamy przez `isinstance` z wyłączeniem `bool` jako liczby.
 
+- **P1.2a – kontrakt.** `FormAnalysis` wymaga jawnych `applicants` i `applicant: ApplicantData`. Decyzje MVP mają przesłanki w papierze i są niezależne od ekstraktora. Dane spoza szablonu trafiają do `applicant_extra_fields`, a reguły D4 dla `show_if` obowiązują także w tej liście. Tekst analizy naprawia samotne surogaty do U+FFFD przed walidacją. Dobór sekcji należy do P1.2b, detektor do P1.2c, a tryby rozszerzone do P1.3. Test D5 pomija dokładne słowo »regon« – nazwa walidatora z Reguł i wartość kontraktu, nie tekst z folderu 1.
+
+- **P1.2b – generator.** `FormAnalysis.applicant` wyznacza sekcje wnioskodawcy, korespondencję, pola dodatkowe i kontakt, a S2 wyświetla tylko faktyczne wybory, co zastępuje GD2 z radiem o jednej opcji dla ENTITY.
+
+- **P1.3a.** Pola `TEXT_FIELD` z analizy dostają walidator typu po `REQUIRED`, jeśli etykieta po NFC, casefold i usunięciu polskich znaków pasuje do dokładnie jednej kategorii na granicach słów (PESEL, NIP, REGON, ZIP_CODE, EMAIL, SERIAL_NUMBER_ID_CARD, EPUAP, ADE). Etykieta złożona → bez walidatora typu, jeśli po usunięciu dopasowanej frazy pozostaje separator, spójnik lub słowo innej danej. Dobór odbywa się bez modelu, a `ADD_VALIDATORS = False` czyści wszystkie walidatory.
+
 M1.1 (Marcin):
 
 | What                    | Why                                                         | Licence    |
@@ -74,6 +80,20 @@ M1.2 (Marcin):
   API z nazwą zmiennej, zamiast dawać 413 lub 500 przy każdym pliku. Compose przekazuje każdą
   zmienną z `env.example` jako `${NAZWA:-}`: ta forma działa też w podman-compose.
 - ODS: wpis `mimetype` musi być dokładnie równy typowi (bez końca linii i dopisków), jak w ODF 1.2.
+
+K1 (Mikołaj):
+
+| What                                  | Why                                                                 | Licence      |
+| ------------------------------------- | ------------------------------------------------------------------- | ------------ |
+| httpx 0.28.1 (już w `requirements.txt`) | teraz też w runtime: klient modelu w `llm.py`, atrapa transportu w testach | BSD-3-Clause |
+
+- **K1 – myślenie.** Na `/v1/chat/completions` Ollama ignoruje `think: false`: 641 znaków myślenia i 250 tokenów, jak bez flagi. `reasoning_effort: "none"` daje 0 znaków i 3 tokeny. `llm.py` wysyła tylko `reasoning_effort` (zmierzone 2026-11-21, Ollama 0.40.15).
+- **K1 – kontekst.** `/v1` nie ustawia `num_ctx`, a serwer domyślnie ma 4096 tokenów. Nadpłata z DOCX to 2034 tokeny promptu i 1088 odpowiedzi, skan JPG 3437 i 690. Serwer dostaje `OLLAMA_CONTEXT_LENGTH=16384`.
+- **K1 – pomiar.** Warunki: `qwen3.5:4b` Q4_K_M, `ollama/ollama:0.40.15` w Dockerze, sam CPU (Core Ultra 7 255U, limit 6 GB), temperature 0, folder 5. Wyniki:
+  DOCX, 3 przebiegi: JSON poprawny 3/3, `FormAnalysis.model_validate` 0/3, czas 238–344 s (mediana 318 s), odpowiedzi identyczne. Jedyny błąd: RADIO z `show_if` na samo siebie. Zgodność etykiet z `fields.json`: recall 0,43, precision 0,30, typy dopasowanych pól 100%, adresat i wnioskodawcy poprawni. Model dodał PESEL i NIP, a resztę pól nazwał innymi słowami.
+  JPG, 1 przebieg: JSON poprawny, walidacja nie (2 × `show_if` na nieistniejące pole), 575 s, recall 0,29, precision 0,22.
+  Pierwsze zapytanie po starcie serwera trwa 16,7 s, krótkie zapytanie po rozgrzaniu 3,2 s. Bielika nie mierzyliśmy (decyzja lidera, mało pamięci).
+- **K1 – wniosek.** Qwen3.5-4B zostaje: daje poprawny JSON, myślenie da się wyłączyć. Kryterium „< 60 s na CPU” jest niespełnione, więc `LLM_TIMEOUT_S=120` na takim laptopie to zawsze 503. Skan przez model był wolniejszy i gorszy niż tekst (jeden przebieg). Zalecenie dla K2: skany przez OCR, obraz w modelu tylko jako zapas. Surowe odpowiedzi i raporty leżą tylko w `materialy/bench-k1/`, poza gitem.
 
 M1.3 (Marcin):
 
