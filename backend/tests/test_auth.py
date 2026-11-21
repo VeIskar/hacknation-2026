@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from samples import PDF, PNG
 
+from app import main as main_module
 from app.auth import MSG_UNAUTHORIZED, AuthError, create_token, main, verify_token
 from app.config import Settings, get_settings
 from app.main import MSG_SERVER_ERROR, app
@@ -25,6 +26,12 @@ def use(settings: Settings) -> TestClient:
 @pytest.fixture
 def client() -> TestClient:
     return use(ON)
+
+
+@pytest.fixture(autouse=True)
+def _no_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Testy JWT dotyczą wejścia do trasy, nie analizy: łańcuch M1.4 zastępuje atrapa."""
+    monkeypatch.setattr(main_module, "process_file", lambda *_: {"title": "Atrapa", "tabs": [], "flow": {"links": []}})
 
 
 @pytest.fixture(autouse=True)

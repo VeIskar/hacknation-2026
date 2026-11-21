@@ -6,11 +6,16 @@ from typing import Annotated, Any
 from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 
+from app import lint
+from app.analysis import analyze
 from app.auth import AuthError, require_token
 from app.config import Settings, get_settings
 from app.errors import AppError
+from app.extract import extract
 from app.files import MSG_NO_FILE, read_single_file, validate_upload
+from app.generator import build_form
 
 log = logging.getLogger(__name__)
 
@@ -65,9 +70,22 @@ async def unexpected_error_handler(_: Request, exc: Exception) -> JSONResponse:
     return JSONResponse({"detail": MSG_SERVER_ERROR}, status_code=500)
 
 
-def form_skeleton() -> dict[str, Any]:
-    """M1.1: stały szkielet do czasu generatora (P1) i sklejenia (M1.4)."""
-    return {"title": "Formularz", "tabs": [], "flow": {"links": []}}
+class FormRejectedByLinter(RuntimeError):
+    """Generator dał JSON, który nie przechodzi lintera: błąd po naszej stronie, więc 500 (handler ogólny)."""
+
+
+def process_file(data: bytes, ext: str, settings: Settings) -> dict[str, Any]:
+    """Łańcuch z DELEGACJA rozdz. 2: odczyt → analiza → JSON COI → linter.
+
+    Błędy AppError (400 z odczytu, 503 z analizy) idą dalej do app_error_handler.
+    Zła odpowiedź lintera to 500. Wymaga decyzji lidera; do tego czasu błędy trafiają do logu.
+    """
+    form = build_form(analyze(extract(data, ext), settings=settings))
+    errors = lint.check(form)
+    if errors:
+        log.error("JSON odrzucony przez linter (%d błędów): %s", len(errors), "; ".join(errors[:20]))
+        raise FormRejectedByLinter(f"{len(errors)} błędów lintera")
+    return form
 
 
 @app.get("/health")
@@ -80,5 +98,7 @@ async def create_form(
     request: Request, settings: Annotated[Settings, Depends(get_settings)]
 ) -> JSONResponse:
     filename, data = await read_single_file(request, settings.max_file_bytes)
-    validate_upload(filename, data, settings.max_file_bytes)
-    return JSONResponse(form_skeleton())
+    ext = validate_upload(filename, data, settings.max_file_bytes)
+    # OCR i model trwają do minut: w wątku, żeby /health i inne żądania nie czekały.
+    form = await run_in_threadpool(process_file, data, ext, settings)
+    return JSONResponse(form)
