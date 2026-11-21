@@ -95,6 +95,43 @@ K1 (Mikołaj):
   Pierwsze zapytanie po starcie serwera trwa 16,7 s, krótkie zapytanie po rozgrzaniu 3,2 s. Bielika nie mierzyliśmy (decyzja lidera, mało pamięci).
 - **K1 – wniosek.** Qwen3.5-4B zostaje: daje poprawny JSON, myślenie da się wyłączyć. Kryterium „< 60 s na CPU” jest niespełnione, więc `LLM_TIMEOUT_S=120` na takim laptopie to zawsze 503. Skan przez model był wolniejszy i gorszy niż tekst (jeden przebieg). Zalecenie dla K2: skany przez OCR, obraz w modelu tylko jako zapas. Surowe odpowiedzi i raporty leżą tylko w `materialy/bench-k1/`, poza gitem.
 
+M1.3 (Marcin):
+
+| What                                   | Why                                         | Licence    |
+| -------------------------------------- | ------------------------------------------- | ---------- |
+| obraz `python:3.14.10-slim-trixie`     | Treść pkt 5: Python 3.14, jawna wersja      | PSF-2.0 (Python), Debian |
+| `tesseract-ocr` 5.5.0 + `tesseract-ocr-pol` (apt) | OCR skanów JPG/PNG i PDF bez tekstu (K2) | Apache-2.0 |
+
+- Kontener `api`: użytkownik `app` (UID 10001) bez powłoki, kod tylko do odczytu, w compose `read_only`,
+  `tmpfs /tmp`, `cap_drop: ALL`, `no-new-privileges`. Zapis poza `/tmp` w pamięci kończy się błędem.
+- Do decyzji lidera lub mentora: pakiet Debiana `tesseract-ocr` ciągnie biblioteki systemowe na LGPL
+  (pango, cairo, glib, gnutls, fribidi, libthai). Obraz bazowy ma już glibc (LGPL) i bash (GPL).
+  To biblioteki systemu łączone dynamicznie, nie kod aplikacji. Lista: `dpkg-query -W` w obrazie.
+- Docker Hub ogranicza pobrania bez logowania. Ten sam obraz jest w `mirror.gcr.io/library/python`:
+  `podman pull mirror.gcr.io/library/python:3.14.10-slim-trixie` i `podman tag` na nazwę z Dockerfile.
+
+M1.5 (Marcin):
+
+| What                          | Why                                              | Licence |
+| ----------------------------- | ------------------------------------------------ | ------- |
+| obraz `ollama/ollama:0.40.15` | lokalny serwer modelu w compose (SPEC „Model”); wersja z pomiaru K1 | MIT |
+| PyYAML 6.0.4 (tylko testy) | testy czytają `docker-compose.yml` parserem, nie regexami po wcięciach (recenzja M1.5) | MIT |
+
+- `ollama/Dockerfile` dodaje użytkownika `ollama` (UID 10002), bo oficjalny obraz działa jako root (Treść pkt 5).
+- Serwis `ollama` nie wystawia portu na hoście; `api` woła `http://ollama:11434/v1` w sieci compose.
+- Model jest w wolumenie `ollama-models`, pobierany raz przez `scripts/pull_model.sh`. To jedyny trwały zapis.
+- `OLLAMA_CONTEXT_LENGTH=16384` (K1) i `OLLAMA_KEEP_ALIVE=24h`: model zostaje w pamięci, demo nie czeka na ładowanie.
+- `OLLAMA_NO_CLOUD=1`: bez modeli i usług w chmurze Ollamy (Treść pkt 5, prośba Mikołaja).
+- `name: hacknation-2026` w compose: ten sam wolumen z modelem w każdym katalogu, bez ponownego pobierania 3,3 GB.
+
+pypdf (Marcin, na prośbę Mikołaja do K2.3):
+
+| What         | Why                                                        | Licence      |
+| ------------ | ---------------------------------------------------------- | ------------ |
+| pypdf 7.1.1  | tekst z PDF w pamięci (K2.3); czysty Python, obraz bez zmian | BSD-3-Clause |
+
+- Bez dodatku `crypto`: zaszyfrowane PDF-y (AES) wymagają `cryptography` – decyzja przy K2.3, jeśli trafią się w materiałach.
+
 K3 (Mikołaj):
 
 - **K3 – ustawienia.** `analysis.analyze(doc, *, settings)` i `llm.chat_json(..., settings=...)` wymagają ustawień od wołającego. Żaden z nich nie czyta env, więc `dependency_overrides[get_settings]` obejmuje model i `LLM_FIXTURE` (uwaga R2 z recenzji K1).

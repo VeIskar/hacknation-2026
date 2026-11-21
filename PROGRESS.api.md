@@ -2,7 +2,9 @@
 
 ## State
 
-(rewritten by /hn-stan before sleep, at a usage limit, before switching agents)
+2026-11-21 19:00 · M1.5 gotowe do commita na `marcin/m1.5` (worktree `.claude/worktrees/m1.5`, baza `marcin/m1.3`,
+już na `main` jako #9). Przed PR: scalić `origin/main` (konflikty w `PROGRESS.api.md`, `DECISIONS.md`).
+Next: M1.4 (czeka na K2/K3; można zacząć z zaślepkami), `LLM_TIMEOUT_S` (prośba Mikołaja), M1.6 README.
 
 ## Plan
 
@@ -88,6 +90,22 @@ Krok P1.3a: walidatory typu dla etykiet pól analizy.
 - Dowód: mutacje, porównanie fixture’ów z `origin/main`, macierz z linterem, `bash scripts/gate.sh api -rs`.
 - Po recenzji: odtworzyć fałszywe dopasowania w tabeli etykiet, odrzucić etykiety złożone i sprawdzić mutację tej reguły.
 
+Krok M1.3 (Marcin): obraz `api` zgodny z Treść pkt 5 (bez roota, jawne wersje, bez trwałego zapisu).
+- `backend/Dockerfile`: `python:3.14.10-slim-trixie`, `tesseract-ocr` + `tesseract-ocr-pol` z apt, użytkownik
+  `app` (UID 10001) bez powłoki, kod tylko do odczytu, `EXPOSE 8000`.
+- `docker-compose.yml` (`api`): `read_only`, `tmpfs /tmp`, `cap_drop: ALL`, `no-new-privileges`.
+- `DECISIONS.md`: obraz bazowy, tesseract (licencje). Web (nginx bez roota na 8080) → Request do `web`.
+- Dowód: `test_docker.py` (statycznie: wersja obrazu, USER, port, compose); `docker compose build api`,
+  `whoami` → `app`, `tesseract --list-langs` ma `pol`, `/health` 200, zapis poza `/tmp` odrzucony.
+
+Krok M1.5 (Marcin): model w compose (DELEGACJA M1.5, ustalenia K1 w DECISIONS).
+- `ollama/Dockerfile`: `ollama/ollama:0.40.15` (wersja z K1), użytkownik `ollama` (10002) bez roota.
+- `docker-compose.yml`: serwis `ollama` bez portu na hoście, wolumen `ollama-models`, `OLLAMA_CONTEXT_LENGTH=16384`,
+  `OLLAMA_KEEP_ALIVE`; `api` dostaje domyślnie `LLM_BASE_URL=http://ollama:11434/v1`.
+- `scripts/pull_model.sh`: uruchamia `ollama` i pobiera `LLM_MODEL` (domyślnie `qwen3.5:4b`) do wolumenu.
+- `backend/tests/test_config.py`, `test_docker.py`: domyślna wartość w compose, serwis `ollama` (statycznie).
+- Dowód: `pull_model.sh`, z kontenera `api` zapytanie `/v1/chat/completions` do `ollama` → odpowiedź modelu.
+
 Krok K3 (Mikołaj, gałąź `mikolaj/k3`): `ExtractedDocument` → `FormAnalysis` przez lokalny model.
 
 - `backend/app/llm.py`: `settings` wymagane (bez `get_settings()`); `LLM_FIXTURE` zwraca plik bez sieci, nieczytelny → `LLMUnavailable`.
@@ -111,6 +129,7 @@ Krok K3 (Mikołaj, gałąź `mikolaj/k3`): `ExtractedDocument` → `FormAnalysis
 - Mikołaj → Marcin (M1.5, `docker-compose.yml`): serwis `ollama/ollama:0.40.15` z `OLLAMA_CONTEXT_LENGTH=16384` i `OLLAMA_NO_CLOUD=1`, bez portu na hoście (API Ollamy nie ma haseł).
 - Mikołaj → Marcin (`config.py`, `env.example`): `LLM_TIMEOUT_S=120` jest za małe na CPU (K1: 238–344 s na formularz); podnieś do 600 albo zmierz na maszynie demo.
 - Mikołaj → web (`frontend/playwright.config.ts`): ustaw `LLM_FIXTURE` dla API, jak mówi SPEC „Real and mocked”. Dziś go nie ma, więc po K3 e2e wołałoby prawdziwy model (recenzja K1-fix2). Ścieżka względna liczy się od `frontend/` (cwd Playwrighta), np. `../backend/tests/fixtures/fields.json`. Przy `reuseExistingServer: true` już działające API bez tej zmiennej też wołałoby model.
+- Marcin (M1.3) → web (`frontend/Dockerfile`, `frontend/nginx.conf`): nginx bez roota (`nginxinc/nginx-unprivileged:<jawna wersja>` albo `USER nginx`), nasłuch na 8080, `EXPOSE 8080`; Treść pkt 5. Potem Marcin zmienia w compose `5173:80` na `5173:8080`.
 - Mikołaj → Marcin (M1.4, `main.py`): wołaj `analysis.analyze(doc, settings=settings)` z `settings` trasy (`Depends(get_settings)`). Funkcja jest synchroniczna i na CPU trwa minuty, więc przez `run_in_threadpool`. Dokument bez tekstu i obrazów → `ExtractionError` (400), reszta błędów → `LLMUnavailable` (503).
 - Mikołaj → lider (`DELEGACJA.md`, rozdz. 2.2): sygnatura `analysis.analyze(doc, *, settings) -> FormAnalysis`, `settings` wymagane też w `llm.chat_json`; `analyze` rzuca `ExtractionError` dla dokumentu bez tekstu i obrazów (K3).
 - Mikołaj → Marcin (M1.5, `docker-compose.yml`, `config.py`): budżet K3 zakłada `OLLAMA_CONTEXT_LENGTH=16384` (stała `CONTEXT_TOKENS` w `analysis.py`). Tekst z folderu 8 (ok. 31 tys. znaków) się nie mieści, a folder 9 mieści się bez miejsca na ponowienie. Rozważ 32768 i zmienną `LLM_CONTEXT_TOKENS` w `Settings`, żeby serwer i analiza znały tę samą liczbę. Recenzja Codexa (P1): bez tej zmiennej większy kontekst serwera nie pomoże folderowi 8, bo K3 liczy budżet od stałej; po jej dodaniu K3 przełączy `CONTEXT_TOKENS` na `settings`.
@@ -143,5 +162,11 @@ Krok K3 (Mikołaj, gałąź `mikolaj/k3`): `ExtractedDocument` → `FormAnalysis
 - P1.2b: done dobór sekcji i SHOW, regresje F2–F4 i F6–F9, 2 976 kombinacji z P2 (1,76 s), 36/36 mutacji; trzy fixture’y identyczne z `origin/main`, ENTITY zmieniony zgodnie z nowymi regułami; `bash scripts/gate.sh api -rs` → `441 passed`, 0 pominiętych, 1 ostrzeżenie Starlette, `GATE: PASS (api)` / next commit człowieka / blocker brak.
 - P1.3a: done walidatory z etykiet w obu ścieżkach analizy, 16 czerwonych przypadków przed zmianą, 17/17 mutacji wykrytych, 5 fixture’ów identycznych z `origin/main`, pełna macierz 2 976 kombinacji (1,71 s), `bash scripts/gate.sh api -rs` → `516 passed`, 0 pominiętych, 1 ostrzeżenie Starlette, `GATE: PASS (api)` / next commit człowieka / blocker brak.
 - P1.3a po recenzji: done etykieta złożona bez walidatora typu, 13 błędów odtworzonych przed zmianą i po wyłączeniu reguły, 5 fixture’ów identycznych z `origin/main`, `bash scripts/gate.sh api -rs` → `538 passed`, 0 pominiętych, 1 ostrzeżenie Starlette, `GATE: PASS (api)` / next commit człowieka / blocker brak.
+- M1.3 (api): done obraz `python:3.14.10-slim-trixie`, tesseract 5.5.0 + `pol`, użytkownik `app` (10001), compose `read_only`/`tmpfs /tmp`/`cap_drop ALL`/`no-new-privileges`; `docker compose build api` OK, `whoami` → `app`, `/health` 200, PDF → 200, fałszywy PDF → 415, JWT 401/200 w kontenerze, zapis poza `/tmp` odrzucony; `test_docker.py` 7/7 mutacji wykrytych; `gate.sh` → 403 passed / next web: nginx bez roota na 8080 (Request), M1.4 / blocker: licencje LGPL bibliotek tesseracta – decyzja lidera/mentora (DECISIONS M1.3).
+- M1.5: done `ollama/Dockerfile` (0.40.15, UID 10002), serwis `ollama` bez portu na hoście, wolumen `ollama-models`, `read_only`/`cap_drop ALL`, `OLLAMA_CONTEXT_LENGTH=16384`, `OLLAMA_KEEP_ALIVE=24h`, `OLLAMA_NO_CLOUD=1` (prośba Mikołaja), `name: hacknation-2026` w compose (ten sam wolumen w każdym katalogu), `LLM_BASE_URL` domyślnie `http://ollama:11434/v1`, `scripts/pull_model.sh`; ręcznie: `id` → 10002, zapis poza wolumenem odrzucony, `pull_model.sh` → `qwen3.5:4b` 3,3 GB, z kontenera `api` `/v1/chat/completions` → poprawny JSON w 10,5 s, 0 znaków myślenia, `ollama ps` 16384 / 100% CPU; `gate.sh` → 409 passed / next merge `origin/main`, M1.4 / blocker: kryterium „curl na plik z folderu 3 → JSON < 2 min” dopiero po M1.4 (K2, K3).
+- M1.5 recenzja (subagent `reviewer`, werdykt FIX): 1 CONFIRMED – `env.example` miał `LLM_BASE_URL=http://localhost:11434/v1`, więc `cp env.example .env` kierował `api` w compose na samego siebie (503); teraz pusty, test `test_env_example_does_not_override_compose_defaults` czerwony przed poprawką; 6 LATER (REVIEW.md): `LLM_TIMEOUT_S` 120 < 238–344 s na CPU → z M1.4, skutki `name:`, `depends_on`, sieć tylko api–ollama, komentarz w `.env` w `pull_model.sh`, kruchy `_compose_block` / next commit M1.5, merge `origin/main` / blocker brak.
+- M1.5 testy compose: done regexy po wcięciach zastąpione parserem YAML (`backend/tests/compose.py`, PyYAML 6.0.4, MIT, wpis w DECISIONS) w `test_docker.py` i `test_config.py`; 5 równoważnych zapisów compose przechodzi (tmpfs skalarnie i z opcjami, `no-new-privileges` bez `:true`, komentarze w serwisie, cały plik z wcięciem 4 i posortowanymi kluczami), 8 regresji wykrytych; `gate.sh` → 410 passed / next commit M1.5 / blocker brak.
+- M1.5 recenzja testów compose (`c62614a`, subagent `reviewer`, werdykt SHIP): 0 CONFIRMED, 5 LATER (REVIEW.md): PyYAML w obrazie produkcyjnym (jak pytest/ruff; `requirements-dev.txt` – lider), `safe_load` przy imporcie, anonimowe wolumeny i `- FOO` w `environment` w normalizatorach, `read_only is True` / next merge `origin/main`, PR M1.5 / blocker brak.
+- pypdf (Marcin, prośba Mikołaja do K2.3): done `pypdf==7.1.1` (BSD-3-Clause) w `requirements.txt` + `DECISIONS.md`; Docker bez zmian (czysty Python); Tesseract `pol` potwierdzony w obrazie `api` tak, jak woła go K2.2 (`tesseract stdin stdout -l pol`, `app`, `read_only`) na skanie z folderu 5 / next M1.4 na K2 + K3 / blocker brak.
 - K3: done `llm.py` (`settings` wymagane, `LLM_FIXTURE` bez sieci), `analysis.py` (prompt z kontraktem `applicant` i zasadą podstawy w treści, lekkie uporządkowanie tekstu, budżet kontekstu i kontrola przycięcia przez serwer, 2 próby, potem 503); 31/31 mutacji i mutacja D5 wykryte, 5 przebiegów bez niestabilności; ręcznie `qwen3.5:4b` na CPU: DOCX nadpłaty → poprawny `FormAnalysis` w 2. próbie, 1121 s, jakość pól do poprawy (Requests); recenzja `reviewer`: FIX (1, 2), naniesione 1–4; `bash scripts/gate.sh api -rs` → 566 passed, 0 pominiętych, `GATE: PASS (api)` / next commit człowieka, M1.4 (Marcin) z `analyze(doc, settings=settings)`, Q1 kontrola podstawy w treści / blocker `LLM_TIMEOUT_S=120` przy 537–584 s na próbę na CPU; folder 8 nie mieści się w kontekście 16384.
 - K3 recenzja (Codex `--uncommitted`, baza `4e9603e`; `origin/main` = `7788a2f` z M1.3): done 2/5 CONFIRMED naprawione w obszarze: ponowienie bez długiej odpowiedzi, gdy z nią nie mieści się w kontekście (folder 9), i `json.loads` przed walidacją (samotny surogat jak w P1.2a, `RecursionError` → ponowienie); 1 CONFIRMED poza obszarem (`LLM_CONTEXT_TOKENS`, prośba do Marcina), 2 LATER, 1 FALSE (REVIEW.md); 36/36 mutacji i mutacja D5 wykryte; K3 na `origin/main` → 575 passed, konflikty tylko w dopiskach `DECISIONS.md` i `PROGRESS.api.md`; `bash scripts/gate.sh api -rs` → 569 passed, 0 pominiętych, `GATE: PASS (api)` / next commit człowieka, scalenie z `main` z zachowaniem obu dopisków, Q1 szybkość i podstawa w treści / blocker: Qwen 4B niegotowy do demo (2. próba, 1121 s, pola bez podstawy).
