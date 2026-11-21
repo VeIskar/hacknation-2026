@@ -2,12 +2,13 @@
 
 import base64
 import json
+from pathlib import Path
 
 import httpx
 import pytest
 from env_proxy import record_proxy_use
 
-from app.config import Settings, get_settings
+from app.config import Settings
 from app.errors import LLMUnavailable
 from app.llm import UNAVAILABLE_DETAIL, chat_json, image_part
 from app.models import FormAnalysis
@@ -111,21 +112,40 @@ def test_malformed_metadata_keeps_the_answer_and_drops_bad_values(usage: object,
     assert (result.prompt_tokens, result.completion_tokens) == (None, None)
 
 
-def test_without_settings_the_client_uses_app_config(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_settings_must_come_from_the_caller(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bez cichego get_settings(): inaczej dependency_overrides w testach trasy nie dotarłyby do modelu."""
     monkeypatch.setenv("LLM_BASE_URL", "http://env.test/v1")
-    monkeypatch.setenv("LLM_MODEL", "SpeakLeash/bielik-4.5b-v3.0-instruct:Q8_0")
-    monkeypatch.setenv("LLM_API_KEY", "z-env")
     seen: list[httpx.Request] = []
-    get_settings.cache_clear()
-    try:
+    with pytest.raises(TypeError, match="settings"):
         chat_json(MESSAGES, {}, transport=_transport(httpx.Response(200, json=_completion()), seen))
-    finally:
-        get_settings.cache_clear()
+    assert seen == []
 
-    (request,) = seen
-    assert str(request.url) == "http://env.test/v1/chat/completions"
-    assert request.headers["Authorization"] == "Bearer z-env"
-    assert json.loads(request.content)["model"] == "SpeakLeash/bielik-4.5b-v3.0-instruct:Q8_0"
+
+def test_fixture_returns_the_file_without_calling_the_model(tmp_path: Path) -> None:
+    fixture = tmp_path / "analiza.json"
+    fixture.write_text('{"title": "Wniosek z atrapy"}', encoding="utf-8")
+    seen: list[httpx.Request] = []
+    settings = Settings(llm_base_url="http://model.test/v1", llm_fixture=str(fixture))
+    result = chat_json(MESSAGES, {}, settings=settings, transport=_transport(httpx.Response(500), seen))
+    assert result.content == '{"title": "Wniosek z atrapy"}'
+    assert (result.finish_reason, result.reasoning, result.prompt_tokens) == ("stop", "", None)
+    assert seen == []
+
+
+@pytest.mark.parametrize("content", [None, b"\xff\xfe nie UTF-8"], ids=["missing", "not-utf8"])
+def test_unreadable_fixture_is_llm_unavailable_with_the_path_in_the_log(
+    tmp_path: Path, content: bytes | None, caplog: pytest.LogCaptureFixture
+) -> None:
+    fixture = tmp_path / "analiza.json"
+    if content is not None:
+        fixture.write_bytes(content)
+    seen: list[httpx.Request] = []
+    settings = Settings(llm_base_url="http://model.test/v1", llm_fixture=str(fixture))
+    with pytest.raises(LLMUnavailable) as caught:
+        chat_json(MESSAGES, {}, settings=settings, transport=_transport(httpx.Response(200, json=_completion()), seen))
+    assert caught.value.detail == UNAVAILABLE_DETAIL
+    assert seen == []
+    assert f"LLM_FIXTURE: nie można odczytać pliku {fixture}" in caplog.text
 
 
 def test_model_call_ignores_proxy_from_environment(monkeypatch: pytest.MonkeyPatch) -> None:
