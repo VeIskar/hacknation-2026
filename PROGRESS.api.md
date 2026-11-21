@@ -80,6 +80,14 @@ Krok P1.2b: dobór sekcji z `FormAnalysis.applicant` i warunki SHOW.
 - `DECISIONS.md`: zastąpienie GD2 i uzasadnienie wyjątku D5.
 - Dowód: mutacje, porównanie z `origin/main` poza UUID, `bash scripts/gate.sh api -rs` i kontrola zakresu diffu.
 
+Krok P1.3a: walidatory typu dla etykiet pól analizy.
+
+- `backend/tests/test_generator.py`: czerwone testy kategorii, niejednoznaczności, typów pól, F9 i przełącznika.
+- `backend/app/generator/form.py`: deterministyczne dopasowanie etykiety we wspólnej ścieżce generowania pól analizy.
+- `DECISIONS.md`: reguła P1.3a.
+- Dowód: mutacje, porównanie fixture’ów z `origin/main`, macierz z linterem, `bash scripts/gate.sh api -rs`.
+- Po recenzji: odtworzyć fałszywe dopasowania w tabeli etykiet, odrzucić etykiety złożone i sprawdzić mutację tej reguły.
+
 ## Requests
 
 (one line per change you need from another area: who asks, what, why)
@@ -117,3 +125,5 @@ Krok P1.2b: dobór sekcji z `FormAnalysis.applicant` i warunki SHOW.
 - K1 recenzja (Codex, baza `4e9d228`; P2 weszło potem na `main`): done 1/8 CONFIRMED, `llm.py` zamienia zły typ `usage`, tokenów i `reasoning` na brak wartości (wcześniej `AttributeError` omijał `LLMUnavailable`, czyli 503); 4 nowe przypadki czerwone przed poprawką, 5/5 mutacji wykrytych; `gate.sh api -rs` → 263 passed, 0 pominiętych, `GATE: PASS (api)` / later: 7 ustaleń (proxy w httpx, 6 w `bench_model.py`) w REVIEW.md / next scalenie z `main`: konflikt w PROGRESS.api.md, zostaw oba wpisy / blocker brak.
 - K1-fix2 (zakres lidera; scalony `main` `d0c07fd` z M1.2 JWT i P1.2a): done #1 `trust_env=False` w `llm.py` i w sondzie wersji, #2 odrzucanie kopii folderu 1 po sha256 (na prawdziwych materiałach odrzuca 1 kopię), #3 i rozjazd promptu z P1.2a zapisane jako wymagania przed pomiarem; kolizja z P1.2a (`applicants` bez domyślnej wartości) rozwiązana w scaleniu: `applicants_ok` fałszywe przy braku klucza; 4 nowe testy bez sieci, czerwone przed poprawką, 6/6 mutacji wykrytych także po scaleniu; samo scalenie → 462 passed, całość `gate.sh api -rs` → 466 passed, 0 pominiętych, `GATE: PASS (api)`; recenzje: Codex (nowe zmiany) 8 uwag, w testach naniesione N3–N7, `reviewer` (cały PR do `c7d6cf1`) SHIP, 0 CONFIRMED / later: #4, #5, #7, #8, N1, N2, N8, K3: `chat_json` z ustawieniami z `Depends` i gałąź `LLM_FIXTURE` (REVIEW.md) / next K2 / blocker `LLM_TIMEOUT_S=120` (prośba do Marcina).
 - P1.2b: done dobór sekcji i SHOW, regresje F2–F4 i F6–F9, 2 976 kombinacji z P2 (1,76 s), 36/36 mutacji; trzy fixture’y identyczne z `origin/main`, ENTITY zmieniony zgodnie z nowymi regułami; `bash scripts/gate.sh api -rs` → `441 passed`, 0 pominiętych, 1 ostrzeżenie Starlette, `GATE: PASS (api)` / next commit człowieka / blocker brak.
+- P1.3a: done walidatory z etykiet w obu ścieżkach analizy, 16 czerwonych przypadków przed zmianą, 17/17 mutacji wykrytych, 5 fixture’ów identycznych z `origin/main`, pełna macierz 2 976 kombinacji (1,71 s), `bash scripts/gate.sh api -rs` → `516 passed`, 0 pominiętych, 1 ostrzeżenie Starlette, `GATE: PASS (api)` / next commit człowieka / blocker brak.
+- P1.3a po recenzji: done etykieta złożona bez walidatora typu, 13 błędów odtworzonych przed zmianą i po wyłączeniu reguły, 5 fixture’ów identycznych z `origin/main`, `bash scripts/gate.sh api -rs` → `538 passed`, 0 pominiętych, 1 ostrzeżenie Starlette, `GATE: PASS (api)` / next commit człowieka / blocker brak.

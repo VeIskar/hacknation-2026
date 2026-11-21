@@ -53,6 +53,8 @@ Decyzje lidera po recenzji P0 (2026-11-21). Kod: `backend/app/errors.py`, `backe
 
 - **P1.2b – generator.** `FormAnalysis.applicant` wyznacza sekcje wnioskodawcy, korespondencję, pola dodatkowe i kontakt, a S2 wyświetla tylko faktyczne wybory, co zastępuje GD2 z radiem o jednej opcji dla ENTITY.
 
+- **P1.3a.** Pola `TEXT_FIELD` z analizy dostają walidator typu po `REQUIRED`, jeśli etykieta po NFC, casefold i usunięciu polskich znaków pasuje do dokładnie jednej kategorii na granicach słów (PESEL, NIP, REGON, ZIP_CODE, EMAIL, SERIAL_NUMBER_ID_CARD, EPUAP, ADE). Etykieta złożona → bez walidatora typu, jeśli po usunięciu dopasowanej frazy pozostaje separator, spójnik lub słowo innej danej. Dobór odbywa się bez modelu, a `ADD_VALIDATORS = False` czyści wszystkie walidatory.
+
 M1.1 (Marcin):
 
 | What                    | Why                                                         | Licence    |
