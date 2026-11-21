@@ -150,6 +150,15 @@ Krok K2.4 (Mikołaj, `mikolaj/k2-reszta` od `65c0259`): tekst komórek XLSX i OD
 - `backend/tests/test_extract.py`: syntetyczne XLSX i ODS, pliki uszkodzone, bomba powtórzeń, próbki COI 1 i 5; ręcznie foldery 2–4, 6–9.
 - Dowód: RED każdego testu, mutacje, `bash scripts/gate.sh api -rs`.
 
+Krok M1.7 (Marcin, `marcin/m1.7` od `2a139f9`): `LLM_PROVIDER` (D9, DELEGACJA rozdz. 3 na gałęzi lidera).
+
+- `config.py`: `llm_provider` `ollama` (domyślnie) albo `edenai`; inna wartość zatrzymuje start z nazwą zmiennej.
+- Przy `edenai`: `LLM_BASE_URL` tylko `https://api.edenai.run` albo `https://api.eu.edenai.run`; klucz wymagany (nie `ollama`, nie w komunikacie); `LLM_MODEL` z listy modeli otwartych (D9 pkt 8).
+- Domyślny adres zależy od dostawcy: puste `LLM_BASE_URL` przy `edenai` → `https://api.edenai.run/v3`; przy `ollama` → `LLM_OLLAMA_URL` (compose: `http://ollama:11434/v1`), inaczej localhost.
+- `docker-compose.yml`: `LLM_PROVIDER`, `LLM_BASE_URL: ${LLM_BASE_URL:-}`, stałe `LLM_OLLAMA_URL`; `api` bez sieci `internal`.
+- `env.example`, README (oba tryby, treść pliku idzie do Eden AI), DECISIONS (lista modeli i hostów).
+- Testy: `test_config.py`, `test_docker.py`; dowód RED przed zmianą, mutacje, `gate.sh api -rs`.
+
 ## Requests
 
 (one line per change you need from another area: who asks, what, why)
@@ -181,6 +190,7 @@ Krok K2.4 (Mikołaj, `mikolaj/k2-reszta` od `65c0259`): tekst komórek XLSX i OD
 - Marcin → lider (`DELEGACJA.md`, rozdz. 5): dopisać `LLM_CONTEXT_TOKENS` | `32768` | kontekst modelu, ten sam dla serwera i budżetu analizy (min. 8192).
 - Mikołaj → Marcin (K2.4, `backend/tests/test_api.py`): docstring `test_format_without_reader_yet_is_400` jest nieaktualny, bo XLSX ma już czytnik. Test dalej przechodzi, bo próbka `XLSX` z `samples.py` nie ma arkusza. Proponuję opis „XLSX bez arkusza → 400” albo prawdziwy XLSX → 200.
 - Mikołaj → lider (`.gitignore`): wzorzec `materialy/` pasuje tylko do katalogu, a w worktree `materialy` to dowiązanie do materiałów COI. „Stage all” w GUI doda je do commita (D5). Proponuję wzorzec `materialy` bez ukośnika.
+- Marcin → lider (`DECISIONS.md` D9 pkt 7, przy scalaniu `lead/mentor-2111`): lista modeli otwartych dla `edenai` jest w wpisie M1.7 (8 tras Qwen3.5-9B z D9 pkt 8, także dwie z datą wycofania) i w `EDENAI_OPEN_MODELS`; hosty `api.edenai.run` i `api.eu.edenai.run`. Potwierdź albo zawęź. Zaktualizuj też stan D9: zapytanie do Eden AI już poszło (Marcin, formularz 3, `flexai/Qwen3.5-9B`, poprawny JSON COI).
 
 ## Log
 
@@ -226,3 +236,5 @@ Krok K2.4 (Mikołaj, `mikolaj/k2-reszta` od `65c0259`): tekst komórek XLSX i OD
 - M1.6: done README: przepływ, wymagania (x86 bez GPU, dysk), obrazy (api, ollama, web; lustro mirror.gcr.io), uruchomienie (compose, `pull_model.sh`, `--build`, `down` bez `-v`), model lokalny albo otwarty przez API (Eden AI), tabela konfiguracji z `env.example`, REST API z `curl` (z JWT i bez) i wszystkimi kodami błędów z SPEC, `generate_forms.py`, praca lokalna; teksty błędów sprawdzone z kodem / next `LLM_CONTEXT_TOKENS` w README po scaleniu gałęzi / blocker: `ADD_VALIDATORS` z `.env` nie działa (generator czyta stałą `app.generator.form.ADD_VALIDATORS`, Paweł).
 - LLM_CONTEXT_TOKENS: done `Settings.llm_context_tokens` (domyślnie 32768, min. 8192, błąd z nazwą zmiennej), compose: `api` dostaje `LLM_CONTEXT_TOKENS`, `ollama` bierze z niej `OLLAMA_CONTEXT_LENGTH` (osobna zmienna usunięta), `env.example`; pomiar `qwen3.5:4b` 16384 → 32768: 3,7 → 4,2 GB; 9 nowych testów czerwonych przed zmianą, 4/4 mutacje wykryte / next Mikołaj przełącza `CONTEXT_TOKENS` w K3 na ustawienie (Request) / blocker brak.
 - K2.4 (`mikolaj/k2-reszta` od `65c0259`): done XLSX i ODS bez nowej zależności (`extract/sheets.py`, `extract/common.py`); 16/16 plików COI (foldery 1–9) z tekstem, XLSX = ODS w 6/7 folderów (folder 3: różnica w samych plikach), API z `LLM_FIXTURE` 16/16 → 200, linter 0 błędów. Recenzja `reviewer`: FIX, naniesione 1–3 i 5 (kodowanie XML → 400, limity głębokości, elementów komórki i 8 MB XML, komórka zamiast wiersza w pamięci, części OPC bez wielkości liter i z `%`); 4 to Request do lidera. 56/56 mutacji wykrytych, pokrycie `sheets.py` i `common.py` 100% linii i gałęzi; `bash scripts/gate.sh api -rs` → 745 passed, 0 pominiętych / next K2.5 binarny DOC (decyzja: `olefile` BSD-2-Clause przez Request do Marcina) / blocker brak; defekt poza krokiem: DOCX z nieznanym kodowaniem XML → 500 (`LookupError`), do kroku limitów.
+- M1.7: done `LLM_PROVIDER` (`ollama` domyślnie, `edenai`; inna wartość zatrzymuje start), przy `edenai` tylko https na `api.edenai.run`/`api.eu.edenai.run` (bez użytkownika i obcego portu), wymagany klucz (nie `ollama`, nigdy w komunikacie), `LLM_MODEL` z `EDENAI_OPEN_MODELS` (lista w DECISIONS); pusty `LLM_BASE_URL` daje adres dostawcy, compose podaje Ollamę osobno w `LLM_OLLAMA_URL`; `api` bez sieci `internal`; `env.example`, README, DECISIONS; testy czerwone przed zmianą, 10/10 mutacji wykrytych; `bash scripts/gate.sh api -rs` → 917 passed, 0 pominiętych, `GATE: PASS (api)` / next commit człowieka, pomiar czasu Eden AI (człowiek) / blocker brak.
+- M1.7 recenzja (`reviewer`, Codex niezainstalowany): 5 ustaleń; CONFIRMED i poprawione: `ollama` z adresem Eden AI omijał listę modeli (teraz stop startu), wartość `LLM_PROVIDER`/`LLM_MODEL` w komunikacie (klucz wklejony w złą zmienną w logu), `Ollama` jako klucz bez względu na wielkość liter, komentarz compose i wiersz `LLM_OLLAMA_URL` w README, pusty `_set` w teście; LATER: `LLM_EXTRA_BODY` bez listy dozwolonych kluczy przy `edenai` (niepotwierdzone, czy Eden AI ma klucze trasowania). Testy czerwone przed poprawką (7); `bash scripts/gate.sh api -rs` → 924 passed, `GATE: PASS (api)` / next commit człowieka / blocker brak.

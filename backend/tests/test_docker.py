@@ -115,10 +115,19 @@ def test_ollama_cloud_is_off() -> None:
 
 
 def test_api_talks_to_ollama_service_by_default() -> None:
-    assert interpolation(environment("api")["LLM_BASE_URL"]) == (
-        "LLM_BASE_URL",
-        "http://ollama:11434/v1",
-    )
+    """M1.7: adres Ollamy jest osobno, więc pusty `LLM_BASE_URL` przy `edenai` nie trafi do Ollamy."""
+    env = environment("api")
+    assert env["LLM_OLLAMA_URL"] == "http://ollama:11434/v1"
+    assert interpolation(env["LLM_BASE_URL"]) == ("LLM_BASE_URL", "")
+
+
+def test_api_keeps_internet_access_for_eden() -> None:
+    """D9, M1.7: `api` woła Eden AI, więc żadna jego sieć nie jest `internal`."""
+    networks = COMPOSE.get("networks") or {}
+    joined = service("api").get("networks")
+    for name in (list(joined) if isinstance(joined, dict) else as_list(joined)) or ["default"]:
+        assert not (networks.get(name) or {}).get("internal"), f"api: sieć {name} bez internetu"
+    assert service("api").get("network_mode") in (None, "bridge")
 
 
 def test_compose_passes_d11_settings_to_api() -> None:

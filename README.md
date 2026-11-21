@@ -69,9 +69,19 @@ sam model w pomiarze K1 potrzebował 238–344 s na formularz. Tryb lokalny prze
 
 ### Model w chmurze: Eden AI (D9)
 
-Po włączeniu obsługi `LLM_PROVIDER` z M1.7 można użyć Eden AI organizatorów. D9 dopuszcza tylko
-modele otwarte, które można uruchomić na własnej infrastrukturze, np. `ovhcloud/Qwen3.5-9B`.
-W trybie Eden AI treść przesłanego pliku trafia do Eden AI jako tekst lub obrazy stron.
+`LLM_PROVIDER=edenai` włącza Eden AI organizatorów. D9 dopuszcza tylko modele otwarte, które można
+uruchomić na własnej infrastrukturze, np. `ovhcloud/Qwen3.5-9B`.
+**W trybie Eden AI treść przesłanego pliku trafia do Eden AI jako tekst lub obrazy stron.**
+
+API nie wystartuje przy `edenai`, jeśli:
+
+- `LLM_BASE_URL` nie wskazuje `https://api.edenai.run` ani `https://api.eu.edenai.run`
+  (pusty daje `https://api.edenai.run/v3`);
+- brakuje `LLM_API_KEY` (wartość `ollama` z `env.example` się nie liczy);
+- `LLM_MODEL` nie jest na liście modeli otwartych z `DECISIONS.md` (M1.7). Dziś to trasy Qwen3.5-9B.
+
+Komunikat błędu podaje nazwę zmiennej, bez jej wartości. Adres Eden AI przy `LLM_PROVIDER=ollama`
+też zatrzymuje start, żeby nie ominąć listy modeli.
 
 W powłoce Bash podaj klucz do środowiska w chwili uruchomienia. Nie zapisuj go w `.env` ani w repozytorium.
 
@@ -112,9 +122,11 @@ Zmienne z `env.example`. Compose przekazuje je do `api`, a pusta wartość daje 
 | `JWT_ENABLED` | `false` | `true`: `POST /api/forms` wymaga tokenu JWT. `/health` i `/api/info` są otwarte |
 | `JWT_SECRET` | – | Sekret JWT, co najmniej 32/48/64 bajty dla HS256/HS384/HS512 |
 | `JWT_ALGORITHM` | `HS256` | `HS256`, `HS384` albo `HS512` |
-| `LLM_BASE_URL` | compose: `http://ollama:11434/v1`, lokalnie: `http://localhost:11434/v1` | Serwer modelu zgodny z OpenAI. Dla Ollamy z compose zostaw w `.env` pusty |
-| `LLM_MODEL` | `qwen3.5:4b` | Nazwa modelu na serwerze |
-| `LLM_API_KEY` | `ollama` | Klucz API. Ollama go nie sprawdza |
+| `LLM_PROVIDER` | `ollama` | `ollama` albo `edenai` (D9). Inna wartość zatrzymuje start |
+| `LLM_BASE_URL` | Ollama w compose: `http://ollama:11434/v1`, lokalnie: `http://localhost:11434/v1`; Eden AI: `https://api.edenai.run/v3` | Serwer modelu zgodny z OpenAI. Zostaw w `.env` pusty, wtedy adres wynika z dostawcy. Przy `edenai` tylko host Eden AI |
+| `LLM_OLLAMA_URL` | compose: `http://ollama:11434/v1` | Adres Ollamy dla pustego `LLM_BASE_URL`. Ustawia go compose; nie ma go w `env.example` |
+| `LLM_MODEL` | `qwen3.5:4b` | Nazwa modelu na serwerze. Przy `edenai` tylko model otwarty z listy w `DECISIONS.md` |
+| `LLM_API_KEY` | `ollama`; Eden AI: brak | Klucz API. Ollama go nie sprawdza. Przy `edenai` wymagany; podawaj go w powłoce, nie w `.env` |
 | `LLM_TIMEOUT_S` | `120` | Timeout dla pojedynczego zapytania w sekundach. Przekroczenie daje 503 |
 | `LLM_CONNECT_TIMEOUT_S` | `10` | Limit na nawiązanie połączenia z modelem w sekundach |
 | `LLM_CONTEXT_TOKENS` | `32768` | Kontekst analizy w tokenach, min. `8192`. Compose podaje tę samą liczbę Ollamie |
