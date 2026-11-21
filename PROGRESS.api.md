@@ -56,6 +56,23 @@ Krok P1.2a: wymagany kontrakt MVP `FormAnalysis.applicant` i jawne `applicants`.
 - `DECISIONS.md` i „Requests”: decyzja MVP oraz treści do zgłoszenia liderowi.
 - Dowód: czerwone nowe testy, mutacje reguł i Unicode, `bash scripts/gate.sh api -rs` bez pominięć, przegląd nazw plików.
 
+Krok K1 (Mikołaj, gałąź `mikolaj/k1`): pomiar `qwen3.5:4b` w lokalnej Ollamie (Docker 0.40.15, CPU).
+
+- `backend/app/llm.py`: klient `/v1/chat/completions` (httpx) z ustawieniami z `config.Settings`; `reasoning_effort: "none"`, `response_format` ze schematem `FormAnalysis`; sieć, timeout, zła odpowiedź → `LLMUnavailable`.
+- `scripts/bench_model.py`: DOCX albo JPG z folderu 5 → czas, tokeny, JSON, `FormAnalysis.model_validate`, zgodność pól z `fields.json`. Folder 1 odrzucony. Surowe odpowiedzi tylko w `materialy/` albo poza repo.
+- Testy offline (atrapa transportu, bez modelu): `backend/tests/test_llm.py`, `backend/tests/test_bench_model.py`.
+- Dokumenty: wynik pomiaru i httpx w runtime w `DECISIONS.md` (api); log tutaj. Bielik tylko opcjonalnie.
+- Dowód: `bash scripts/gate.sh api -rs`, każdy nowy test widziany na czerwono.
+
+Krok K1-fix2 (zakres zatwierdzony przez lidera 2026-11-21, także `scripts/bench_model.py`): uwagi Codexa #1 i #2.
+
+- `backend/app/llm.py` i `ollama_version` w `scripts/bench_model.py`: `httpx.Client(trust_env=False)`, model zawsze bez proxy z env.
+- `scripts/bench_model.py`: `check_input` odrzuca też plik o tej samej treści (sha256) co plik z folderu 1, w dowolnym miejscu.
+- Testy bez sieci: proxy z env, host `ollama`, podmienione tylko wysyłanie w `httpx.HTTPTransport` (httpx pomija proxy z env przy własnym transporcie, więc atrapa nie wystarczy); kopia pliku kontrolnego w `tmp_path`, także przez `main`, bez materiałów COI.
+- Wymaganie przed kolejnym pomiarem jakości pól (lider, uwaga Codexa #3): `field_quality` ma dawać wynik niezależny od kolejności etykiet. Najpierw dokładne etykiety, potem przydział 1:1 wśród reszty, z testem na zamienioną kolejność wzorców.
+- Wymaganie przed kolejnym pomiarem (kontrakt P1.2a): prompt w `bench_model.py` każe pominąć dane wnioskodawcy i kontakt, a `FormAnalysis` wymaga teraz decyzji `applicant` i `applicant_extra_fields`. Pomiar ma też oceniać te decyzje, nie tylko pola przedmiotu.
+- Dowód: `bash scripts/gate.sh api -rs`, każdy nowy test widziany na czerwono.
+
 Krok P1.2b: dobór sekcji z `FormAnalysis.applicant` i warunki SHOW.
 
 - `backend/tests/test_generator.py`: najpierw regresje F2–F4 i F6–F9, pełna macierz z P2 i dokładny wzorzec 5.
@@ -74,6 +91,10 @@ Krok P1.2b: dobór sekcji z `FormAnalysis.applicant` i warunki SHOW.
 - Marcin → lider (`SPEC.md`, Must 1 i „API contract”): dopisać wyjątek od zgodności typu z rozszerzeniem, np. „Plik `.doc`, który w środku jest DOCX, jest przyjmowany i czytany jak DOCX (tak są zapisane pliki `.DOC` z folderów 5 i 7). `.jpe` jest przyjmowane jak `.jpg` (plik `.JPE` w folderze 7).” Kod już tak działa (DECISIONS, M1.1); uwaga Pawła z recenzji M1.1.
 - Paweł → lider (P1.2a, `SZABLONY_SEKCJI.md`, rozdz. 1): dodać tabelę „decyzja → sekcja” dla `ApplicantData` z zaznaczeniem, że dobór obowiązuje od P1.2b.
 - Paweł → lider (P1.2a, `DELEGACJA.md`, rozdz. 2.1): dopisać wymagane `applicants` i `applicant: ApplicantData`, walidację i niezależność od ekstraktora oraz kolejność P1.2a → P1.2b/P1.2c.
+- Mikołaj → lider (`SPEC.md`, „Model”): zamień `think: false` na `reasoning_effort: "none"`, bo `/v1` ignoruje `think` (pomiar K1 w `DECISIONS.md`).
+- Mikołaj → Marcin (M1.5, `docker-compose.yml`): serwis `ollama/ollama:0.40.15` z `OLLAMA_CONTEXT_LENGTH=16384` i `OLLAMA_NO_CLOUD=1`, bez portu na hoście (API Ollamy nie ma haseł).
+- Mikołaj → Marcin (`config.py`, `env.example`): `LLM_TIMEOUT_S=120` jest za małe na CPU (K1: 238–344 s na formularz); podnieś do 600 albo zmierz na maszynie demo.
+- Mikołaj → web (`frontend/playwright.config.ts`): ustaw `LLM_FIXTURE` dla API, jak mówi SPEC „Real and mocked”. Dziś go nie ma, więc po K3 e2e wołałoby prawdziwy model (recenzja K1-fix2).
 
 ## Log
 
@@ -92,4 +113,7 @@ Krok P1.2b: dobór sekcji z `FormAnalysis.applicant` i warunki SHOW.
 - M1.2: done `auth.py` (Bearer, HMAC, wymagany `exp`, sekret 32/48/64 B), 401 z `WWW-Authenticate` przed odczytem pliku, `/health` otwarte, `python -m app.auth token`, PyJWT 2.15.1 (MIT); `gate.sh api -rs` → 187 passed, 0 pominiętych; mutacje (bez zależności, bez `exp`, bez nagłówka) wykryte / next M1.3 Docker / blocker brak.
 - M1.2 recenzja (subagent `reviewer`, werdykt SHIP): 0 CONFIRMED, 5 LATER (REVIEW.md): `JWT_*`/`MAX_FILE_SIZE_MB` w compose → M1.3, `securitySchemes` w OpenAPI → M1.6, kolejność w DECISIONS, walidacja sekretu przy starcie, 2 testy; `gate.sh` → 187 passed / next rebase na `origin/main`, M1.3 / blocker brak.
 - P1.2a: done kontrakt MVP, 5 fixture’ów, 29 nowych przypadków czerwonych przed wdrożeniem i 25/25 mutacji wykrytych, `bash scripts/gate.sh api -rs` → `397 passed`, 0 pominiętych, 1 ostrzeżenie Starlette, `GATE: PASS (api)` / next commit człowieka i aktualizacja dokumentów przez lidera / blocker brak.
+- K1 (pomiar na `2e7bdba`, gałąź przewinięta na `4e9d228`): done `llm.py` (klient `/v1`, `reasoning_effort: "none"`, `config.Settings`), `scripts/bench_model.py`, testy offline; pomiar `qwen3.5:4b`, folder 5: JSON 3/3, `FormAnalysis` 0/3, DOCX 238–344 s, JPG 575 s (`DECISIONS.md`); `gate.sh api -rs` na `4e9d228` → 259 passed, 0 pominiętych; 35/35 mutacji wykrytych / next K2 (skany przez OCR), K3 z ponowieniem po błędzie walidatora / blocker `LLM_TIMEOUT_S=120` krótszy niż czas na CPU (prośba do Marcina).
+- K1 recenzja (Codex, baza `4e9d228`; P2 weszło potem na `main`): done 1/8 CONFIRMED, `llm.py` zamienia zły typ `usage`, tokenów i `reasoning` na brak wartości (wcześniej `AttributeError` omijał `LLMUnavailable`, czyli 503); 4 nowe przypadki czerwone przed poprawką, 5/5 mutacji wykrytych; `gate.sh api -rs` → 263 passed, 0 pominiętych, `GATE: PASS (api)` / later: 7 ustaleń (proxy w httpx, 6 w `bench_model.py`) w REVIEW.md / next scalenie z `main`: konflikt w PROGRESS.api.md, zostaw oba wpisy / blocker brak.
+- K1-fix2 (zakres lidera; scalony `main` `d0c07fd` z M1.2 JWT i P1.2a): done #1 `trust_env=False` w `llm.py` i w sondzie wersji, #2 odrzucanie kopii folderu 1 po sha256 (na prawdziwych materiałach odrzuca 1 kopię), #3 i rozjazd promptu z P1.2a zapisane jako wymagania przed pomiarem; kolizja z P1.2a (`applicants` bez domyślnej wartości) rozwiązana w scaleniu: `applicants_ok` fałszywe przy braku klucza; 4 nowe testy bez sieci, czerwone przed poprawką, 6/6 mutacji wykrytych także po scaleniu; samo scalenie → 462 passed, całość `gate.sh api -rs` → 466 passed, 0 pominiętych, `GATE: PASS (api)`; recenzje: Codex (nowe zmiany) 8 uwag, w testach naniesione N3–N7, `reviewer` (cały PR do `c7d6cf1`) SHIP, 0 CONFIRMED / later: #4, #5, #7, #8, N1, N2, N8, K3: `chat_json` z ustawieniami z `Depends` i gałąź `LLM_FIXTURE` (REVIEW.md) / next K2 / blocker `LLM_TIMEOUT_S=120` (prośba do Marcina).
 - P1.2b: done dobór sekcji i SHOW, regresje F2–F4 i F6–F9, 2 976 kombinacji z P2 (1,76 s), 36/36 mutacji; trzy fixture’y identyczne z `origin/main`, ENTITY zmieniony zgodnie z nowymi regułami; `bash scripts/gate.sh api -rs` → `441 passed`, 0 pominiętych, 1 ostrzeżenie Starlette, `GATE: PASS (api)` / next commit człowieka / blocker brak.
