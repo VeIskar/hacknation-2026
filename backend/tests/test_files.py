@@ -7,12 +7,16 @@ from samples import (
     DOCX,
     JPG,
     ODS,
+    ODS_BAD_CD_OFFSET,
+    ODS_BAD_ZIP_VERSION,
+    ODS_MIMETYPE_WITH_TAIL,
     ODT,
     PDF,
     PLAIN_ZIP,
     PNG,
     VALID,
     XLSX,
+    XLSX_BAD_ZIP_VERSION,
 )
 
 from app.errors import UploadError
@@ -95,6 +99,10 @@ def test_unsupported_type(filename: str) -> None:
         ("fałszywy.ods", ODT),
         ("fałszywy.ods", XLSX),
         ("uszkodzony.ods", BROKEN_ODS),
+        ("ogon.ods", ODS_MIMETYPE_WITH_TAIL),
+        ("wersja.ods", ODS_BAD_ZIP_VERSION),
+        ("wersja.xlsx", XLSX_BAD_ZIP_VERSION),
+        ("katalog.ods", ODS_BAD_CD_OFFSET),
         ("fałszywy.docx", DOC),
     ],
 )

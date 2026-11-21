@@ -44,7 +44,7 @@ def test_too_large_is_413(client: TestClient) -> None:
     assert response.json() == {"detail": "Plik jest za duży. Limit to 1 MB."}
 
 
-def test_much_too_large_is_cut_off_while_streaming(client: TestClient) -> None:
+def test_declared_content_length_over_limit_is_413(client: TestClient) -> None:
     response = post(client, "wniosek.pdf", PDF.ljust(5 * 1024 * 1024, b"\x00"))
     assert response.status_code == 413
 
@@ -80,6 +80,66 @@ def test_empty_file_part_is_400_no_file(client: TestClient) -> None:
 def test_not_multipart_is_400(client: TestClient) -> None:
     response = client.post("/api/forms", content=PDF, headers={"content-type": "application/pdf"})
     assert (response.status_code, response.json()) == (400, {"detail": MSG_NO_FILE})
+
+
+@pytest.mark.parametrize(
+    "content_type",
+    ["Multipart/Form-Data; boundary=b", "MULTIPART/FORM-DATA; BOUNDARY=b", "multipart/form-data;boundary=b"],
+)
+def test_content_type_is_case_insensitive(client: TestClient, content_type: str) -> None:
+    """Typ MIME i nazwy parametrów nie zależą od wielkości liter (RFC 2045)."""
+    body = (
+        b'--b\r\nContent-Disposition: form-data; name="file"; filename="a.pdf"\r\n\r\n'
+        + PDF
+        + b"\r\n--b--\r\n"
+    )
+    response = client.post("/api/forms", content=body, headers={"content-type": content_type})
+    assert response.status_code == 200, response.text
+
+
+def test_stream_without_content_length_is_cut_off_early() -> None:
+    """Bez Content-Length (chunked) limit działa w pętli odczytu i przerywa ją przed końcem.
+
+    TestClient czyta całe ciało przed wywołaniem aplikacji, więc wołamy ASGI bezpośrednio.
+    """
+    app.dependency_overrides[get_settings] = lambda: Settings(max_file_size_mb=1)
+    chunk = b"\x00" * (512 * 1024)
+    total_chunks = 20  # 10 MB, limit to 1 MB
+    received = 0
+    sent: list[dict] = []
+
+    async def receive() -> dict:
+        nonlocal received
+        received += 1
+        return {"type": "http.request", "body": chunk, "more_body": received < total_chunks}
+
+    async def send(message: dict) -> None:
+        sent.append(message)
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/api/forms",
+        "raw_path": b"/api/forms",
+        "query_string": b"",
+        "root_path": "",
+        "headers": [(b"content-type", b"multipart/form-data; boundary=b")],
+        "client": ("test", 1),
+        "server": ("test", 80),
+    }
+    try:
+        asyncio.run(app(scope, receive, send))
+    finally:
+        app.dependency_overrides.clear()
+
+    start = next(m for m in sent if m["type"] == "http.response.start")
+    body = b"".join(m.get("body", b"") for m in sent if m["type"] == "http.response.body")
+    assert start["status"] == 413
+    assert json.loads(body) == {"detail": "Plik jest za duży. Limit to 1 MB."}
+    assert received <= 3, f"odczytano {received} z {total_chunks} fragmentów"
 
 
 def test_two_files_is_400(client: TestClient) -> None:
