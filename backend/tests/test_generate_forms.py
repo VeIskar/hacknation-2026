@@ -343,7 +343,9 @@ def test_quality_uses_text_prefixes_and_checks_applicant_evidence(
     ))
     out = tmp_path / "out"
     assert _run(out, "2") == 0
-    quality = _report(out)[0]["quality"]
+    row, = _report(out)
+    quality = row["quality"]
+    assert row["grounding"] == {"corrections": 0, "notes": []}
     assert quality["text_support"] == {
         "matched": 2, "total": 4, "percent": 50.0,
         "unsupported_labels": ["Cel"], "unsupported_options": ["Curling"],
@@ -385,6 +387,45 @@ def test_flags_unknown_dictionary_and_counts_show_outside_literals(
     row, = _report(out)
     assert row["stats"]["dictionaries"]["Działki"] == 1
     assert row["quality"]["unexpected_dictionaries"] == ["Działki"]
+    assert "Działki" in row["quality"]["dictionary_issues"][0]
     # Trzeci SHOW pochodzi z sekcji standardowej strony Dane dla BOTH.
     assert row["stats"]["show"] == {"total": 3, "or": 1, "and": 1, "sections": 2}
     assert "Działki" in (out / "report.md").read_text(encoding="utf-8")
+
+
+def test_reports_grounding_notes_and_coi_issues(
+    materials: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data = _analysis(entity_ids=["REGON"])
+    data["subject_pages"][0]["sections"][0]["fields"].append({"label": "PESEL", "type": "TEXT_FIELD"})
+    _file(materials, 2, "formularz.docx", _word(TEXT + " Uzasadnienie sprawy." * 13))
+    build = generate.generator.build_form
+
+    def introduce_coi_issues(analysis) -> dict:
+        form = build(analysis)
+        item = form["tabs"][1]["questions"][0]["field"]["repeatingSectionGrid"][0]["field"]
+        item["validation"].append("PESEL")
+        item["dictionaryName"] = "Działki"
+        return form
+
+    monkeypatch.setattr(generate.generator, "build_form", introduce_coi_issues)
+    out = tmp_path / "out"
+    transport = _TrackedTransport([_reply(json.dumps(data))])
+    assert _run(out, "2", transport=transport) == 0
+    row, = _report(out)
+    grounding = row["grounding"]
+    assert grounding["corrections"] == 2
+    assert any("REGON" in note for note in grounding["notes"])
+    assert any("PESEL" in note for note in grounding["notes"])
+    assert any("Brak oparcia w tekście" in note for note in grounding["notes"])
+    assert "PESEL" in row["quality"]["validator_issues"][0]
+    assert "Działki" in row["quality"]["dictionary_issues"][0]
+    corrected = json.loads((out / "F2.analysis.json").read_text(encoding="utf-8"))
+    assert corrected["applicant"]["entity_ids"] == []
+    fields = corrected["subject_pages"][0]["sections"][0]["fields"]
+    assert [field["label"] for field in fields] == ["Dyscypliny", "Cel"]
+    md = (out / "report.md").read_text(encoding="utf-8")
+    assert "**Korekty strażnika** 2" in md
+    assert "**Uwagi o walidatorach** 1" in md
+    assert "**Uwagi o słownikach** 1" in md
+    assert all(note not in md for note in grounding["notes"])

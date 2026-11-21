@@ -57,6 +57,8 @@ Decyzje lidera po recenzji P0 (2026-11-21). Kod: `backend/app/errors.py`, `backe
 
 - **P1.4.** Alternatywy i koniunkcje SHOW na polach i sekcjach przedmiotu, wcześniejsze źródła między stronami i wykrywanie cykli. F9 jest jednym formularzem z czterema warunkowymi miejscami dla podopiecznych.
 
+- **P4.** Strażnik wyłącza decyzje wnioskodawcy bez przesłanki, usuwa wskazane duplikaty z ochroną źródeł `SHOW` i raportuje pozostałe braki oparcia. Kontrola walidatorów respektuje wyjątek P1 dla `readOnly`. Reguła `Kraje` obejmuje etykiety kraju na polach bez odwołań z `show_if` i `show_if_all`. Dotyczy `TEXT_FIELD` oraz `SELECT` i `RADIO` z co najmniej pięcioma opcjami bez znormalizowanych wartości „tak”, „nie”, „inny” i „inne”.
+
 M1.1 (Marcin):
 
 | What                    | Why                                                         | Licence    |
@@ -154,6 +156,15 @@ K2.3 (Mikołaj): `pypdf` 7.1.1 (BSD-3-Clause, bez wymaganych zależności) czyta
 z bajtów w pamięci. Odczyt K2 zostaje lokalny i deterministyczny: COI dopuściło Eden AI, ale K2 nie
 używa zewnętrznego OCR ani kluczy API (decyzja lidera). Strona bez tekstu zostaje pusta między
 separatorami `\f` i trafia do `warnings`; jej OCR to osobny krok.
+
+LLM_CONTEXT_TOKENS (Marcin, prośba Mikołaja do K3):
+
+- Jedna zmienna `LLM_CONTEXT_TOKENS` (domyślnie 32768, min. 8192) dla `Settings` i dla Ollamy w compose
+  (`OLLAMA_CONTEXT_LENGTH: ${LLM_CONTEXT_TOKENS:-32768}`). Serwer z mniejszym kontekstem przycina prompt po cichu (K1),
+  więc obie strony muszą znać tę samą liczbę. Test pilnuje, że domyślna w compose = domyślna w `Settings`.
+- 32768 zamiast 16384: tekst formularza 8 (ok. 31 tys. znaków) nie mieści się w 16384, a 9 nie zostawia miejsca na ponowienie.
+  Koszt na CPU zmierzony dla `qwen3.5:4b` w kontenerze `ollama`: 3,7 → 4,2 GB (`ollama ps`), kontener 4,28 → 4,84 GB.
+  Modele w chmurze mają więcej (Qwen3.5-9B: 262144); wtedy `LLM_CONTEXT_TOKENS` można podnieść w `.env`.
 
 K2.4 (Mikołaj): XLSX i ODS bez nowej zależności: `zipfile` i `ElementTree` z biblioteki standardowej,
 jak DOCX w K2.1. `openpyxl` i `odfpy` z DELEGACJA niepotrzebne, więc `requirements.txt` bez zmian.

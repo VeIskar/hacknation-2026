@@ -4,6 +4,7 @@ import logging
 import tempfile
 import threading
 from collections.abc import Iterator
+from functools import partial
 from pathlib import Path
 
 import httpx
@@ -18,6 +19,7 @@ from app import main as main_module
 from app.config import Settings, get_settings
 from app.files import MSG_NAME, MSG_NO_FILE, MSG_TYPE
 from app.generator import build_form
+from app.generator.coi import iter_fields
 from app.llm import UNAVAILABLE_DETAIL
 from app.main import MSG_SERVER_ERROR, app, request_validation_handler
 from app.models import FormAnalysis
@@ -219,6 +221,7 @@ def test_default_limit_comes_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
 # M1.4: prawdziwy łańcuch extract → analyze → build_form → lint.check, model zastępuje LLM_FIXTURE.
 PDF_WITH_TEXT = pdf("WNIOSEK O STWIERDZENIE NADPLATY PODATKU\nDane wnioskodawcy\nKwota nadplaty")
 DOCX_WITH_TEXT = docx("<w:p><w:r><w:t>Wniosek o stwierdzenie nadpłaty podatku</w:t></w:r></w:p>")
+LONG_PDF_WITH_TEXT = pdf("Uzasadnienie sprawy. " * 13)
 EXPECTED_FORM = build_form(FormAnalysis.model_validate_json(FIELDS.read_text(encoding="utf-8")))
 
 
@@ -229,13 +232,47 @@ def pipeline() -> Iterator[TestClient]:
     app.dependency_overrides.clear()
 
 
-@pytest.mark.parametrize(("filename", "data"), [("wniosek.pdf", PDF_WITH_TEXT), ("wniosek.docx", DOCX_WITH_TEXT)])
+@pytest.mark.parametrize(("filename", "data"), [
+    ("wniosek.pdf", PDF_WITH_TEXT), ("wniosek.docx", DOCX_WITH_TEXT),
+    pytest.param("dlugi.pdf", LONG_PDF_WITH_TEXT, id="fixture-long-text"),
+])
 def test_document_becomes_coi_json_that_passes_linter(pipeline: TestClient, filename: str, data: bytes) -> None:
     response = post(pipeline, filename, data)
     assert response.status_code == 200, response.text
     form = response.json()
     assert lint.check(form) == []
     assert form == EXPECTED_FORM
+
+
+def test_api_grounds_model_output_before_building_coi(
+    pipeline: TestClient, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+) -> None:
+    answer = json.loads(FIELDS.read_text(encoding="utf-8"))
+    answer["applicant"].update(applicant_pesel=True, entity_ids=["REGON"], entity_ids_one_of=False)
+    answer["subject_pages"][0]["sections"][0]["fields"].append({"label": "PESEL", "type": "TEXT_FIELD"})
+    received = []
+
+    def model(request: httpx.Request) -> httpx.Response:
+        received.append(request.url.host)
+        return httpx.Response(200, json={
+            "choices": [{"message": {"content": json.dumps(answer)}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 3000, "completion_tokens": 120},
+        })
+
+    monkeypatch.setattr(main_module, "analyze", partial(main_module.analyze, transport=httpx.MockTransport(model)))
+    app.dependency_overrides[get_settings] = lambda: Settings(llm_base_url="http://model.test/v1")
+    with caplog.at_level(logging.INFO, logger="app.main"):
+        response = post(pipeline, "dlugi.pdf", pdf("PESEL. " + "Uzasadnienie sprawy. " * 13))
+    assert response.status_code == 200, response.text
+    assert received == ["model.test"]
+    form = response.json()
+    assert lint.check(form) == []
+    assert not any(field["title"] == "REGON" for page in form["tabs"] for field in iter_fields(page))
+    assert not any(field["title"] == "PESEL" for page in form["tabs"][1:-2] for field in iter_fields(page))
+    assert any(field["techName"] == "numer_pesel" for field in iter_fields(form["tabs"][0]))
+    [entry] = [record for record in caplog.records if record.name == "app.main" and "Korekty strażnika" in record.msg]
+    assert len(entry.args) == 2 and all(type(count) is int for count in entry.args)
+    assert entry.args[0] >= 2
 
 
 def test_document_without_text_is_400(pipeline: TestClient) -> None:

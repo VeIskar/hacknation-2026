@@ -18,7 +18,7 @@ import pytest
 from pydantic import ValidationError
 from starlette.responses import JSONResponse
 
-from app import lint
+from app import lint, quality
 from app.generator import build_form, template
 from app.generator import form as generator_form
 from app.generator.coi import Names, choice_options, jsonata_string, slug
@@ -757,6 +757,8 @@ def test_applicant_decision_matrix_passes_lint(applicants: str, count: int) -> N
             continue
         form = build_form(a)
         assert lint.check(form) == [], (applicants, decisions)
+        assert quality.validator_issues(form) == [], (applicants, decisions)
+        assert quality.dictionary_issues(form) == [], (applicants, decisions)
         for item in elements(form).values():
             if item["type"] == "RADIO":
                 assert len(item["options"]) >= 2, (applicants, decisions, item["techName"])
