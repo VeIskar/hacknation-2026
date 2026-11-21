@@ -56,6 +56,13 @@ Krok P1.2a: wymagany kontrakt MVP `FormAnalysis.applicant` i jawne `applicants`.
 - `DECISIONS.md` i „Requests”: decyzja MVP oraz treści do zgłoszenia liderowi.
 - Dowód: czerwone nowe testy, mutacje reguł i Unicode, `bash scripts/gate.sh api -rs` bez pominięć, przegląd nazw plików.
 
+Krok P1.2b: dobór sekcji z `FormAnalysis.applicant` i warunki SHOW.
+
+- `backend/tests/test_generator.py`: najpierw regresje F2–F4 i F6–F9, pełna macierz z P2 i dokładny wzorzec 5.
+- `backend/app/generator/`: dobór ścieżek i sekcji, korespondencja, pola dodatkowe oraz kontakt.
+- `DECISIONS.md`: zastąpienie GD2 i uzasadnienie wyjątku D5.
+- Dowód: mutacje, porównanie z `origin/main` poza UUID, `bash scripts/gate.sh api -rs` i kontrola zakresu diffu.
+
 ## Requests
 
 (one line per change you need from another area: who asks, what, why)
@@ -85,3 +92,4 @@ Krok P1.2a: wymagany kontrakt MVP `FormAnalysis.applicant` i jawne `applicants`.
 - M1.2: done `auth.py` (Bearer, HMAC, wymagany `exp`, sekret 32/48/64 B), 401 z `WWW-Authenticate` przed odczytem pliku, `/health` otwarte, `python -m app.auth token`, PyJWT 2.15.1 (MIT); `gate.sh api -rs` → 187 passed, 0 pominiętych; mutacje (bez zależności, bez `exp`, bez nagłówka) wykryte / next M1.3 Docker / blocker brak.
 - M1.2 recenzja (subagent `reviewer`, werdykt SHIP): 0 CONFIRMED, 5 LATER (REVIEW.md): `JWT_*`/`MAX_FILE_SIZE_MB` w compose → M1.3, `securitySchemes` w OpenAPI → M1.6, kolejność w DECISIONS, walidacja sekretu przy starcie, 2 testy; `gate.sh` → 187 passed / next rebase na `origin/main`, M1.3 / blocker brak.
 - P1.2a: done kontrakt MVP, 5 fixture’ów, 29 nowych przypadków czerwonych przed wdrożeniem i 25/25 mutacji wykrytych, `bash scripts/gate.sh api -rs` → `397 passed`, 0 pominiętych, 1 ostrzeżenie Starlette, `GATE: PASS (api)` / next commit człowieka i aktualizacja dokumentów przez lidera / blocker brak.
+- P1.2b: done dobór sekcji i SHOW, regresje F2–F4 i F6–F9, 2 976 kombinacji z P2 (1,76 s), 36/36 mutacji; trzy fixture’y identyczne z `origin/main`, ENTITY zmieniony zgodnie z nowymi regułami; `bash scripts/gate.sh api -rs` → `441 passed`, 0 pominiętych, 1 ostrzeżenie Starlette, `GATE: PASS (api)` / next commit człowieka / blocker brak.

@@ -147,7 +147,7 @@ def answer_is_not(option: str, page: str, section: str, field_name: str) -> str:
 
 
 def show(query: str) -> list[dict]:
-    return [{"type": "SHOW", "query": query}]
+    return [{"type": "SHOW", "query": query}] if query else []
 
 
 # --- pola, sekcje, strony -------------------------------------------------------------------------

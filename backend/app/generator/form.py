@@ -29,7 +29,7 @@ from app.generator.coi import (
     show,
     tab,
 )
-from app.models import FieldType, FormAnalysis, SubjectField, SubjectPage
+from app.models import FieldType, FormAnalysis, SubjectField, SubjectSection
 
 # SZABLONY, rozdz. 5: walidatory to nasze rozszerzenie. False = validation [] wszędzie, jak we wzorcach.
 ADD_VALIDATORS = True
@@ -40,14 +40,15 @@ ID_NAMESPACE = uuid.UUID("7319e414-8854-44a5-ae2b-fdac98e7d0b9")
 
 def build_form(a: FormAnalysis) -> dict:
     """Gotowy JSON COI: „Dane”, strony przedmiotu, „Kontakt i zgody”, „Strona końcowa”, flow."""
-    standard = [template.data_page(a), template.contact_page(a), template.finish_page(a)]
+    data, contact, finish = template.data_page(a), template.contact_page(a), template.finish_page(a)
     names = Names()
-    for page in standard:
+    for page in (data, contact, finish):
         for item in iter_fields(page):
             names.reserve(item["techName"])
+    if a.applicant.applicant_extra_fields:
+        data = _add_applicant_fields(data, a.applicant.applicant_extra_fields, names)
     titles = subject_page_titles(page.title for page in a.subject_pages)
-    subject = [_subject_tab(page, title, names) for page, title in zip(a.subject_pages, titles, strict=True)]
-    data, contact, finish = standard
+    subject = [tab(title, _subject_sections(page.sections, title, names)) for page, title in zip(a.subject_pages, titles, strict=True)]
     form = {"title": a.title, "tabs": [data, *subject, contact, finish], "flow": {"links": []}}
     _assign_ids(form, uuid.uuid5(ID_NAMESPACE, canonical_json(a)))
     if not ADD_VALIDATORS:
@@ -86,14 +87,25 @@ def subject_page_titles(titles: Iterable[str]) -> list[str]:
     return result
 
 
-def _subject_tab(page: SubjectPage, title: str, names: Names) -> dict:
-    """Strona przedmiotu: najpierw nazwy wszystkich sekcji i pól, potem warunki SHOW po etykiecie.
+def _add_applicant_fields(page: dict, fields: list[SubjectField], names: Names) -> dict:
+    subject = SubjectSection(title="Dodatkowe dane wnioskodawcy", fields=fields)
+    [extra] = _subject_sections([subject], page["title"], names)
+    sections = [question["field"] for question in page["questions"]]
+    index = next(
+        (index for index, item in enumerate(sections) if item["techName"] == template.POWER_OF_ATTORNEY),
+        len(sections),
+    )
+    sections.insert(index, extra)
+    return tab(page["title"], sections)
 
-    show_if może wskazywać pole z innej sekcji tej strony, także dalszej. Etykieta wskazana
-    w show_if jest na stronie jedna (FormAnalysis), więc mapowanie etykieta -> techName jest pewne.
+
+def _subject_sections(source_sections: list[SubjectSection], title: str, names: Names) -> list[dict]:
+    """Najpierw nazwy sekcji i pól w przekazanym zakresie, potem warunki SHOW po etykiecie.
+
+    Dla stron przedmiotu zakres to cała strona. Dodatkowe dane wnioskodawcy mają własną sekcję.
     """
     section_names, field_names, located = [], [], {}
-    for subject_section in page.sections:
+    for subject_section in source_sections:
         section_name = names.claim(subject_section.title, "sekcja")
         names_in_section = [names.claim(subject_field.label, "pole") for subject_field in subject_section.fields]
         for subject_field, field_name in zip(subject_section.fields, names_in_section, strict=True):
@@ -102,7 +114,7 @@ def _subject_tab(page: SubjectPage, title: str, names: Names) -> dict:
         field_names.append(names_in_section)
 
     sections = []
-    for subject_section, section_name, names_in_section in zip(page.sections, section_names, field_names, strict=True):
+    for subject_section, section_name, names_in_section in zip(source_sections, section_names, field_names, strict=True):
         fields = []
         for subject_field, field_name in zip(subject_section.fields, names_in_section, strict=True):
             states = []
@@ -111,7 +123,7 @@ def _subject_tab(page: SubjectPage, title: str, names: Names) -> dict:
                 states = show(answer_is(subject_field.show_if.equals, title, source_section, source_field))
             fields.append(_subject_field(subject_field, field_name, states))
         sections.append(section(section_name, subject_section.title, fields, body=paragraphs(subject_section.description)))
-    return tab(title, sections)
+    return sections
 
 
 def _subject_field(subject_field: SubjectField, tech_name: str, states: list[dict]) -> dict:
