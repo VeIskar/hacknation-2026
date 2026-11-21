@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from functools import cache
 
 MB = 1024 * 1024
+# Odpowiedź modelu ma do 4096 tokenów (ANSWER_TOKENS w analysis.py); mniejszy kontekst nie mieści dokumentu.
+MIN_CONTEXT_TOKENS = 8192
 _TRUE = {"1", "true", "yes", "on"}
 
 
@@ -50,6 +52,8 @@ class Settings:
     llm_model: str = "qwen3.5:4b"
     llm_api_key: str = "ollama"
     llm_timeout_s: float = 120.0
+    # Kontekst serwera modelu w tokenach. Ten sam dla Ollamy (compose) i budżetu analizy (K3).
+    llm_context_tokens: int = 32768
     llm_fixture: str | None = None
     ocr_lang: str = "pol"
     add_validators: bool = True
@@ -60,6 +64,11 @@ class Settings:
             raise ValueError(f"MAX_FILE_SIZE_MB ma być dodatnią liczbą całkowitą, jest {self.max_file_size_mb!r}")
         if not (math.isfinite(self.llm_timeout_s) and self.llm_timeout_s > 0):
             raise ValueError(f"LLM_TIMEOUT_S ma być dodatnią liczbą, jest {self.llm_timeout_s!r}")
+        if isinstance(self.llm_context_tokens, bool) or self.llm_context_tokens < MIN_CONTEXT_TOKENS:
+            raise ValueError(
+                f"LLM_CONTEXT_TOKENS ma być liczbą całkowitą co najmniej {MIN_CONTEXT_TOKENS}, "
+                f"jest {self.llm_context_tokens!r}"
+            )
 
     @property
     def max_file_bytes(self) -> int:
@@ -76,6 +85,7 @@ class Settings:
             llm_model=_env("LLM_MODEL", "qwen3.5:4b"),
             llm_api_key=_env("LLM_API_KEY", "ollama"),
             llm_timeout_s=_env_positive_float("LLM_TIMEOUT_S", 120.0),
+            llm_context_tokens=_env_positive_int("LLM_CONTEXT_TOKENS", 32768),
             llm_fixture=os.environ.get("LLM_FIXTURE") or None,
             ocr_lang=_env("OCR_LANG", "pol"),
             add_validators=_env_bool("ADD_VALIDATORS", True),
