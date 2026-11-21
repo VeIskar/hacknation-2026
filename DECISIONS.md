@@ -57,6 +57,8 @@ Decyzje lidera po recenzji P0 (2026-11-21). Kod: `backend/app/errors.py`, `backe
 
 - **P1.4.** Alternatywy i koniunkcje SHOW na polach i sekcjach przedmiotu, wcześniejsze źródła między stronami i wykrywanie cykli. F9 jest jednym formularzem z czterema warunkowymi miejscami dla podopiecznych.
 
+- **P4.** Strażnik wyłącza decyzje wnioskodawcy bez przesłanki, usuwa wskazane duplikaty z ochroną źródeł `SHOW` i raportuje pozostałe braki oparcia. Kontrola walidatorów respektuje wyjątek P1 dla `readOnly`. Reguła `Kraje` obejmuje etykiety kraju na polach bez odwołań z `show_if` i `show_if_all`. Dotyczy `TEXT_FIELD` oraz `SELECT` i `RADIO` z co najmniej pięcioma opcjami bez znormalizowanych wartości „tak”, „nie”, „inny” i „inne”.
+
 M1.1 (Marcin):
 
 | What                    | Why                                                         | Licence    |
