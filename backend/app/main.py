@@ -5,6 +5,7 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from app.auth import AuthError, require_token
 from app.config import Settings, get_settings
 from app.errors import AppError
 from app.files import MSG_NO_FILE, read_single_file, validate_upload
@@ -36,6 +37,14 @@ async def app_error_handler(_: Request, exc: AppError) -> JSONResponse:
     return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
 
 
+@app.exception_handler(AuthError)
+async def auth_error_handler(_: Request, exc: AuthError) -> JSONResponse:
+    # RFC 6750, 3: odpowiedź 401 mówi, jakiego schematu oczekujemy.
+    return JSONResponse(
+        {"detail": exc.detail}, status_code=exc.status_code, headers={"WWW-Authenticate": "Bearer"}
+    )
+
+
 @app.exception_handler(RequestValidationError)
 async def request_validation_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
     # D2: bez 422, detail zawsze tekstem (front pokazuje go bez zmian).
@@ -58,7 +67,7 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post("/api/forms", openapi_extra=UPLOAD_BODY)
+@app.post("/api/forms", openapi_extra=UPLOAD_BODY, dependencies=[Depends(require_token)])
 async def create_form(
     request: Request, settings: Annotated[Settings, Depends(get_settings)]
 ) -> JSONResponse:
