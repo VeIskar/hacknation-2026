@@ -9,6 +9,7 @@ import logging
 import re
 from dataclasses import dataclass, replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Annotated, Any
 
 import httpx
@@ -17,7 +18,7 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from app import analysis
+from app import analysis, llm
 from app.analysis import (
     CORRECTION_INTRO,
     CORRECTION_OUTRO,
@@ -219,6 +220,62 @@ def test_model_failure_is_503_and_is_not_retried() -> None:
     with pytest.raises(LLMUnavailable) as caught:
         _run(model)
     assert caught.value.detail == UNAVAILABLE_DETAIL
+    assert len(model.requests) == 1
+
+
+def _model_clock(monkeypatch: pytest.MonkeyPatch, *ticks: float) -> None:
+    clock = iter(ticks)
+    monkeypatch.setattr(llm, "time", SimpleNamespace(perf_counter=lambda: next(clock)))
+
+
+def test_retry_is_skipped_when_the_projected_time_exceeds_d11(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+) -> None:
+    _model_clock(monkeypatch, 0, 90, 90, 100)
+    model = FakeModel("{}", VALID)
+    with pytest.raises(LLMUnavailable) as caught:
+        _run(model)
+    assert caught.value.status_code == 503
+    assert len(model.requests) == 1
+    assert any(
+        record.levelno == logging.WARNING
+        and "pominięto ponowienie: budżet D11" in record.getMessage()
+        and "próby 90.0 s, ostatnia 90.0 s, prognoza 189.0 s, budżet 170.0 s" in record.getMessage()
+        for record in caplog.records
+    )
+
+
+def test_retry_is_sent_when_the_projected_time_equals_the_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    _model_clock(monkeypatch, 0, 50, 50, 80)
+    model = FakeModel("{}", VALID)
+    settings = replace(SETTINGS, llm_analysis_budget_s=105.0)
+    assert analyze(DOC, settings=settings, transport=model.transport) == FormAnalysis.model_validate_json(VALID)
+    assert len(model.requests) == 2
+
+
+@pytest.mark.parametrize(("elapsed_second", "expected_requests"), [(40, 3), (50, 2)])
+def test_third_attempt_uses_the_sum_of_previous_attempts(
+    monkeypatch: pytest.MonkeyPatch, elapsed_second: int, expected_requests: int,
+) -> None:
+    end_second = 70 + elapsed_second
+    _model_clock(monkeypatch, 0, 70, 70, end_second, end_second, end_second + 10)
+    model = FakeModel("{}", "{}", VALID)
+    settings = replace(SETTINGS, llm_max_attempts=3)
+    if expected_requests == 3:
+        assert analyze(DOC, settings=settings, transport=model.transport) == FormAnalysis.model_validate_json(VALID)
+    else:
+        with pytest.raises(LLMUnavailable):
+            analyze(DOC, settings=settings, transport=model.transport)
+    assert len(model.requests) == expected_requests
+
+
+def test_max_attempts_one_sends_no_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    _model_clock(monkeypatch, 0, 1)
+    model = FakeModel("{}", VALID)
+    settings = replace(SETTINGS, llm_max_attempts=1)
+    with pytest.raises(LLMUnavailable) as caught:
+        analyze(DOC, settings=settings, transport=model.transport)
+    assert caught.value.status_code == 503
     assert len(model.requests) == 1
 
 

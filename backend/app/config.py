@@ -93,6 +93,8 @@ class Settings:
     llm_strict_schema: bool = True
     llm_extra_body: dict[str, Any] | None = None
     llm_connect_timeout_s: float = 10.0
+    llm_analysis_budget_s: float = 170.0
+    llm_max_attempts: int = 2
 
     def __post_init__(self) -> None:
         # Bez tego 0 albo -1 dawałoby 413 dla każdego poprawnego pliku.
@@ -113,6 +115,10 @@ class Settings:
             raise ValueError("LLM_REASONING_EFFORT ma być jedną z wartości: none, minimal, low, medium, high, xhigh, off")
         if not (math.isfinite(self.llm_connect_timeout_s) and self.llm_connect_timeout_s > 0):
             raise ValueError("LLM_CONNECT_TIMEOUT_S ma być dodatnią liczbą")
+        if not (math.isfinite(self.llm_analysis_budget_s) and self.llm_analysis_budget_s > 0):
+            raise ValueError("LLM_ANALYSIS_BUDGET_S ma być dodatnią liczbą")
+        if type(self.llm_max_attempts) is not int or not 1 <= self.llm_max_attempts <= 3:
+            raise ValueError("LLM_MAX_ATTEMPTS ma być liczbą całkowitą od 1 do 3")
 
     @property
     def max_file_bytes(self) -> int:
@@ -143,6 +149,8 @@ class Settings:
             llm_strict_schema=strict_schema == "true",
             llm_extra_body=_env_extra_body(),
             llm_connect_timeout_s=_env_positive_float("LLM_CONNECT_TIMEOUT_S", 10.0),
+            llm_analysis_budget_s=_env_positive_float("LLM_ANALYSIS_BUDGET_S", 170.0),
+            llm_max_attempts=_env_positive_int("LLM_MAX_ATTEMPTS", 2),
         )
 
 

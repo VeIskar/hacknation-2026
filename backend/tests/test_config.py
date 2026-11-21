@@ -170,3 +170,39 @@ def test_k31_options_match_in_sample_compose_and_settings() -> None:
     }
     assert names <= _env_example_names() & _compose_api_environment()
     assert all(hasattr(Settings(), name.lower()) for name in names)
+
+
+def test_d11_settings_are_listed_for_compose_and_have_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    names = {"LLM_ANALYSIS_BUDGET_S", "LLM_MAX_ATTEMPTS"}
+    assert names <= _env_example_names() & _compose_api_environment()
+    for name in names:
+        monkeypatch.delenv(name, raising=False)
+    settings = Settings.from_env()
+    assert (settings.llm_analysis_budget_s, settings.llm_max_attempts) == (170.0, 2)
+    for name in names:
+        monkeypatch.setenv(name, "")
+    assert Settings.from_env() == settings
+
+
+@pytest.mark.parametrize("attempts", [1, 3])
+def test_d11_settings_read_valid_nondefaults(monkeypatch: pytest.MonkeyPatch, attempts: int) -> None:
+    monkeypatch.setenv("LLM_ANALYSIS_BUDGET_S", "125.5")
+    monkeypatch.setenv("LLM_MAX_ATTEMPTS", str(attempts))
+    settings = Settings.from_env()
+    assert (settings.llm_analysis_budget_s, settings.llm_max_attempts) == (125.5, attempts)
+
+
+@pytest.mark.parametrize(("name", "value"), [
+    ("LLM_ANALYSIS_BUDGET_S", "0"),
+    ("LLM_ANALYSIS_BUDGET_S", "-1"),
+    ("LLM_ANALYSIS_BUDGET_S", "nan"),
+    ("LLM_ANALYSIS_BUDGET_S", "inf"),
+    ("LLM_ANALYSIS_BUDGET_S", "abc"),
+    ("LLM_MAX_ATTEMPTS", "0"),
+    ("LLM_MAX_ATTEMPTS", "4"),
+    ("LLM_MAX_ATTEMPTS", "1.5"),
+])
+def test_invalid_d11_settings_prevent_api_startup(monkeypatch: pytest.MonkeyPatch, name: str, value: str) -> None:
+    monkeypatch.setenv(name, value)
+    with pytest.raises(ValueError, match=name), TestClient(app):
+        pass

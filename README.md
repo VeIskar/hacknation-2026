@@ -61,23 +61,43 @@ Aplikacja: http://127.0.0.1:5173. API: http://127.0.0.1:8000, opis OpenAPI: http
   `--build` kontener działa na starym kodzie.
 - Zatrzymanie: `docker compose down`. **Bez `-v`**, bo `-v` usuwa wolumen z modelem.
 
-### Model: lokalnie albo przez API
+### Model lokalny (domyślnie)
 
 Domyślnie `api` woła lokalną Ollamę (`http://ollama:11434/v1`, model `qwen3.5:4b`). Na samym CPU
-analiza jednego formularza trwa kilka minut (pomiar K1: 238–344 s). To więcej niż domyślny limit
-`LLM_TIMEOUT_S=120`.
+sam model w pomiarze K1 potrzebował 238–344 s na formularz. Tryb lokalny przekracza więc granicę
+200 s na cały proces z D11 (cel to ok. 180 s). Do pomiarów lokalnych można zwiększyć `LLM_TIMEOUT_S`.
 
-Można też użyć **otwartego** modelu przez API zgodne z OpenAI, np. Qwen3.5-9B w Eden AI. Model musi
-dać się uruchomić na własnej infrastrukturze. Modele zamknięte, dostępne tylko jako usługa, są
-niedozwolone. W `.env`:
+### Model w chmurze: Eden AI (D9)
 
+Po włączeniu obsługi `LLM_PROVIDER` z M1.7 można użyć Eden AI organizatorów. D9 dopuszcza tylko
+modele otwarte, które można uruchomić na własnej infrastrukturze, np. `ovhcloud/Qwen3.5-9B`.
+W trybie Eden AI treść przesłanego pliku trafia do Eden AI jako tekst lub obrazy stron.
+
+W powłoce Bash podaj klucz do środowiska w chwili uruchomienia. Nie zapisuj go w `.env` ani w repozytorium.
+
+```bash
+(
+  export LLM_PROVIDER=edenai
+  export LLM_BASE_URL=https://api.eu.edenai.run/v3
+  export LLM_MODEL=ovhcloud/Qwen3.5-9B
+  export LLM_CONTEXT_TOKENS=65536
+  export LLM_MAX_TOKENS=8192
+  export LLM_FIXTURE=
+  read -rs -p 'Klucz Eden AI: ' LLM_API_KEY
+  printf '\n'
+  export LLM_API_KEY
+
+  # Aplikacja w kontenerach albo pomiar formularzy z powłoki.
+  docker compose up -d --build api web
+  backend/.venv/bin/python scripts/generate_forms.py --out ../generated-forms-eden
+)
 ```
-LLM_BASE_URL=https://api.edenai.run/v3
-LLM_MODEL=<dostawca/model z katalogu Eden AI, np. together_ai/Qwen/Qwen3.5-9B>
-LLM_API_KEY=<klucz Eden AI>
-```
 
-Katalog modeli: `curl -s https://api.edenai.run/v3/models`. Klucz trzymaj tylko w `.env`.
+- Jeśli trasa odrzuci `reasoning_effort` lub `temperature`, ustaw odpowiednio
+  `LLM_REASONING_EFFORT=off` lub `LLM_TEMPERATURE=off`.
+- Jeśli trasa odrzuci `strict: true`, ustaw `LLM_STRICT_SCHEMA=false`.
+- Jeśli model zwraca tok rozumowania, wypróbuj
+  `LLM_EXTRA_BODY='{"chat_template_kwargs":{"enable_thinking":false}}'`.
 
 Przy prawdziwym uruchomieniu `LLM_FIXTURE` musi być pusty. Ustawiony zastępuje model plikiem, więc
 każdy dokument dostaje tę samą analizę. Służy tylko testom.
@@ -89,14 +109,22 @@ Zmienne z `env.example`. Compose przekazuje je do `api`, a pusta wartość daje 
 | Zmienna | Domyślnie | Znaczenie |
 |---|---|---|
 | `MAX_FILE_SIZE_MB` | `10` | Limit pliku w MB. Większy plik daje 413. Liczba całkowita > 0, inaczej API nie startuje |
-| `JWT_ENABLED` | `false` | `true`: `POST /api/forms` wymaga tokenu JWT. `/health` jest zawsze otwarte |
+| `JWT_ENABLED` | `false` | `true`: `POST /api/forms` wymaga tokenu JWT. `/health` i `/api/info` są otwarte |
 | `JWT_SECRET` | – | Sekret JWT, co najmniej 32/48/64 bajty dla HS256/HS384/HS512 |
 | `JWT_ALGORITHM` | `HS256` | `HS256`, `HS384` albo `HS512` |
 | `LLM_BASE_URL` | compose: `http://ollama:11434/v1`, lokalnie: `http://localhost:11434/v1` | Serwer modelu zgodny z OpenAI. Dla Ollamy z compose zostaw w `.env` pusty |
 | `LLM_MODEL` | `qwen3.5:4b` | Nazwa modelu na serwerze |
 | `LLM_API_KEY` | `ollama` | Klucz API. Ollama go nie sprawdza |
-| `LLM_TIMEOUT_S` | `120` | Limit jednego zapytania do modelu w sekundach. Analiza robi do 2 prób. Przekroczenie daje 503 |
-| `LLM_CONTEXT_TOKENS` | `32768` | Kontekst modelu w tokenach, min. `8192`. Compose podaje tę samą liczbę Ollamie. Modele w chmurze pozwalają na więcej (Qwen3.5-9B: 262144). Analiza (K3) liczy budżet jeszcze od stałej 16384 |
+| `LLM_TIMEOUT_S` | `120` | Timeout dla pojedynczego zapytania w sekundach. Przekroczenie daje 503 |
+| `LLM_CONNECT_TIMEOUT_S` | `10` | Limit na nawiązanie połączenia z modelem w sekundach |
+| `LLM_CONTEXT_TOKENS` | `32768` | Kontekst analizy w tokenach, min. `8192`. Compose podaje tę samą liczbę Ollamie |
+| `LLM_MAX_TOKENS` | Ollama `4096`, Eden AI `8192` | Limit tokenów odpowiedzi uwzględniany w budżecie kontekstu |
+| `LLM_TEMPERATURE` | `0` | Temperatura od 0 do 2. `off` pomija parametr |
+| `LLM_REASONING_EFFORT` | `none` | Ustawienie toku rozumowania. `off` pomija parametr |
+| `LLM_STRICT_SCHEMA` | `true` | Wartość `strict` w żądaniu schematu JSON. Dopuszczalne `true` i `false` |
+| `LLM_EXTRA_BODY` | pusty | Obiekt JSON z dodatkowymi parametrami. Własne ustawienia klienta, w tym model, wiadomości i format odpowiedzi, mają pierwszeństwo |
+| `LLM_ANALYSIS_BUDGET_S` | `170` | Budżet czasu prób w sekundach do sprawdzenia przed ponowieniem. Analiza sumuje czasy prób i dodaje 110% czasu ostatniej. Przekroczenie prognozy daje 503 |
+| `LLM_MAX_ATTEMPTS` | `2` | Łączna liczba prób analizy, od 1 do 3 |
 | `LLM_FIXTURE` | pusty | Ścieżka do pliku `FormAnalysis`. Gdy ustawiona, model nie jest wołany (testy) |
 | `OCR_LANG` | `pol` | Język Tesseract dla skanów |
 | `ADD_VALIDATORS` | `true` | Walidatory (PESEL, NIP, REGON, ZIP_CODE, EMAIL) w JSON-ie. **Obecnie bez skutku**: generator używa stałej `app.generator.form.ADD_VALIDATORS` |
@@ -112,6 +140,15 @@ ten sam kontekst. Ma też `OLLAMA_KEEP_ALIVE` (domyślnie `24h`: model zostaje w
 ```bash
 curl http://127.0.0.1:8000/health
 # 200 {"status":"ok"}
+```
+
+### `GET /api/info`
+
+Zwraca skonfigurowanego dostawcę i model. Token JWT jest zbędny.
+
+```bash
+curl http://127.0.0.1:8000/api/info
+# 200 {"llm":"ollama","model":"qwen3.5:4b"}
 ```
 
 ### `POST /api/forms`

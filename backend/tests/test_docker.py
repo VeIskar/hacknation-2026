@@ -119,3 +119,9 @@ def test_api_talks_to_ollama_service_by_default() -> None:
         "LLM_BASE_URL",
         "http://ollama:11434/v1",
     )
+
+
+def test_compose_passes_d11_settings_to_api() -> None:
+    api = environment("api")
+    for name in ("LLM_ANALYSIS_BUDGET_S", "LLM_MAX_ATTEMPTS"):
+        assert interpolation(api[name]) == (name, "")
