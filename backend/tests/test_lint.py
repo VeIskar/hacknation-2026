@@ -362,6 +362,26 @@ def test_flow_cycle_with_a_way_to_finish(working_copy: dict) -> None:
     assert lint.check(working_copy) == []
 
 
+
+@pytest.mark.parametrize("return_kind", ["SHOW", "READ_ONLY"])
+def test_lint_detects_only_show_cycles_between_pages(working_copy: dict, return_kind: str) -> None:
+    later = _add_choice_page(
+        working_copy, "Dodatkowy wybór", {"id": "tak", "name": "Tak"}, member="id", repeating=False,
+    )
+    _change(working_copy, f"{CHOICE_FIELD}.states", [{"type": "SHOW", "query": later}])
+    later_field = "tabs[3].questions[0].field.repeatingSectionGrid[0].field"
+    _change(working_copy, f"{later_field}.states", [{"type": return_kind, "query": _choice_query(working_copy)}])
+    expected = [f"{later_field}.states[0].query: cykl zależności SHOW"] if return_kind == "SHOW" else []
+    assert lint.check(working_copy) == expected
+
+
+@pytest.mark.parametrize("target", [CHOICE_FIELD, CHOICE_SECTION], ids=["self-reference", "hidden-source"])
+def test_lint_detects_cycle_when_show_hides_its_own_source(working_copy: dict, target: str) -> None:
+    _change(working_copy, f"{CHOICE_FIELD}.states", [])
+    _change(working_copy, f"{target}.states", [{"type": "SHOW", "query": _choice_query(working_copy)}])
+    assert lint.check(working_copy) == [f"{target}.states[0].query: cykl zależności SHOW"]
+
+
 @pytest.mark.parametrize(("key", "message"), [
     ("page", "nie ma strony 'nieznane'"),
     ("section", "nie ma sekcji 'nieznane' na wskazanej stronie"),

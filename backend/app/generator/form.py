@@ -15,6 +15,7 @@ import re
 import unicodedata
 import uuid
 from collections.abc import Iterable
+from dataclasses import dataclass
 from itertools import pairwise
 
 from app.generator import template
@@ -65,7 +66,11 @@ def build_form(a: FormAnalysis) -> dict:
     if a.applicant.applicant_extra_fields:
         data = _add_applicant_fields(data, a.applicant.applicant_extra_fields, names)
     titles = subject_page_titles(page.title for page in a.subject_pages)
-    subject = [tab(title, _subject_sections(page.sections, title, names)) for page, title in zip(a.subject_pages, titles, strict=True)]
+    sources: dict[str, _Source] = {}
+    subject = [
+        tab(title, _subject_sections(page.sections, title, names, sources))
+        for page, title in zip(a.subject_pages, titles, strict=True)
+    ]
     form = {"title": a.title, "tabs": [data, *subject, contact, finish], "flow": {"links": []}}
     _assign_ids(form, uuid.uuid5(ID_NAMESPACE, canonical_json(a)))
     if not ADD_VALIDATORS:
@@ -77,7 +82,26 @@ def build_form(a: FormAnalysis) -> dict:
 
 def canonical_json(a: FormAnalysis) -> str:
     """Treść analizy niezależna od kolejności pól w modelu; z niej pochodzą identyfikatory."""
-    return json.dumps(a.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
+    data = a.model_dump(mode="json")
+    for page in data["subject_pages"]:
+        for section_data in page["sections"]:
+            _omit_empty_conditions(section_data)
+            if section_data["show_if"] is None:
+                del section_data["show_if"]
+            for field_data in section_data["fields"]:
+                _omit_empty_conditions(field_data)
+    for field_data in data["applicant"]["applicant_extra_fields"]:
+        _omit_empty_conditions(field_data)
+    return json.dumps(data, sort_keys=True, ensure_ascii=False)
+
+
+def _omit_empty_conditions(item: dict) -> None:
+    """Puste pola dodane w P1.4 nie zmieniają wejścia do UUID5."""
+    for condition in (item["show_if"], *item["show_if_all"]):
+        if condition is not None and not condition["any_of"]:
+            del condition["any_of"]
+    if not item["show_if_all"]:
+        del item["show_if_all"]
 
 
 def _title_key(title: str) -> str:
@@ -105,8 +129,20 @@ def subject_page_titles(titles: Iterable[str]) -> list[str]:
 
 
 def _add_applicant_fields(page: dict, fields: list[SubjectField], names: Names) -> dict:
-    subject = SubjectSection(title="Dodatkowe dane wnioskodawcy", fields=fields)
-    [extra] = _subject_sections([subject], page["title"], names)
+    title = "Dodatkowe dane wnioskodawcy"
+    section_name = names.claim(title, "sekcja")
+    field_names = [names.claim(applicant_field.label, "pole") for applicant_field in fields]
+    located = {}
+    for applicant_field, field_name in zip(fields, field_names, strict=True):
+        located.setdefault(applicant_field.label, field_name)
+
+    items = []
+    for applicant_field, field_name in zip(fields, field_names, strict=True):
+        states = []
+        if condition := applicant_field.show_if:
+            states = show(answer_is(condition.equals, page["title"], section_name, located[condition.field]))
+        items.append(_subject_field(applicant_field, field_name, states))
+    extra = section(section_name, title, items)
     sections = [question["field"] for question in page["questions"]]
     index = next(
         (index for index, item in enumerate(sections) if item["techName"] == template.POWER_OF_ATTORNEY),
@@ -116,30 +152,48 @@ def _add_applicant_fields(page: dict, fields: list[SubjectField], names: Names) 
     return tab(page["title"], sections)
 
 
-def _subject_sections(source_sections: list[SubjectSection], title: str, names: Names) -> list[dict]:
-    """Najpierw nazwy sekcji i pól w przekazanym zakresie, potem warunki SHOW po etykiecie.
+@dataclass(frozen=True)
+class _Source:
+    page: str
+    section: str
+    field: str
+    guards: tuple[str, ...]
 
-    Dla stron przedmiotu zakres to cała strona. Dodatkowe dane wnioskodawcy mają własną sekcję.
-    """
-    section_names, field_names, located = [], [], {}
+
+def _show_conditions(
+    item: SubjectField | SubjectSection, sources: dict[str, _Source],
+) -> tuple[str, ...]:
+    conditions = ([item.show_if] if item.show_if is not None else []) + item.show_if_all
+    direct, inherited = [], []
+    for condition in conditions:
+        source = sources[condition.field]
+        alternatives = [
+            answer_is(option, source.page, source.section, source.field)
+            for option in (condition.equals, *condition.any_of)
+        ]
+        direct.append(f"({' or '.join(alternatives)})" if len(alternatives) > 1 else alternatives[0])
+        inherited.extend(source.guards)
+    return tuple(dict.fromkeys((*direct, *inherited)))
+
+
+def _subject_sections(
+    source_sections: list[SubjectSection], title: str, names: Names, sources: dict[str, _Source],
+) -> list[dict]:
+    """Źródła z wcześniejszych pól są już dostępne wraz z warunkami ich widoczności."""
+    sections = []
     for subject_section in source_sections:
         section_name = names.claim(subject_section.title, "sekcja")
-        names_in_section = [names.claim(subject_field.label, "pole") for subject_field in subject_section.fields]
-        for subject_field, field_name in zip(subject_section.fields, names_in_section, strict=True):
-            located.setdefault(subject_field.label, (section_name, field_name))
-        section_names.append(section_name)
-        field_names.append(names_in_section)
-
-    sections = []
-    for subject_section, section_name, names_in_section in zip(source_sections, section_names, field_names, strict=True):
+        section_guards = _show_conditions(subject_section, sources)
         fields = []
-        for subject_field, field_name in zip(subject_section.fields, names_in_section, strict=True):
-            states = []
-            if subject_field.show_if is not None:
-                source_section, source_field = located[subject_field.show_if.field]
-                states = show(answer_is(subject_field.show_if.equals, title, source_section, source_field))
-            fields.append(_subject_field(subject_field, field_name, states))
-        sections.append(section(section_name, subject_section.title, fields, body=paragraphs(subject_section.description)))
+        for subject_field in subject_section.fields:
+            field_name = names.claim(subject_field.label, "pole")
+            field_guards = _show_conditions(subject_field, sources)
+            fields.append(_subject_field(subject_field, field_name, show(" and ".join(field_guards))))
+            sources.setdefault(subject_field.label, _Source(title, section_name, field_name, section_guards + field_guards))
+        sections.append(section(
+            section_name, subject_section.title, fields,
+            body=paragraphs(subject_section.description), states=show(" and ".join(section_guards)),
+        ))
     return sections
 
 
