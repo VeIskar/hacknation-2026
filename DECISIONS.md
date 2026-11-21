@@ -145,6 +145,14 @@ K3 (Mikołaj):
 - **K3 – pomiar.** `qwen3.5:4b`, `ollama/ollama:0.40.15`, sam CPU (limit 6 GB), DOCX nadpłaty z folderu 5, tekst przez `docx_text` z `bench_model.py` (zastępstwo K2), jeden przebieg 2026-11-21. Próba 1: 2765 tokenów promptu (szacunek 3908), 1167 odpowiedzi, 584 s, 1 błąd walidatora. Próba 2 z błędem: 4022 i 1185 tokenów, 537 s, poprawny `FormAnalysis`. Razem 1121 s. Tytuł, adresat, `applicants` i `signature` zgodne z `fields.json`.
   Jakość: model powtórzył dane wnioskodawcy w `subject_pages` i rozbił wybór rozliczenia na dwa RADIO. Dodał też oświadczenie, pole „Inne dokumenty” i REGON, których nie ma w tekście papieru. `contact: []` i `proxy: false` zgadzają się z papierem, a `fields.json` opisuje wzorzec COI. Wniosek: zasada podstawy w treści w samym prompcie nie wystarcza modelowi 4B (Requests). Pomiar przeszedł przed dwiema poprawkami promptu z recenzji (`false` tylko w `applicant`, domyślny podpis). Wynik leży poza repozytorium.
 
+K2.2 (Mikołaj): Tesseract CLI i dane językowe `pol` (Apache-2.0) do lokalnego OCR skanów JPG/PNG.
+Stdin i stdout pozwalają odczytać obraz bez tworzenia pliku tymczasowego.
+
+K2.3 (Mikołaj): `pypdf` 7.1.1 (BSD-3-Clause, bez wymaganych zależności) czyta warstwę tekstową PDF
+z bajtów w pamięci. Odczyt K2 zostaje lokalny i deterministyczny: COI dopuściło Eden AI, ale K2 nie
+używa zewnętrznego OCR ani kluczy API (decyzja lidera). Strona bez tekstu zostaje pusta między
+separatorami `\f` i trafia do `warnings`; jej OCR to osobny krok.
+
 ## Event: whole project
 
 - **D7 – odpowiedzialność.** Lider rozstrzyga kontrakty, zakres i integrację. `SPEC.md` określa kontrakty, `DECISIONS.md` zapisuje decyzje, `DELEGACJA.md` wyznacza wykonawców, a `PROGRESS*.md` rejestruje postęp i wyniki bramek.

@@ -114,6 +114,25 @@ Krok K3 (Mikołaj, gałąź `mikolaj/k3`): `ExtractedDocument` → `FormAnalysis
 - `DECISIONS.md` (api): K3. Requests: Marcin (M1.4, kontekst), lider (DELEGACJA 2.2, SPEC, nowe zadania).
 - Dowód: mutacje, `bash scripts/gate.sh api -rs`, ręcznie DOCX nadpłaty → `FormAnalysis` na `qwen3.5:4b`.
 
+Krok K2.1 (Mikołaj): pierwszy odczyt przez `extract(data, ext)` dla DOCX z tekstem.
+
+- `backend/app/extract/`: odczyt akapitów, tabel i podziałów stron z głównego XML w pamięci.
+- `backend/tests/test_extract.py`: syntetyczne DOCX, błędy odczytu i próbki COI z folderów 1 i 5.
+- Dowód: zaobserwowany RED, przywrócenie bajtów po mutacjach i `bash scripts/gate.sh api -rs`.
+
+Krok K2.2 (Mikołaj): lokalny OCR dla JPG i PNG, w tym aliasów normalizowanych podczas uploadu.
+
+- `backend/app/extract/`: przekazanie bajtów przez stdin do Tesseract, `OCR_LANG`, limit czasu i tekst w `ExtractedDocument`.
+- `backend/tests/test_extract.py`: wybór języka, przekazanie bajtów, brak tekstu i błędy OCR bez procesu zewnętrznego.
+- Dowód: RED/GREEN, `bash scripts/gate.sh api -rs` oraz Tesseract `pol` na skanach z folderów 1 i 5.
+
+Krok K2.3 (Mikołaj): odczyt warstwy tekstowej PDF przez `pypdf`, bez OCR.
+
+- `backend/app/extract/`: strony z bajtów w pamięci, kolejność stron, separator `\f`, ostrzeżenie o stronach bez tekstu, błędy odczytu jako `ExtractionError`.
+- `backend/tests/test_extract.py`: PDF wielostronicowy, pusta strona, PDF bez tekstu, pliki uszkodzone, polskie znaki, próbki COI z folderów 1 i 5; OCR nie jest wołany.
+- Zależność `pypdf==7.1.1` (BSD-3-Clause): wpis w `DECISIONS.md`, a linia w `requirements.txt` to Request do Marcina.
+- Dowód: RED/GREEN każdego testu i `bash scripts/gate.sh api -rs`.
+
 ## Requests
 
 (one line per change you need from another area: who asks, what, why)
@@ -122,6 +141,8 @@ Krok K3 (Mikołaj, gałąź `mikolaj/k3`): `ExtractedDocument` → `FormAnalysis
 - lider → Marcin (M1.1): endpoint zwraca na razie stały szkielet JSON, bo wzorców COI nie ma już w `backend/tests/fixtures/` (D5).
 - lider → Mikołaj (K3, `analysis.py`): `ValidationError` z `FormAnalysis.model_validate` po ponowieniach zamień na `LLMUnavailable` (D4).
 - lider → Mikołaj (K2, `extract`): przytnij `images` do 20 sztuk i 40 MB przed utworzeniem `ExtractedDocument` i dopisz ostrzeżenie (D3).
+- Mikołaj → Marcin (K2, `backend/Dockerfile` i `backend/requirements.txt`): uzgodnić instalację Tesseract z `pol` i wersję `pypdf` do odczytu PDF.
+- Mikołaj → Marcin (K2.3, `backend/requirements.txt`): dopisać `pypdf==7.1.1` (BSD-3-Clause, bez wymaganych zależności, Python ≥ 3.10). Bez tej linii `import app.extract` kończy się `ModuleNotFoundError` w obrazie API i w świeżym `.venv`, więc K2.3 nie może wejść na `main` przed nią.
 - Marcin → lider (`SPEC.md`, Must 1 i „API contract”): dopisać wyjątek od zgodności typu z rozszerzeniem, np. „Plik `.doc`, który w środku jest DOCX, jest przyjmowany i czytany jak DOCX (tak są zapisane pliki `.DOC` z folderów 5 i 7). `.jpe` jest przyjmowane jak `.jpg` (plik `.JPE` w folderze 7).” Kod już tak działa (DECISIONS, M1.1); uwaga Pawła z recenzji M1.1.
 - Paweł → lider (P1.2a, `SZABLONY_SEKCJI.md`, rozdz. 1): dodać tabelę „decyzja → sekcja” dla `ApplicantData` z zaznaczeniem, że dobór obowiązuje od P1.2b.
 - Paweł → lider (P1.2a, `DELEGACJA.md`, rozdz. 2.1): dopisać wymagane `applicants` i `applicant: ApplicantData`, walidację i niezależność od ekstraktora oraz kolejność P1.2a → P1.2b/P1.2c.
@@ -170,3 +191,9 @@ Krok K3 (Mikołaj, gałąź `mikolaj/k3`): `ExtractedDocument` → `FormAnalysis
 - pypdf (Marcin, prośba Mikołaja do K2.3): done `pypdf==7.1.1` (BSD-3-Clause) w `requirements.txt` + `DECISIONS.md`; Docker bez zmian (czysty Python); Tesseract `pol` potwierdzony w obrazie `api` tak, jak woła go K2.2 (`tesseract stdin stdout -l pol`, `app`, `read_only`) na skanie z folderu 5 / next M1.4 na K2 + K3 / blocker brak.
 - K3: done `llm.py` (`settings` wymagane, `LLM_FIXTURE` bez sieci), `analysis.py` (prompt z kontraktem `applicant` i zasadą podstawy w treści, lekkie uporządkowanie tekstu, budżet kontekstu i kontrola przycięcia przez serwer, 2 próby, potem 503); 31/31 mutacji i mutacja D5 wykryte, 5 przebiegów bez niestabilności; ręcznie `qwen3.5:4b` na CPU: DOCX nadpłaty → poprawny `FormAnalysis` w 2. próbie, 1121 s, jakość pól do poprawy (Requests); recenzja `reviewer`: FIX (1, 2), naniesione 1–4; `bash scripts/gate.sh api -rs` → 566 passed, 0 pominiętych, `GATE: PASS (api)` / next commit człowieka, M1.4 (Marcin) z `analyze(doc, settings=settings)`, Q1 kontrola podstawy w treści / blocker `LLM_TIMEOUT_S=120` przy 537–584 s na próbę na CPU; folder 8 nie mieści się w kontekście 16384.
 - K3 recenzja (Codex `--uncommitted`, baza `4e9603e`; `origin/main` = `7788a2f` z M1.3): done 2/5 CONFIRMED naprawione w obszarze: ponowienie bez długiej odpowiedzi, gdy z nią nie mieści się w kontekście (folder 9), i `json.loads` przed walidacją (samotny surogat jak w P1.2a, `RecursionError` → ponowienie); 1 CONFIRMED poza obszarem (`LLM_CONTEXT_TOKENS`, prośba do Marcina), 2 LATER, 1 FALSE (REVIEW.md); 36/36 mutacji i mutacja D5 wykryte; K3 na `origin/main` → 575 passed, konflikty tylko w dopiskach `DECISIONS.md` i `PROGRESS.api.md`; `bash scripts/gate.sh api -rs` → 569 passed, 0 pominiętych, `GATE: PASS (api)` / next commit człowieka, scalenie z `main` z zachowaniem obu dopisków, Q1 szybkość i podstawa w treści / blocker: Qwen 4B niegotowy do demo (2. próba, 1121 s, pola bez podstawy).
+- K2.1 (`mikolaj/k2`, baza `4e9d228`): done tekst akapitów i tabel DOCX w pamięci, w tym próbki COI 1/5 oraz `.DOC` wykryty jako DOCX. 9/9 nowych przypadków widzianych na czerwono, po przywróceniu kodu `gate.sh api -rs` → 237 passed, a na kopii `c7d6cf1` z tym samym kodem → 406 passed, bez pominiętych / next PDF, arkusze, OCR i binarny DOC / blocker dla OCR: Tesseract z `pol` w obrazie API.
+- K2.2 (`mikolaj/k2`): done lokalny OCR JPG/PNG przez Tesseract `pol`; 8 nowych przypadków RED/GREEN, 7/7 skanów COI z wymaganymi słowami (foldery 1, 5, `.JPE` z 7), 0,64–5,44 s. `gate.sh api -rs` → 245 passed w worktree, 444 passed na kopii `d0c07fd` z P1.2a, bez pominiętych / next tekst PDF, arkusze i binarny DOC / blocker wdrożenia OCR: Tesseract z `pol` w obrazie API.
+- K2.1/K2.2 po recenzji: done odczyt `w:sdt` i kontrolowane 500 przy braku programu Tesseract, 3 przypadki RED/GREEN, 7/7 rzeczywistych skanów; `gate.sh api -rs` → 248 passed na bazie K2 i 558 passed na `4e9603e` z kodem K2, 0 pominiętych / next pierwszy commit po decyzji lidera / blocker integracji: konflikty w `DECISIONS.md` i `PROGRESS.api.md`, uwagi w `REVIEW.md`.
+- K2.3 (`mikolaj/k2`, baza `2892e6a`): done warstwa tekstowa PDF przez `pypdf` 7.1.1: kolejność stron, separator `\f`, ostrzeżenie o stronach bez tekstu, każdy błąd odczytu jako 400, bez OCR. 13 nowych przypadków, każdy widziany na czerwono (RED albo mutacja kodu); fuzz 5877 uszkodzonych PDF-ów: 0 zawieszeń, wyjątki spoza `PyPdfError` potwierdzone; 9/9 PDF-ów COI ma tekst na każdej stronie, odczyt do 0,39 s. `gate.sh api -rs` → 261 passed, 0 pominiętych / next OCR stron PDF bez tekstu (wymaga decyzji o rendererze), obrazy w DOCX, XLSX, ODS, binarny DOC / blocker: `pypdf` w `requirements.txt` (Request do Marcina) i synchronizacja z `main`.
+- K2.3 recenzja (Codex, `--uncommitted`, kopia bez `.env` i materiałów): 3 ustalenia, 0 do poprawy w K2 (brak `pypdf` w `requirements.txt` rozwiązany na `main` przez PR #13; budżet zasobów i PDF z AES jako LATER w `REVIEW.md`). Własne sondy: 1 CONFIRMED – font PDF oddawał NUL, `\f` i niesparowany surogat jako tekst (fałszywy podział stron, tekst nie do zapisania w UTF-8); poprawione, test czerwony przed poprawką. `gate.sh api -rs` → 262 passed, 0 pominiętych / next commit lidera, potem scalenie `main` / blocker brak.
+- K2-merge: scalenie `main` `cb3daaa` (P2, JWT, K1, M1.3, M1.5, pypdf, K3) do `mikolaj/k2` po K2.3 `6bcbf75`; konflikty tylko w `DECISIONS.md` i `PROGRESS.api.md`, rozwiązane przez zachowanie wpisów obu stron; `gate.sh api -rs` → 616 passed, 0 pominiętych / next merge PR #12, potem pozostałe formaty K2 (XLSX, ODS, binarny DOC, OCR stron PDF i obrazów DOCX) / blocker brak.
