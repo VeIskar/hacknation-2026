@@ -1,0 +1,68 @@
+{
+  "title": "Wniosek o stwierdzenie nadpłaty podatku",
+  "addressee": {"type": "URZAD", "name": "Urząd Gminy Ulan-Majorat"},
+  "applicants": "BOTH",
+  "signature": true,
+  "subject_pages": [
+    {
+      "title": "Informacje o nadpłacie",
+      "sections": [
+        {
+          "title": "Informacje o nadpłacie",
+          "description": "",
+          "fields": [
+            {"label": "Podatek, którego dotyczy nadpłata", "type": "TEXT_FIELD", "required": true},
+            {"label": "Kwota", "type": "NUMBER", "required": true},
+            {
+              "label": "Uzasadnienie",
+              "type": "TEXTAREA",
+              "required": true,
+              "description": "Uzasadnij dlaczego Twoim zdaniem powstała nadpłata i z czego wynika jej wysokość."
+            }
+          ]
+        },
+        {
+          "title": "Rozliczenie nadpłaty",
+          "description": "",
+          "fields": [
+            {
+              "label": "Wybierz, co mamy zrobić z nadpłatą",
+              "type": "RADIO",
+              "required": true,
+              "options": [
+                "Zaliczyć na poczet przyszłego zobowiązania podatkowego",
+                "Zwrócić przelewem na rachunek bankowy"
+              ]
+            },
+            {
+              "label": "Nazwa podatku",
+              "type": "TEXT_FIELD",
+              "required": true,
+              "show_if": {
+                "field": "Wybierz, co mamy zrobić z nadpłatą",
+                "equals": "Zaliczyć na poczet przyszłego zobowiązania podatkowego"
+              }
+            },
+            {
+              "label": "Numer rachunku",
+              "type": "TEXT_FIELD",
+              "required": true,
+              "show_if": {
+                "field": "Wybierz, co mamy zrobić z nadpłatą",
+                "equals": "Zwrócić przelewem na rachunek bankowy"
+              }
+            }
+          ]
+        },
+        {
+          "title": "Korekta deklaracji",
+          "description": "Załącz poprawioną deklarację podatkową, z której wynika prawidłowa, niższa wysokość zobowiązania podatkowego, a w konsekwencji nadpłata.",
+          "fields": [
+            {"label": "Plik deklaracji podatkowej", "type": "FILE_UPLOADER", "required": true}
+          ]
+        }
+      ]
+    }
+  ],
+  "statements": []
+}

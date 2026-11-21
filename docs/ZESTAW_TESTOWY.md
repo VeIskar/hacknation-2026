@@ -11,7 +11,9 @@ Cel: po każdej zmianie w pipeline jedną komendą zobaczyć, czy jest lepiej cz
 
 Podział ról w grupie A: **5 (nadpłata) = zbiór roboczy** – wolno go używać w promptach jako przykład. **1 (numer porządkowy) = zbiór kontrolny** – nie wklejamy go do promptów i nie stroimy pod niego. Jego wynik mówi, jak poradzimy sobie z nowym plikiem w finale.
 
-## 2. Struktura katalogu (w repo)
+## 2. Struktura katalogu
+
+Uwaga (D5 w `DECISIONS.md`): plików COI nie commitujemy. Dane wejściowe i wzorce czytamy z `materialy/` (poza gitem), a `tests/data/` poniżej to układ logiczny, nie katalog w repo.
 
 ```
 tests/data/
