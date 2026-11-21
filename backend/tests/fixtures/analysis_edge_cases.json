@@ -2,6 +2,18 @@
   "title": "Wniosek o kartę mieszkańca <Kwiatkowo> & okolic",
   "addressee": {"type": "ORGAN", "name": "Wójt Gminy Kwiatkowo"},
   "applicants": "BOTH",
+  "applicant": {
+    "proxy": true,
+    "applicant_pesel": true,
+    "person_address": true,
+    "entity_ids": ["NIP", "REGON", "KRS"],
+    "entity_ids_one_of": false,
+    "entity_address": true,
+    "representative_proof": true,
+    "correspondence_address": false,
+    "contact": ["PHONE", "EMAIL"],
+    "applicant_extra_fields": []
+  },
   "signature": false,
   "subject_pages": [
     {

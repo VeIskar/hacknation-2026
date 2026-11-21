@@ -2,7 +2,7 @@
 
 Umowa między modułami (DELEGACJA.md, rozdz. 2). Zmiana pola = decyzja lidera w DECISIONS.md.
 - ExtractedDocument tworzy app/extract (odczyt pliku).
-- FormAnalysis tworzy app/analysis (lokalny model), czyta app/generator.
+- FormAnalysis opisuje papierowy formularz i trafia do app/generator.
 Opisy pól (description) trafiają do schematu JSON, który dostaje model, więc są po polsku
 i mówią modelowi, co ma wpisać. Przykłady w opisach są zmyślone albo pochodzą ze zbioru
 roboczego (folder 5). Zbiór kontrolny (folder 1) nie może się w nich pojawić: pilnuje tego
@@ -12,14 +12,31 @@ tests/test_models.py.
 from enum import StrEnum
 from typing import Annotated, Self
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    model_validator,
+)
 
 MAX_IMAGES = 20
 # 4 x domyślny limit pliku (MAX_FILE_SIZE_MB=10): strona skanu po zapisaniu jako PNG bywa
 # kilka razy większa od źródłowego JPG. Największy skan w materiałach COI ma 6,7 MB.
 MAX_IMAGES_BYTES = 40 * 1024 * 1024
 
-Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+
+def _replace_lone_surrogates(value: object) -> object:
+    if isinstance(value, str):
+        # Dekoder scala poprawne pary surogatów, a samotne zastępuje znakiem U+FFFD.
+        return value.encode("utf-16-le", errors="surrogatepass").decode("utf-16-le", errors="replace")
+    return value
+
+
+_NORMALIZE_UNICODE = BeforeValidator(_replace_lone_surrogates)
+Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1), _NORMALIZE_UNICODE]
+DescriptionText = Annotated[str, _NORMALIZE_UNICODE]
 
 
 class StrictModel(BaseModel):
@@ -75,6 +92,17 @@ class Applicants(StrEnum):
     BOTH = "BOTH"
 
 
+class EntityId(StrEnum):
+    NIP = "NIP"
+    REGON = "REGON"
+    KRS = "KRS"
+
+
+class ContactField(StrEnum):
+    PHONE = "PHONE"
+    EMAIL = "EMAIL"
+
+
 class FieldType(StrEnum):
     TEXT_FIELD = "TEXT_FIELD"
     TEXTAREA = "TEXTAREA"
@@ -107,7 +135,7 @@ class SubjectField(StrictModel):
         )
     )
     required: bool = Field(default=True, description="Czy pole jest obowiązkowe")
-    description: str = Field(default="", description="Krótka podpowiedź pod etykietą; pusta, gdy zbędna")
+    description: DescriptionText = Field(default="", description="Krótka podpowiedź pod etykietą; pusta, gdy zbędna")
     options: list[Text] = Field(
         default_factory=list, description="Opcje dla RADIO, CHECKBOX i SELECT; dla innych typów pusta lista"
     )
@@ -126,9 +154,34 @@ class SubjectField(StrictModel):
         return self
 
 
+def _validate_show_if(fields: list[SubjectField], location: str) -> None:
+    """Etykiety mogą się powtarzać, ale etykieta źródła musi wskazywać dokładnie jedno pole."""
+    for field in fields:
+        condition = field.show_if
+        if condition is None:
+            continue
+        sources = [candidate for candidate in fields if candidate.label == condition.field]
+        if not sources:
+            raise ValueError(f"show_if pola '{field.label}': {location} nie ma pola '{condition.field}'")
+        if len(sources) > 1:
+            raise ValueError(
+                f"show_if pola '{field.label}': etykieta '{condition.field}' jest niejednoznaczna, "
+                f"ma ją {len(sources)} pól {location}"
+            )
+        source = sources[0]
+        if source is field:
+            raise ValueError(f"show_if pola '{field.label}' wskazuje to samo pole")
+        if source.type not in CHOICE_TYPES:
+            raise ValueError(f"show_if pola '{field.label}': '{source.label}' nie jest polem wyboru")
+        if condition.equals not in source.options:
+            raise ValueError(
+                f"show_if pola '{field.label}': pole '{source.label}' nie ma opcji '{condition.equals}'"
+            )
+
+
 class SubjectSection(StrictModel):
     title: Text = Field(description="Tytuł sekcji tematycznej, np. 'Rozliczenie nadpłaty'")
-    description: str = Field(default="", description="Krótki opis sekcji; pusty, gdy zbędny")
+    description: DescriptionText = Field(default="", description="Krótki opis sekcji; pusty, gdy zbędny")
     fields: list[SubjectField] = Field(min_length=1)
 
 
@@ -138,29 +191,57 @@ class SubjectPage(StrictModel):
 
     @model_validator(mode="after")
     def _show_if_points_to_one_choice_field(self) -> Self:
-        """Etykiety mogą się powtarzać, ale etykieta wskazana w show_if musi być na stronie jedna."""
         fields = [field for section in self.sections for field in section.fields]
-        for field in fields:
-            condition = field.show_if
-            if condition is None:
-                continue
-            sources = [candidate for candidate in fields if candidate.label == condition.field]
-            if not sources:
-                raise ValueError(f"show_if pola '{field.label}': na stronie nie ma pola '{condition.field}'")
-            if len(sources) > 1:
-                raise ValueError(
-                    f"show_if pola '{field.label}': etykieta '{condition.field}' jest niejednoznaczna, "
-                    f"ma ją {len(sources)} pól na stronie"
-                )
-            source = sources[0]
-            if source is field:
-                raise ValueError(f"show_if pola '{field.label}' wskazuje to samo pole")
-            if source.type not in CHOICE_TYPES:
-                raise ValueError(f"show_if pola '{field.label}': '{source.label}' nie jest polem wyboru")
-            if condition.equals not in source.options:
-                raise ValueError(
-                    f"show_if pola '{field.label}': pole '{source.label}' nie ma opcji '{condition.equals}'"
-                )
+        _validate_show_if(fields, "na stronie")
+        return self
+
+
+class ApplicantData(StrictModel):
+    """Decyzje o danych wnioskodawcy na podstawie papierowego formularza."""
+
+    proxy: bool = Field(
+        description=(
+            "Czy papier przewiduje pełnomocnika lub działanie w czyimś imieniu? "
+            "Szukaj danych pełnomocnika, pełnomocnictwa lub opłaty za pełnomocnictwo także w objaśnieniach i załącznikach. "
+            "Decyzja obejmuje dokument i standardową opłatę skarbową we wszystkich ścieżkach wnioskodawcy."
+        )
+    )
+    applicant_pesel: bool = Field(
+        description="Czy papier pyta o PESEL wnioskodawcy? Dokument tożsamości zamiast PESEL zapisz w applicant_extra_fields."
+    )
+    person_address: bool = Field(description="Czy papier zbiera adres zamieszkania wnioskodawcy będącego osobą fizyczną?")
+    entity_ids: list[EntityId] = Field(
+        description=(
+            "Identyfikatory podmiotu, które użytkownik wpisuje w pola NIP, REGON lub KRS. "
+            "Odpis z KRS lub innego rejestru oznacz w representative_proof."
+        )
+    )
+    entity_ids_one_of: bool = Field(description="Czy papier żąda jednego z identyfikatorów, np. NIP lub REGON?")
+    entity_address: bool = Field(description="Czy papier zbiera adres siedziby podmiotu?")
+    representative_proof: bool = Field(description="Czy papier wymaga odpisu z KRS lub innego rejestru jako dowodu reprezentacji?")
+    correspondence_address: bool = Field(description="Czy papier pozwala podać inny adres do korespondencji wnioskodawcy?")
+    contact: list[ContactField] = Field(
+        description=(
+            "PHONE dla pola telefonu i EMAIL dla pola e-mail wnioskodawcy. Pomiń adresy e-mail urzędu i inspektora danych. "
+            "Wpisz pustą listę, gdy papier nie zbiera danych do kontaktu."
+        )
+    )
+    applicant_extra_fields: list[SubjectField] = Field(
+        description=(
+            "Dane wnioskodawcy poza szablonem, np. data urodzenia, seria i numer dowodu, dokument zamiast PESEL lub adres ePUAP. "
+            "Warunki show_if wskazują pole z tej samej listy. Wpisz pustą listę, gdy nie ma takich danych."
+        )
+    )
+
+    @model_validator(mode="after")
+    def _validate_decisions(self) -> Self:
+        if len(set(self.entity_ids)) != len(self.entity_ids):
+            raise ValueError("Identyfikatory podmiotu nie mogą się powtarzać.")
+        if self.entity_ids_one_of and len(self.entity_ids) < 2:
+            raise ValueError("Wybór jednego identyfikatora wymaga co najmniej dwóch identyfikatorów podmiotu.")
+        if len(set(self.contact)) != len(self.contact):
+            raise ValueError("Pola kontaktowe nie mogą się powtarzać.")
+        _validate_show_if(self.applicant_extra_fields, "w dodatkowych danych wnioskodawcy")
         return self
 
 
@@ -178,17 +259,45 @@ class FormAnalysis(StrictModel):
     title: Text = Field(max_length=255, description="Tytuł usługi, np. 'Wniosek o stwierdzenie nadpłaty podatku'")
     addressee: Addressee
     applicants: Applicants = Field(
-        default=Applicants.BOTH,
         description=(
-            "PERSON tylko osoba fizyczna; ENTITY tylko firma lub instytucja; "
-            "BOTH gdy wniosek może złożyć i osoba, i firma"
+            "PERSON dla osoby fizycznej, gdy papier pyta o imię i nazwisko wnioskodawcy. "
+            "ENTITY dla firmy lub instytucji, gdy papier pyta o nazwę podmiotu. "
+            "BOTH gdy papier dopuszcza oba typy wnioskodawców."
         ),
     )
+    applicant: ApplicantData = Field(description="Decyzje o sekcjach i dodatkowe dane wnioskodawcy z papieru.")
     signature: bool = Field(default=True, description="Czy wniosek wymaga podpisu")
     subject_pages: list[SubjectPage] = Field(
         min_length=1,
-        description="Strony z treścią wniosku. Bez danych wnioskodawcy, adresu, kontaktu, podpisu i daty",
+        description=(
+            "Zachowaj wszystkie informacje potrzebne do załatwienia sprawy. "
+            "Dane pokryte przez szablon zapisz w jego parametrach. "
+            "Pozostałe dane wnioskodawcy zapisz w applicant_extra_fields. "
+            "Tutaj zapisz resztę informacji z papieru, w tym dane innych osób, daty zdarzeń, załączniki, instrukcje, wybory i ich warunki. "
+            "Adresata i podpis zapisz w przeznaczonych do tego polach. "
+            "Do statements przenieś oświadczenia wymagane od tej samej osoby w każdej ścieżce. "
+            "Zachowaj opcjonalne i warunkowe zgody przy danych, których dotyczą."
+        ),
     )
     statements: list[Text] = Field(
         default_factory=list, description="Oświadczenia z wniosku ('Oświadczam, że…'), prostym językiem"
     )
+
+    @model_validator(mode="after")
+    def _applicant_matches_type(self) -> Self:
+        applicant = self.applicant
+        if self.applicants is Applicants.PERSON:
+            if applicant.entity_ids_one_of:
+                raise ValueError("Osoba fizyczna nie wybiera jednego identyfikatora podmiotu.")
+            if applicant.entity_ids:
+                raise ValueError("Wniosek osoby fizycznej nie zbiera identyfikatorów podmiotu.")
+            if applicant.entity_address:
+                raise ValueError("Wniosek osoby fizycznej nie zbiera adresu siedziby.")
+            if applicant.representative_proof:
+                raise ValueError("Wniosek osoby fizycznej nie wymaga odpisu z rejestru.")
+        elif self.applicants is Applicants.ENTITY:
+            if applicant.applicant_pesel:
+                raise ValueError("Wniosek podmiotu nie zbiera numeru PESEL wnioskodawcy.")
+            if applicant.person_address:
+                raise ValueError("Wniosek podmiotu nie zbiera adresu zamieszkania wnioskodawcy.")
+        return self
