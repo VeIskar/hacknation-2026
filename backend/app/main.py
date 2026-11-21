@@ -8,7 +8,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
-from app import lint
+from app import lint, quality
 from app.analysis import analyze
 from app.auth import AuthError, require_token
 from app.config import Settings, get_settings
@@ -80,7 +80,14 @@ def process_file(data: bytes, ext: str, settings: Settings) -> dict[str, Any]:
     Błędy AppError (400 z odczytu, 503 z analizy) idą dalej do app_error_handler.
     Zła odpowiedź lintera to 500. Wymaga decyzji lidera; do tego czasu błędy trafiają do logu.
     """
-    form = build_form(analyze(extract(data, ext), settings=settings))
+    document = extract(data, ext)
+    analyzed = analyze(document, settings=settings)
+    if not settings.llm_fixture:
+        grounded = quality.ground(analyzed, document)
+        analyzed = grounded.analysis
+        corrections = grounded.correction_count
+        log.info("Korekty strażnika %d, uwagi %d", corrections, len(grounded.notes) - corrections)
+    form = build_form(analyzed)
     errors = lint.check(form)
     if errors:
         log.error("JSON odrzucony przez linter (%d błędów): %s", len(errors), "; ".join(errors[:20]))
