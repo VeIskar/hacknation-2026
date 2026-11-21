@@ -1,0 +1,30 @@
+# docker compose up --build   ->  web http://localhost:5173, api http://localhost:8000
+# The LLM_* values come from the shell or from a .env file next to this file (see env.example).
+services:
+  api:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      - LLM_BASE_URL
+      - LLM_MODEL
+      - LLM_API_KEY
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  web:
+    build: ./frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      api:
+        condition: service_healthy

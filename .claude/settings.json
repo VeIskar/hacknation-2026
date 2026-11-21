@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(npm test *)",
+      "Bash(npx playwright *)",
+      "Bash(npx tsc *)",
+      "Bash(bash scripts/gate.sh)",
+      "Bash(bash scripts/gate.sh *)",
+      "Bash(docker compose *)",
+      "Bash(codex review *)",
+      "Bash(backend/.venv/bin/python -m pytest *)",
+      "Bash(backend/.venv/bin/python -m ruff *)",
+      "Bash(git status)", "Bash(git status *)", "Bash(git diff *)", "Bash(git log *)",
+      "Bash(git add *)"
+    ],
+    "deny": [
+      "Read(./.env)", "Read(./.env.*)",
+      "Read(./frontend/.env)", "Read(./frontend/.env.*)",
+      "Read(./backend/.env)", "Read(./backend/.env.*)",
+      "Bash(rm -rf *)",
+      "Bash(git push --force*)",
+      "Bash(git commit *)"
+    ]
+  },
+  "hooks": {
+    "Stop": [
+      { "hooks": [ { "type": "command",
+          "command": "bash \"$CLAUDE_PROJECT_DIR/scripts/stop-gate.sh\"" } ] }
+    ]
+  }
+}

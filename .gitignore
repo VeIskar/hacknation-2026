@@ -1,0 +1,14 @@
+.env
+.env.*
+.claude/settings.local.json
+.hn-area
+node_modules/
+backend/.venv/
+backend/.pytest_cache/
+backend/.ruff_cache/
+__pycache__/
+frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
+frontend/shots/
+REVIEW.md
