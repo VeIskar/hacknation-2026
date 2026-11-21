@@ -48,6 +48,14 @@ Krok M1.2 (Marcin): JWT według „API contract” (401, `Authorization: Bearer`
 - `backend/requirements.txt` + `DECISIONS.md`: PyJWT 2.15.1 (MIT).
 - Dowód: `test_auth.py` (brak/zły/wygasły/obcy token, zły schemat, `/health`, JWT wyłączony, skrypt).
 
+Krok M1.3 (Marcin): obraz `api` zgodny z Treść pkt 5 (bez roota, jawne wersje, bez trwałego zapisu).
+- `backend/Dockerfile`: `python:3.14.10-slim-trixie`, `tesseract-ocr` + `tesseract-ocr-pol` z apt, użytkownik
+  `app` (UID 10001) bez powłoki, kod tylko do odczytu, `EXPOSE 8000`.
+- `docker-compose.yml` (`api`): `read_only`, `tmpfs /tmp`, `cap_drop: ALL`, `no-new-privileges`.
+- `DECISIONS.md`: obraz bazowy, tesseract (licencje). Web (nginx bez roota na 8080) → Request do `web`.
+- Dowód: `test_docker.py` (statycznie: wersja obrazu, USER, port, compose); `docker compose build api`,
+  `whoami` → `app`, `tesseract --list-langs` ma `pol`, `/health` 200, zapis poza `/tmp` odrzucony.
+
 ## Requests
 
 (one line per change you need from another area: who asks, what, why)
@@ -57,6 +65,7 @@ Krok M1.2 (Marcin): JWT według „API contract” (401, `Authorization: Bearer`
 - lider → Mikołaj (K3, `analysis.py`): `ValidationError` z `FormAnalysis.model_validate` po ponowieniach zamień na `LLMUnavailable` (D4).
 - lider → Mikołaj (K2, `extract`): przytnij `images` do 20 sztuk i 40 MB przed utworzeniem `ExtractedDocument` i dopisz ostrzeżenie (D3).
 - Marcin → lider (`SPEC.md`, Must 1 i „API contract”): dopisać wyjątek od zgodności typu z rozszerzeniem, np. „Plik `.doc`, który w środku jest DOCX, jest przyjmowany i czytany jak DOCX (tak są zapisane pliki `.DOC` z folderów 5 i 7). `.jpe` jest przyjmowane jak `.jpg` (plik `.JPE` w folderze 7).” Kod już tak działa (DECISIONS, M1.1); uwaga Pawła z recenzji M1.1.
+- Marcin (M1.3) → web (`frontend/Dockerfile`, `frontend/nginx.conf`): nginx bez roota (`nginxinc/nginx-unprivileged:<jawna wersja>` albo `USER nginx`), nasłuch na 8080, `EXPOSE 8080`; Treść pkt 5. Potem Marcin zmienia w compose `5173:80` na `5173:8080`.
 
 ## Log
 
@@ -74,3 +83,4 @@ Krok M1.2 (Marcin): JWT według „API contract” (401, `Authorization: Bearer`
 - M1.2 kontrakt: done lider zatwierdził 401 w `SPEC.md` (`Authorization: Bearer <JWT_TOKEN>`, `detail` 401, JWT poza „Later”); prośba zamknięta / next M1.2 `auth.py`, `test_auth.py` / blocker: czy `/health` jest otwarte przy JWT – nierozstrzygnięte.
 - M1.2: done `auth.py` (Bearer, HMAC, wymagany `exp`, sekret 32/48/64 B), 401 z `WWW-Authenticate` przed odczytem pliku, `/health` otwarte, `python -m app.auth token`, PyJWT 2.15.1 (MIT); `gate.sh api -rs` → 187 passed, 0 pominiętych; mutacje (bez zależności, bez `exp`, bez nagłówka) wykryte / next M1.3 Docker / blocker brak.
 - M1.2 recenzja (subagent `reviewer`, werdykt SHIP): 0 CONFIRMED, 5 LATER (REVIEW.md): `JWT_*`/`MAX_FILE_SIZE_MB` w compose → M1.3, `securitySchemes` w OpenAPI → M1.6, kolejność w DECISIONS, walidacja sekretu przy starcie, 2 testy; `gate.sh` → 187 passed / next rebase na `origin/main`, M1.3 / blocker brak.
+- M1.3 (api): done obraz `python:3.14.10-slim-trixie`, tesseract 5.5.0 + `pol`, użytkownik `app` (10001), compose `read_only`/`tmpfs /tmp`/`cap_drop ALL`/`no-new-privileges`; `docker compose build api` OK, `whoami` → `app`, `/health` 200, PDF → 200, fałszywy PDF → 415, JWT 401/200 w kontenerze, zapis poza `/tmp` odrzucony; `test_docker.py` 7/7 mutacji wykrytych; `gate.sh` → 403 passed / next web: nginx bez roota na 8080 (Request), M1.4 / blocker: licencje LGPL bibliotek tesseracta – decyzja lidera/mentora (DECISIONS M1.3).
