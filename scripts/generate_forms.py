@@ -26,7 +26,7 @@ import httpx
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "backend"))
 
-from app import analysis, extract, files, generator, lint
+from app import analysis, extract, files, generator, lint, quality
 from app.config import Settings
 from app.errors import AppError, ExtractionError, LLMUnavailable
 from app.generator.coi import jsonata_string
@@ -35,10 +35,6 @@ from app.models import FormAnalysis
 MATERIALS = REPO / "materialy"
 DEFAULT_FORMS = (2, 3, 4, 6, 7, 8, 9)
 DEFAULT_PREFER = "pdf,docx,doc,jpg,png"
-COI_DICTIONARIES = frozenset({
-    "Województwo", "Powiat", "Gmina", "Miejscowość", "Kraje", "Numery kierunkowe",
-    "TERYT_4G_DOWODOWY", "TERYT_DOWODOWY",
-})
 APPLICANT_PATTERNS = {
     "PESEL": r"pesel", "NIP": r"\bnip\b", "REGON": r"regon", "KRS": r"\bkrs\b",
     "pełnomocnik": r"pełnomocn", "telefon": r"telefon|\btel\b", "e-mail": r"e-?mail",
@@ -292,7 +288,7 @@ def _quality(analyzed: FormAnalysis, text: str, dictionaries: dict[str, int]) ->
             name for name, pattern in APPLICANT_PATTERNS.items()
             if enabled.get(name) and not re.search(pattern, normalized)
         ],
-        "unexpected_dictionaries": sorted(set(dictionaries) - COI_DICTIONARIES),
+        "unexpected_dictionaries": sorted(set(dictionaries) - quality.COI_DICTIONARIES),
     }
 
 
@@ -336,6 +332,7 @@ def _process_form(
     row = {
         "form": name, "status": "błąd", "file": None, "format": None, "inputs": [],
         "timings_s": timings, "requests": telemetry.requests, "error": None,
+        "grounding": {"corrections": 0, "notes": []},
     }
     stage = "selection"
     with _measure(timings, "e2e"):
@@ -367,6 +364,12 @@ def _process_form(
                     continue
                 break
 
+            if not settings.llm_fixture:
+                stage = "ground"
+                grounded = quality.ground(analyzed, document)
+                analyzed = grounded.analysis
+                row["grounding"] = {"corrections": grounded.correction_count, "notes": grounded.notes}
+
             with _measure(timings, "build_lint"):
                 stage = "build_form"
                 form = generator.build_form(analyzed)
@@ -379,6 +382,8 @@ def _process_form(
             stage = "quality"
             row["stats"] = _coi_stats(form, analyzed)
             row["quality"] = _quality(analyzed, document.text, row["stats"]["dictionaries"])
+            row["quality"]["validator_issues"] = quality.validator_issues(form)
+            row["quality"]["dictionary_issues"] = quality.dictionary_issues(form)
             row["status"] = "OK"
         except Exception as error:
             log.debug("Błąd formularza %s na etapie %s", name, stage, exc_info=True)
@@ -418,6 +423,7 @@ def _markdown(rows: list[dict]) -> str:
 
     for row in rows:
         timings = row["timings_s"]
+        grounding = row["grounding"]
         lines += [
             "", f"## {row['form']}", "",
             f"- **Plik i format** {_display(row['file'])} / {_display(row['format'])}",
@@ -439,6 +445,8 @@ def _markdown(rows: list[dict]) -> str:
                     f"- **Plik odrzucony** {_display(source['file'])} / {_display(source['format'])}"
                     f" / {_display(error['class'])} / {_display(error['stage'])}"
                 )
+        corrections = grounding["corrections"]
+        lines.append(f"- **Korekty strażnika** {corrections} / uwagi {len(grounding['notes']) - corrections}")
         if error := row["error"]:
             lines.append(
                 f"- **Błąd** {_display(error['reason'])} / {_display(error['class'])}"
@@ -452,6 +460,8 @@ def _markdown(rows: list[dict]) -> str:
                 f"- **SHOW** razem {show['total']} / or {show['or']} / and {show['and']} / sekcje {show['sections']}",
                 f"- **Walidatory** {_counts(stats['validators'])}",
                 f"- **Słowniki** {_counts(stats['dictionaries'])}",
+                f"- **Uwagi o walidatorach** {len(quality['validator_issues'])}",
+                f"- **Uwagi o słownikach** {len(quality['dictionary_issues'])}",
             ]
             if unknown := quality["unexpected_dictionaries"]:
                 lines.append("- **Błąd słownika** " + ", ".join(map(_display, unknown)))

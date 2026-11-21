@@ -6,12 +6,14 @@ konfiguracji eUsługi w formacie COI. Jest dla urzędnika gminy, który cyfryzuj
 Przepływ w `POST /api/forms` (`backend/app/main.py`):
 
 ```
-validate_upload → extract → analyze → build_form → lint.check → JSON COI
-kontrola pliku    tekst/OCR   model AI   generator    linter
+validate_upload → extract → analyze → quality.ground → build_form → lint.check → JSON COI
+kontrola pliku    tekst/OCR   model AI   strażnik         generator    linter
 ```
 
 Plik żyje tylko w pamięci (Treść pkt 5: bez trwałego zapisu). Model zwraca opis formularza
-(`FormAnalysis`), generator buduje z niego JSON COI, a linter sprawdza schemat i Reguły techniczne.
+(`FormAnalysis`). Strażnik (`quality.ground`) porównuje go z tekstem dokumentu: poprawia dane
+wnioskodawcy i usuwa powtórzone pola. Przy `LLM_FIXTURE` jest pominięty. Generator buduje JSON COI,
+a linter sprawdza schemat i Reguły techniczne.
 
 ## Wymagania
 
