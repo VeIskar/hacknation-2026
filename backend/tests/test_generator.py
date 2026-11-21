@@ -9,11 +9,13 @@ import json
 import re
 import unicodedata
 import uuid
-from itertools import pairwise
+from itertools import pairwise, product
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
+from app import lint
 from app.generator import build_form, template
 from app.generator import form as generator_form
 from app.generator.coi import Names, choice_options, jsonata_string, slug
@@ -46,6 +48,7 @@ def atom(option: str, field_name: str, page: str = "Dane", section: str = "podmi
 OTHER_PERSON = atom("Innej osoby", ON_BEHALF)
 LEGAL_ENTITY = atom("Osoby prawnej lub jednostki organizacyjnej", ON_BEHALF)
 AS_ATTORNEY = atom("Pełnomocnik", ROLE)
+AS_REPRESENTATIVE = atom("Reprezentant", ROLE)
 
 # SPEC.md, „Field contract”: pole z kroku 6 demo (bez id, które zależy od formularza).
 SPEC_FIELD_EXAMPLE = {
@@ -207,6 +210,18 @@ def test_show_queries_match_working_reference(coi_working_reference: dict) -> No
         assert [squash(q) for q in states(ours[key])] == [squash(q) for q in states(reference[key])], key
 
 
+def test_nip_only_matches_working_reference_exactly(coi_working_reference: dict) -> None:
+    data = analysis("fields.json").model_dump(mode="json")
+    data["applicant"]["entity_ids"] = ["NIP"]
+    form = build_form(FormAnalysis.model_validate(data))
+    assert layout(form) == layout(coi_working_reference)
+
+    def queries(config: dict) -> dict:
+        return {key: [squash(query) for query in states(item)] for key, item in elements(config).items()}
+
+    assert queries(form) == queries(coi_working_reference)
+
+
 def test_subject_page_has_fixture_fields_and_conditions() -> None:
     a = analysis("fields.json")
     page = generated("fields.json")["tabs"][1]
@@ -302,7 +317,7 @@ def test_show_conditions_point_at_existing_fields_and_options(name: str) -> None
     assert checked > 0
 
 
-@pytest.mark.parametrize(("name", "count"), [("fields.json", 3), ("analysis_person.json", 2), ("analysis_entity.json", 2), ("analysis_edge_cases.json", 3)])
+@pytest.mark.parametrize(("name", "count"), [("fields.json", 3), ("analysis_person.json", 2), ("analysis_entity.json", 1), ("analysis_edge_cases.json", 3)])
 def test_country_fields_default_to_poland(name: str, count: int) -> None:
     form = generated(name)
     countries = [i["field"] for q in form["tabs"][0]["questions"] for i in q["field"]["repeatingSectionGrid"] if i["field"]["techName"].startswith("kraj")]
@@ -336,15 +351,18 @@ def test_person_variant_has_no_entity_sections() -> None:
 def test_entity_variant_has_no_other_person_sections() -> None:
     form = generated("analysis_entity.json")
     assert _data_sections(form) == [
-        "urzad_do_ktorego_jest_skladany_wniosek", "podmiot_wniosku", "twoje_dane", "adres_zamieszkania",
+        "urzad_do_ktorego_jest_skladany_wniosek", "podmiot_wniosku", "twoje_dane",
         "dane_podmiotu", "adres_siedziby", "potwierdzenie_ze_jestes_reprezentantem", "pelnomocnictwo",
         "oplata_skarbowa_pelnomocnictwo_2",
     ]
     items = by_tech_name(form)
-    assert [o["name"] for o in items[ON_BEHALF]["options"]] == ["Osoby prawnej lub jednostki organizacyjnej"]
+    assert ON_BEHALF not in items and "numer_pesel" not in items
     assert [o["name"] for o in items[ROLE]["options"]] == ["Pełnomocnik", "Reprezentant"]
-    assert [squash(q) for q in states(items[ROLE])] == [squash(LEGAL_ENTITY)]
-    assert [squash(q) for q in states(items["pelnomocnictwo"])] == [squash(f"{LEGAL_ENTITY} and {AS_ATTORNEY}")]
+    for name in [ROLE, "dane_podmiotu", "adres_siedziby"]:
+        assert states(items[name]) == [], name
+    assert states(items["potwierdzenie_ze_jestes_reprezentantem"]) == [AS_REPRESENTATIVE]
+    for name in ["pelnomocnictwo", "oplata_skarbowa_pelnomocnictwo_2"]:
+        assert states(items[name]) == [AS_ATTORNEY], name
 
 
 @pytest.mark.parametrize(
@@ -364,6 +382,212 @@ def test_applicant_radios_use_verb_from_title(title: str, verb: str) -> None:
     assert (items[ON_BEHALF]["title"], items[ROLE]["title"]) == (f"Wybierz, w czyim imieniu {verb}", f"Wybierz, jako kto {verb}")
     assert [squash(q) for q in states(items[ROLE])] == [squash(LEGAL_ENTITY)]
     assert [squash(q) for q in states(items["pelnomocnictwo"])] == [squash(f"{OTHER_PERSON} or ({LEGAL_ENTITY} and {AS_ATTORNEY})")]
+
+
+# --- dobór sekcji według decyzji z papieru ----------------------------------------------------------
+
+
+def _analysis_data(applicants: str, **decisions: object) -> dict:
+    return {
+        "title": "Wniosek testowy",
+        "addressee": {"type": "URZAD", "name": "Urząd Gminy Lipowo"},
+        "applicants": applicants,
+        "applicant": {
+            "proxy": False,
+            "applicant_pesel": False,
+            "person_address": False,
+            "entity_ids": [],
+            "entity_ids_one_of": False,
+            "entity_address": False,
+            "representative_proof": False,
+            "correspondence_address": False,
+            "contact": [],
+            "applicant_extra_fields": [],
+        } | decisions,
+        "subject_pages": [{
+            "title": "Treść sprawy",
+            "sections": [{"title": "Cel wniosku", "fields": [{"label": "Uzasadnienie", "type": "TEXTAREA"}]}],
+        }],
+    }
+
+
+def _field_names(item: dict) -> list[str]:
+    return [cell["field"]["techName"] for cell in item["repeatingSectionGrid"]]
+
+
+def _assert_person_without_proxy(form: dict, *, pesel: bool, address: bool) -> None:
+    expected = ["urzad_do_ktorego_jest_skladany_wniosek", "twoje_dane"]
+    if address:
+        expected.append("adres_zamieszkania")
+    assert _data_sections(form) == expected
+    items = by_tech_name(form)
+    assert _field_names(items["twoje_dane"]) == ["imie", "nazwisko"] + (["numer_pesel"] if pesel else [])
+    assert _field_names(items["dane_do_kontaktu"]) == ["numer_telefonu"]
+    if address:
+        assert states(items["adres_zamieszkania"]) == []
+
+
+@pytest.mark.parametrize(
+    ("pesel", "address"),
+    [pytest.param(True, True, id="F3"), pytest.param(False, True, id="F4"), pytest.param(False, False, id="F7")],
+)
+def test_person_forms_without_proxy_have_only_paper_fields(pesel: bool, address: bool) -> None:
+    data = _analysis_data("PERSON", applicant_pesel=pesel, person_address=address, contact=["PHONE"])
+    _assert_person_without_proxy(build_form(FormAnalysis.model_validate(data)), pesel=pesel, address=address)
+
+
+def test_form3_fixture_has_only_requested_applicant_sections() -> None:
+    _assert_person_without_proxy(generated("analysis_form3.json"), pesel=True, address=True)
+
+
+@pytest.mark.parametrize("identifiers", [pytest.param(["NIP"], id="F2"), pytest.param([], id="F6")])
+def test_both_with_proxy_selects_entity_ids_without_register_proof(identifiers: list[str]) -> None:
+    data = _analysis_data(
+        "BOTH", proxy=True, person_address=True, entity_address=True, entity_ids=identifiers, contact=["PHONE", "EMAIL"],
+    )
+    items = by_tech_name(build_form(FormAnalysis.model_validate(data)))
+    assert _field_names(items["dane_podmiotu"]) == ["nazwa", *[value.lower() for value in identifiers]]
+    assert {"numer_pesel", "regon", "numer_krs", "potwierdzenie_ze_jestes_reprezentantem"}.isdisjoint(items)
+    assert states(items["dane_podmiotu"]) == states(items["adres_siedziby"]) == [LEGAL_ENTITY]
+
+
+def test_form8_has_alternative_ids_and_conditional_correspondence_address() -> None:
+    data = _analysis_data(
+        "BOTH", proxy=True, applicant_pesel=True, person_address=True, entity_ids=["REGON", "NIP"],
+        entity_ids_one_of=True, entity_address=True, correspondence_address=True, contact=["PHONE", "EMAIL"],
+    )
+    items = by_tech_name(build_form(FormAnalysis.model_validate(data)))
+    assert items["numer_pesel"]["defaultValue"] == "MLPZ.pesel"
+    assert [o["name"] for o in items[ON_BEHALF]["options"]] == [
+        "Swoim", "Innej osoby", "Osoby prawnej lub jednostki organizacyjnej",
+    ]
+    assert _field_names(items["dane_podmiotu"]) == ["nazwa", "nip", "regon"]
+    assert "Podaj jeden z: NIP, REGON." in items["dane_podmiotu"]["description"]
+    assert items["nip"]["validation"] == ["NIP"]
+    assert items["regon"]["validation"] == ["REGON"]
+    assert "numer_krs" not in items
+
+    address = "adres_do_korespondencji"
+    radio = "czy_adres_do_korespondencji_jest_inny"
+    country = "kraj_korespondencyjny"
+    assert _field_names(items[address]) == [
+        radio, country, "miejscowosc_korespondencyjny_zagranica", "kod_pocztowy_korespondencyjny_zagranica",
+        "ulica_korespondencyjny_zagranica", "wojewodztwo_korespondencyjny", "kod_pocztowy_korespondencyjny",
+        "ulica_korespondencyjny", "numer_budynku_korespondencyjny", "numer_lokalu_korespondencyjny",
+    ]
+    assert states(items[address]) == states(items[radio]) == []
+    assert (items[radio]["type"], items[radio]["title"], items[radio]["validation"]) == (
+        "RADIO", "Czy adres do korespondencji jest inny?", ["REQUIRED"],
+    )
+    assert [option["name"] for option in items[radio]["options"]] == ["Tak", "Nie"]
+    different = atom("Tak", radio, section=address)
+    in_poland = atom("Polska", country, section=address)
+    assert items[country]["dictionaryName"] == "Kraje"
+    assert items[country]["defaultValue"] == ["Polska"]
+    for key in [country, "numer_budynku_korespondencyjny", "numer_lokalu_korespondencyjny"]:
+        assert states(items[key]) == [different], key
+    for key in ["wojewodztwo", "kod_pocztowy", "ulica"]:
+        assert states(items[f"{key}_korespondencyjny"]) == [f"{different} and {in_poland}"], key
+    for key in ["miejscowosc", "kod_pocztowy", "ulica"]:
+        assert states(items[f"{key}_korespondencyjny_zagranica"]) == [f"{different} and $not{in_poland}"], key
+
+
+def test_form9_has_entity_role_and_additional_applicant_fields() -> None:
+    data = _analysis_data(
+        "ENTITY", proxy=True, entity_address=True, representative_proof=True, correspondence_address=True,
+        applicant_extra_fields=[
+            {"label": "Seria i numer dowodu", "type": "TEXT_FIELD"},
+            {"label": "Adres ePUAP", "type": "TEXT_FIELD", "required": False},
+        ],
+    )
+    form = build_form(FormAnalysis.model_validate(data))
+    items = by_tech_name(form)
+    assert {ON_BEHALF, "numer_pesel", "nip", "regon", "numer_krs", "oplata_skarbowa_pelnomocnictwo_1"}.isdisjoint(items)
+    assert [o["name"] for o in items[ROLE]["options"]] == ["Pełnomocnik", "Reprezentant"]
+    assert states(items[ROLE]) == []
+    assert _data_sections(form)[-5:] == [
+        "potwierdzenie_ze_jestes_reprezentantem", "adres_do_korespondencji", "dodatkowe_dane_wnioskodawcy",
+        "pelnomocnictwo", "oplata_skarbowa_pelnomocnictwo_2",
+    ]
+    assert states(items["potwierdzenie_ze_jestes_reprezentantem"]) == [AS_REPRESENTATIVE]
+    assert states(items["pelnomocnictwo"]) == states(items["oplata_skarbowa_pelnomocnictwo_2"]) == [AS_ATTORNEY]
+    assert _field_names(items["dodatkowe_dane_wnioskodawcy"]) == ["seria_i_numer_dowodu", "adres_epuap"]
+    assert items["adres_epuap"]["validation"] == []
+    assert layout(form)[-2] == ("Kontakt i zgody", "MAIN", [("zgoda_wyrazenie", ["zgoda"])])
+
+
+@pytest.mark.parametrize("applicants", ["ENTITY", "BOTH"])
+def test_entity_without_proxy_reuses_only_available_show_conditions(applicants: str) -> None:
+    data = _analysis_data(applicants, representative_proof=True, contact=["EMAIL"])
+    items = by_tech_name(build_form(FormAnalysis.model_validate(data)))
+    assert {ROLE, "pelnomocnictwo", "adres_siedziby", "oplata_skarbowa_pelnomocnictwo_2"}.isdisjoint(items)
+    if applicants == "ENTITY":
+        assert "podmiot_wniosku" not in items and ON_BEHALF not in items
+        expected = []
+    else:
+        assert [o["name"] for o in items[ON_BEHALF]["options"]] == ["Swoim", "Osoby prawnej lub jednostki organizacyjnej"]
+        expected = [LEGAL_ENTITY]
+    assert states(items["dane_podmiotu"]) == states(items["potwierdzenie_ze_jestes_reprezentantem"]) == expected
+    assert _field_names(items["dane_do_kontaktu"]) == ["adres_e_mail"]
+
+
+def test_proxy_for_person_can_omit_the_address() -> None:
+    items = by_tech_name(build_form(FormAnalysis.model_validate(_analysis_data("PERSON", proxy=True))))
+    assert {"adres_zamieszkania", "adres_zamieszkania_osoby_ktorej_jestes_pelnomocnikiem"}.isdisjoint(items)
+    for name in ["dane_innej_osoby", "pelnomocnictwo", "oplata_skarbowa_pelnomocnictwo_1"]:
+        assert states(items[name]) == [OTHER_PERSON], name
+
+
+def test_applicant_extra_show_uses_local_names_after_global_collisions() -> None:
+    data = _analysis_data("PERSON", applicant_extra_fields=[
+        {"label": "Numer <dowodu>", "type": "TEXT_FIELD", "show_if": {"field": "Imię", "equals": "Inne"}},
+        {"label": "Imię", "type": "RADIO", "options": ["Z rejestru", "Inne"]},
+    ])
+    data["subject_pages"][0]["sections"][0]["fields"].append({"label": "Imię", "type": "TEXT_FIELD"})
+    form = build_form(FormAnalysis.model_validate(data))
+    items = elements(form)
+    name = "dodatkowe_dane_wnioskodawcy"
+    assert _data_sections(form)[-1] == name
+    assert items[("Dane", name)]["title"] == "Dodatkowe dane wnioskodawcy"
+    assert _field_names(items[("Dane", name)]) == ["numer_dowodu", "imie_2"]
+    assert states(items[("Dane", "numer_dowodu")]) == [atom("Inne", "imie_2", section=name)]
+    assert ("Treść sprawy", "imie_3") in items
+    assert lint.check(form) == []
+
+
+def test_applicant_decision_matrix_passes_lint() -> None:
+    extra_fields = [
+        {"label": "Dokument tożsamości", "type": "RADIO", "options": ["Dowód osobisty", "Paszport"]},
+        {"label": "Numer paszportu", "type": "TEXT_FIELD", "show_if": {"field": "Dokument tożsamości", "equals": "Paszport"}},
+    ]
+    values = {
+        "proxy": (False, True),
+        "applicant_pesel": (False, True),
+        "person_address": (False, True),
+        "entity_ids": ([], ["NIP"], ["NIP", "REGON"], ["NIP", "REGON", "KRS"]),
+        "entity_ids_one_of": (False, True),
+        "entity_address": (False, True),
+        "representative_proof": (False, True),
+        "correspondence_address": (False, True),
+        "contact": ([], ["PHONE"], ["PHONE", "EMAIL"]),
+        "applicant_extra_fields": ([], extra_fields),
+    }
+    checked = dict.fromkeys(["PERSON", "ENTITY", "BOTH"], 0)
+    for applicants, combination in product(checked, product(*values.values())):
+        decisions = dict(zip(values, combination, strict=True))
+        try:
+            a = FormAnalysis.model_validate(_analysis_data(applicants, **decisions))
+        except ValidationError:
+            continue
+        form = build_form(a)
+        assert lint.check(form) == [], (applicants, decisions)
+        for item in elements(form).values():
+            if item["type"] == "RADIO":
+                assert len(item["options"]) >= 2, (applicants, decisions, item["techName"])
+            if item["type"] == "SECTION":
+                assert item["repeatingSectionGrid"], (applicants, decisions, item["techName"])
+        checked[applicants] += 1
+    assert checked == {"PERSON": 96, "ENTITY": 576, "BOTH": 2304}
 
 
 # --- przypadki brzegowe ---------------------------------------------------------------------------
