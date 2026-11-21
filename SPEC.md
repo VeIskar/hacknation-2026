@@ -68,12 +68,17 @@ curl -F "file=@Wniosek o wydanie zaświadczenia.pdf" http://localhost:8000/api/f
 ```
 
 - 200: ciało to sam JSON formularza (Field contract), bez opakowania.
-- 400 `{"detail": "Nazwa pliku jest za długa albo ma niedozwolone znaki."}`
+- 400 `{"detail": "Nazwa pliku jest za długa albo ma niedozwolone znaki."}`, bez pliku w żądaniu
+  `{"detail": "Wybierz plik formularza."}`, a gdy treści nie da się odczytać
+  `{"detail": "Nie udało się odczytać treści pliku."}`
 - 413 `{"detail": "Plik jest za duży. Limit to 10 MB."}`
 - 415 `{"detail": "Zawartość pliku nie pasuje do rozszerzenia .pdf."}`, a dla innego rozszerzenia
   `{"detail": "Ten typ pliku nie jest obsługiwany. Wybierz PDF, DOC, DOCX, ODS, XLSX, JPG albo PNG."}`
-- 503 `{"detail": "Model AI nie odpowiada. Spróbuj ponownie za chwilę."}`
+- 503 `{"detail": "Model AI nie odpowiada. Spróbuj ponownie za chwilę."}`, także gdy model
+  nie zwrócił poprawnej analizy
+- 500 `{"detail": "Coś poszło nie tak. Spróbuj ponownie."}`
 
+`detail` jest zawsze tekstem. API nie zwraca 422: błąd walidacji żądania wraca jako 400.
 Front pokazuje `detail` bez zmian w komunikacie z `role="alert"`.
 
 ## Field contract
@@ -104,7 +109,8 @@ Testy nie wołają modelu. Przy ustawionym `LLM_FIXTURE` moduł `backend/app/llm
 `backend/tests/fixtures/fields.json`, a `playwright.config.ts` ustawia tę zmienną dla API.
 Ten fixture opisuje wniosek, który można złożyć w imieniu innej osoby (`WNIOSKODAWCY` = OBA).
 Materiały COI (zip z Discorda) leżą w `materialy/`, poza gitem. Foldery 1 i 5 to wzorce,
-foldery 2–4 i 6–9 to formularze do oceny.
+foldery 2–4 i 6–9 to formularze do oceny. Folder 1 to zbiór kontrolny: nie trafia do promptów,
+opisów schematu modelu ani fixture’ów.
 
 ## Model
 
