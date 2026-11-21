@@ -8,6 +8,14 @@ services:
     build: ./backend
     ports:
       - "8000:8000"
+    # Treść pkt 5: bez trwałego zapisu i bez uprawnień roota. Zapis tylko do /tmp w pamięci.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     environment:
       MAX_FILE_SIZE_MB: ${MAX_FILE_SIZE_MB:-}
       JWT_ENABLED: ${JWT_ENABLED:-}

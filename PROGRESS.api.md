@@ -88,6 +88,14 @@ Krok P1.3a: walidatory typu dla etykiet pól analizy.
 - Dowód: mutacje, porównanie fixture’ów z `origin/main`, macierz z linterem, `bash scripts/gate.sh api -rs`.
 - Po recenzji: odtworzyć fałszywe dopasowania w tabeli etykiet, odrzucić etykiety złożone i sprawdzić mutację tej reguły.
 
+Krok M1.3 (Marcin): obraz `api` zgodny z Treść pkt 5 (bez roota, jawne wersje, bez trwałego zapisu).
+- `backend/Dockerfile`: `python:3.14.10-slim-trixie`, `tesseract-ocr` + `tesseract-ocr-pol` z apt, użytkownik
+  `app` (UID 10001) bez powłoki, kod tylko do odczytu, `EXPOSE 8000`.
+- `docker-compose.yml` (`api`): `read_only`, `tmpfs /tmp`, `cap_drop: ALL`, `no-new-privileges`.
+- `DECISIONS.md`: obraz bazowy, tesseract (licencje). Web (nginx bez roota na 8080) → Request do `web`.
+- Dowód: `test_docker.py` (statycznie: wersja obrazu, USER, port, compose); `docker compose build api`,
+  `whoami` → `app`, `tesseract --list-langs` ma `pol`, `/health` 200, zapis poza `/tmp` odrzucony.
+
 ## Requests
 
 (one line per change you need from another area: who asks, what, why)
@@ -103,6 +111,7 @@ Krok P1.3a: walidatory typu dla etykiet pól analizy.
 - Mikołaj → Marcin (M1.5, `docker-compose.yml`): serwis `ollama/ollama:0.40.15` z `OLLAMA_CONTEXT_LENGTH=16384` i `OLLAMA_NO_CLOUD=1`, bez portu na hoście (API Ollamy nie ma haseł).
 - Mikołaj → Marcin (`config.py`, `env.example`): `LLM_TIMEOUT_S=120` jest za małe na CPU (K1: 238–344 s na formularz); podnieś do 600 albo zmierz na maszynie demo.
 - Mikołaj → web (`frontend/playwright.config.ts`): ustaw `LLM_FIXTURE` dla API, jak mówi SPEC „Real and mocked”. Dziś go nie ma, więc po K3 e2e wołałoby prawdziwy model (recenzja K1-fix2).
+- Marcin (M1.3) → web (`frontend/Dockerfile`, `frontend/nginx.conf`): nginx bez roota (`nginxinc/nginx-unprivileged:<jawna wersja>` albo `USER nginx`), nasłuch na 8080, `EXPOSE 8080`; Treść pkt 5. Potem Marcin zmienia w compose `5173:80` na `5173:8080`.
 
 ## Log
 
@@ -127,3 +136,4 @@ Krok P1.3a: walidatory typu dla etykiet pól analizy.
 - P1.2b: done dobór sekcji i SHOW, regresje F2–F4 i F6–F9, 2 976 kombinacji z P2 (1,76 s), 36/36 mutacji; trzy fixture’y identyczne z `origin/main`, ENTITY zmieniony zgodnie z nowymi regułami; `bash scripts/gate.sh api -rs` → `441 passed`, 0 pominiętych, 1 ostrzeżenie Starlette, `GATE: PASS (api)` / next commit człowieka / blocker brak.
 - P1.3a: done walidatory z etykiet w obu ścieżkach analizy, 16 czerwonych przypadków przed zmianą, 17/17 mutacji wykrytych, 5 fixture’ów identycznych z `origin/main`, pełna macierz 2 976 kombinacji (1,71 s), `bash scripts/gate.sh api -rs` → `516 passed`, 0 pominiętych, 1 ostrzeżenie Starlette, `GATE: PASS (api)` / next commit człowieka / blocker brak.
 - P1.3a po recenzji: done etykieta złożona bez walidatora typu, 13 błędów odtworzonych przed zmianą i po wyłączeniu reguły, 5 fixture’ów identycznych z `origin/main`, `bash scripts/gate.sh api -rs` → `538 passed`, 0 pominiętych, 1 ostrzeżenie Starlette, `GATE: PASS (api)` / next commit człowieka / blocker brak.
+- M1.3 (api): done obraz `python:3.14.10-slim-trixie`, tesseract 5.5.0 + `pol`, użytkownik `app` (10001), compose `read_only`/`tmpfs /tmp`/`cap_drop ALL`/`no-new-privileges`; `docker compose build api` OK, `whoami` → `app`, `/health` 200, PDF → 200, fałszywy PDF → 415, JWT 401/200 w kontenerze, zapis poza `/tmp` odrzucony; `test_docker.py` 7/7 mutacji wykrytych; `gate.sh` → 403 passed / next web: nginx bez roota na 8080 (Request), M1.4 / blocker: licencje LGPL bibliotek tesseracta – decyzja lidera/mentora (DECISIONS M1.3).
