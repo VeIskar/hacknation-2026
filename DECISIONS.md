@@ -63,6 +63,9 @@ M1.1 (Marcin):
   zmienną z `env.example` jako `${NAZWA:-}`: ta forma działa też w podman-compose.
 - ODS: wpis `mimetype` musi być dokładnie równy typowi (bez końca linii i dopisków), jak w ODF 1.2.
 
+K2.2 (Mikołaj): Tesseract CLI i dane językowe `pol` (Apache-2.0) do lokalnego OCR skanów JPG/PNG.
+Stdin i stdout pozwalają odczytać obraz bez tworzenia pliku tymczasowego.
+
 ## Event: whole project
 
 - **D7 – odpowiedzialność.** Lider rozstrzyga kontrakty, zakres i integrację. `SPEC.md` określa kontrakty, `DECISIONS.md` zapisuje decyzje, `DELEGACJA.md` wyznacza wykonawców, a `PROGRESS*.md` rejestruje postęp i wyniki bramek.
