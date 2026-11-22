@@ -18,6 +18,45 @@ a linter sprawdza schemat i Reguły techniczne.
 
 [Dokumentacja architektury](docs/ARCHITEKTURA.md)
 
+Do oceny udostępniamy [siedem wynikowych plików JSON COI](wyniki/) dla formularzy 2–4 i 6–9 oraz [raport generowania](wyniki/report.md).
+
+## Uruchomienie do oceny
+
+Obrona odbywa się na x86 bez GPU (D12). Od tego zależy wybór trybu modelu.
+
+| Tryb | Czas na formularz | Przez interfejs (port 5173) |
+|---|---|---|
+| Eden AI, `flexai/Qwen3.5-9B@eu` (D9) | 5–98 s dla formularzy 2–9 ([raport](wyniki/report.md)) | tak |
+| Ollama lokalnie, `qwen3.5:4b`, sam CPU | 238–584 s na jedną próbę (pomiary K1 i K3) | nie, nginx kończy żądanie po 300 s |
+
+**Zalecana ścieżka: Eden AI.** Polecenia są w sekcji [Model w chmurze: Eden AI](#model-w-chmurze-eden-ai-d9).
+Ta ścieżka wymaga internetu i klucza Eden AI. Model otrzymuje tekst odczytany z pliku.
+
+**Bez internetu, na samym CPU.** Domyślne ustawienia tu nie wystarczą. `LLM_TIMEOUT_S=120` kończy
+każdą próbę kodem 503. Druga próba po błędnej odpowiedzi modelu dodałaby kolejne minuty.
+Ustaw dłuższy limit i jedną próbę. Plik wyślij
+bezpośrednio do API na porcie 8000, z pominięciem nginx:
+
+```bash
+cp env.example .env
+bash scripts/pull_model.sh                                   # raz, ok. 3,3 GB
+LLM_TIMEOUT_S=900 LLM_MAX_ATTEMPTS=1 docker compose up -d --build
+curl -s -o formularz.json -w 'HTTP %{http_code}, %{time_total} s\n' \
+     -F "file=@wniosek.pdf" http://127.0.0.1:8000/api/forms
+```
+
+Zmienne podane w poleceniu mają pierwszeństwo przed `.env`. Ten tryb przekracza cel 180 s z D11.
+
+Co znaczy błąd:
+
+| Objaw | Przyczyna | Co zrobić |
+|---|---|---|
+| 503 po mniej niż sekundzie | Ollama nie działa albo model nie jest pobrany | `docker compose ps`, potem `bash scripts/pull_model.sh` |
+| 503 po ok. 120 s (albo po `LLM_TIMEOUT_S`) | model nie zdążył odpowiedzieć | dłuższy `LLM_TIMEOUT_S` i `LLM_MAX_ATTEMPTS=1`, jak wyżej |
+| „Serwer nie odpowiedział na czas” w interfejsie | nginx przerwał żądanie po 300 s | wyślij plik przez `curl` na port 8000 |
+
+Przy braku połączenia z modelem i przy przekroczeniu czasu log API nie podaje dziś przyczyny błędu 503. Stan serwisów pokazuje `docker compose ps`.
+
 ## Wymagania
 
 - Maszyna x86, bez GPU (obrona odbywa się bez karty graficznej).

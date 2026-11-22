@@ -1,0 +1,731 @@
+{
+  "title": "Wniosek o wynajęcie/użyczenie świetlicy wiejskiej",
+  "tabs": [
+    {
+      "id": "24656a59-cb80-5997-bc13-d8386dd068fd",
+      "title": "Dane",
+      "type": "MAIN",
+      "questions": [
+        {
+          "x": 0,
+          "y": 0,
+          "rows": 2,
+          "cols": 3,
+          "field": {
+            "id": "18958efb-2037-5a6a-8871-9abdcec69f9d",
+            "type": "SECTION",
+            "techName": "organ_do_ktorego_jest_skladany_wniosek",
+            "title": "Organ, do którego jest składany wniosek",
+            "description": "<html><head></head><body></body></html>",
+            "options": [],
+            "validation": [],
+            "readOnly": false,
+            "repeatingSectionGrid": [
+              {
+                "x": 0,
+                "y": 0,
+                "rows": 1,
+                "cols": 3,
+                "field": {
+                  "id": "2e622cad-dcf3-53fd-a4b8-3230574d84a5",
+                  "type": "TEXT_FIELD",
+                  "techName": "nazwa_organu",
+                  "title": "Nazwa organu",
+                  "description": "",
+                  "options": [],
+                  "validation": [],
+                  "readOnly": true,
+                  "repeatingSectionGrid": [],
+                  "states": [],
+                  "questionOrder": 0,
+                  "tooltipMessage": "",
+                  "defaultValue": "Wójt Gminy Płoskinia"
+                }
+              }
+            ],
+            "states": [],
+            "questionOrder": 0,
+            "tooltipMessage": ""
+          }
+        },
+        {
+          "x": 0,
+          "y": 2,
+          "rows": 3,
+          "cols": 3,
+          "field": {
+            "id": "079ac083-51ae-5178-b7d1-f56bab6f1acb",
+            "type": "SECTION",
+            "techName": "twoje_dane",
+            "title": "Twoje dane",
+            "description": "<html><head></head><body></body></html>",
+            "options": [],
+            "validation": [],
+            "readOnly": false,
+            "repeatingSectionGrid": [
+              {
+                "x": 0,
+                "y": 0,
+                "rows": 1,
+                "cols": 3,
+                "field": {
+                  "id": "bd1c8a8c-12b9-55f1-b91f-95c63dd1e105",
+                  "type": "TEXT_FIELD",
+                  "techName": "imie",
+                  "title": "Imię",
+                  "description": "",
+                  "options": [],
+                  "validation": [],
+                  "readOnly": true,
+                  "repeatingSectionGrid": [],
+                  "states": [],
+                  "questionOrder": 0,
+                  "tooltipMessage": "",
+                  "defaultValue": "MLPZ.name",
+                  "defaultValueType": "EXTERNAL_SYSTEM"
+                }
+              },
+              {
+                "x": 0,
+                "y": 1,
+                "rows": 1,
+                "cols": 3,
+                "field": {
+                  "id": "ffe280a0-e163-5de2-bbaa-25f521e7e41a",
+                  "type": "TEXT_FIELD",
+                  "techName": "nazwisko",
+                  "title": "Nazwisko",
+                  "description": "",
+                  "options": [],
+                  "validation": [],
+                  "readOnly": true,
+                  "repeatingSectionGrid": [],
+                  "states": [],
+                  "questionOrder": 1,
+                  "tooltipMessage": "",
+                  "defaultValue": "MLPZ.surname",
+                  "defaultValueType": "EXTERNAL_SYSTEM"
+                }
+              }
+            ],
+            "states": [],
+            "questionOrder": 2,
+            "tooltipMessage": ""
+          }
+        },
+        {
+          "x": 0,
+          "y": 5,
+          "rows": 10,
+          "cols": 3,
+          "field": {
+            "id": "335264af-648b-5645-8bb2-d62e04294649",
+            "type": "SECTION",
+            "techName": "adres_zamieszkania",
+            "title": "Adres zamieszkania",
+            "description": "<html><head></head><body></body></html>",
+            "options": [],
+            "validation": [],
+            "readOnly": false,
+            "repeatingSectionGrid": [
+              {
+                "x": 0,
+                "y": 0,
+                "rows": 1,
+                "cols": 3,
+                "field": {
+                  "id": "a7febe23-0548-57c1-812a-36bdbe664f53",
+                  "type": "SELECT",
+                  "techName": "kraj",
+                  "title": "Kraj",
+                  "description": "",
+                  "options": [],
+                  "validation": [],
+                  "readOnly": false,
+                  "repeatingSectionGrid": [],
+                  "states": [],
+                  "questionOrder": 0,
+                  "tooltipMessage": "",
+                  "dictionaryName": "Kraje",
+                  "defaultValue": [
+                    "Polska"
+                  ],
+                  "searchEnabled": true
+                }
+              },
+              {
+                "x": 0,
+                "y": 1,
+                "rows": 1,
+                "cols": 3,
+                "field": {
+                  "id": "46c5612b-1918-5475-97af-d45ddb9f6d9d",
+                  "type": "TEXT_FIELD",
+                  "techName": "miejscowosc_zagranica",
+                  "title": "Miejscowość",
+                  "description": "",
+                  "options": [],
+                  "validation": [],
+                  "readOnly": false,
+                  "repeatingSectionGrid": [],
+                  "states": [
+                    {
+                      "type": "SHOW",
+                      "query": "$not(\"Polska\" in tabs['Dane' in title].questions['adres_zamieszkania' in field.techName].field.repeatingSectionGrid['kraj' in field.techName].field.__userAnswer)"
+                    }
+                  ],
+                  "questionOrder": 1,
+                  "tooltipMessage": ""
+                }
+              },
+              {
+                "x": 0,
+                "y": 2,
+                "rows": 1,
+                "cols": 3,
+                "field": {
+                  "id": "a7bb619b-cbb4-5f17-aa94-d33a248a13a1",
+                  "type": "TEXT_FIELD",
+                  "techName": "kod_pocztowy_zagranica",
+                  "title": "Kod pocztowy",
+                  "description": "",
+                  "options": [],
+                  "validation": [],
+                  "readOnly": false,
+                  "repeatingSectionGrid": [],
+                  "states": [
+                    {
+                      "type": "SHOW",
+                      "query": "$not(\"Polska\" in tabs['Dane' in title].questions['adres_zamieszkania' in field.techName].field.repeatingSectionGrid['kraj' in field.techName].field.__userAnswer)"
+                    }
+                  ],
+                  "questionOrder": 2,
+                  "tooltipMessage": ""
+                }
+              },
+              {
+                "x": 0,
+                "y": 3,
+                "rows": 1,
+                "cols": 3,
+                "field": {
+                  "id": "2c9dd9c4-19a1-5fc8-9b18-fcf006541f64",
+                  "type": "TEXT_FIELD",
+                  "techName": "ulica_zagranica",
+                  "title": "Ulica",
+                  "description": "",
+                  "options": [],
+                  "validation": [],
+                  "readOnly": false,
+                  "repeatingSectionGrid": [],
+                  "states": [
+                    {
+                      "type": "SHOW",
+                      "query": "$not(\"Polska\" in tabs['Dane' in title].questions['adres_zamieszkania' in field.techName].field.repeatingSectionGrid['kraj' in field.techName].field.__userAnswer)"
+                    }
+                  ],
+                  "questionOrder": 3,
+                  "tooltipMessage": ""
+                }
+              },
+              {
+                "x": 0,
+                "y": 4,
+                "rows": 1,
+                "cols": 3,
+                "field": {
+                  "id": "8f5be07c-9dec-5499-ac70-87a96f4d7e75",
+                  "type": "SELECT",
+                  "techName": "wojewodztwo",
+                  "title": "Województwo",
+                  "description": "",
+                  "options": [],
+                  "validation": [],
+                  "readOnly": false,
+                  "repeatingSectionGrid": [],
+                  "states": [
+                    {
+                      "type": "SHOW",
+                      "query": "(\"Polska\" in tabs['Dane' in title].questions['adres_zamieszkania' in field.techName].field.repeatingSectionGrid['kraj' in field.techName].field.__userAnswer)"
+                    }
+                  ],
+                  "questionOrder": 4,
+                  "tooltipMessage": "",
+                  "dictionaryName": "TERYT_4G_DOWODOWY",
+                  "multiLevelTree": true,
+                  "searchEnabled": true,
+                  "defaultValue": []
+                }
+              },
+              {
+                "x": 0,
+                "y": 5,
+                "rows": 1,
+                "cols": 3,
+                "field": {
+                  "id": "29fe3273-cd53-5f78-af68-6c299b59cea9",
+                  "type": "TEXT_FIELD",
+                  "techName": "kod_pocztowy",
+                  "title": "Kod pocztowy",
+                  "description": "",
+                  "options": [],
+                  "validation": [
+                    "REQUIRED",
+                    "ZIP_CODE"
+                  ],
+                  "readOnly": false,
+                  "repeatingSectionGrid": [],
+                  "states": [
+                    {
+                      "type": "SHOW",
+                      "query": "(\"Polska\" in tabs['Dane' in title].questions['adres_zamieszkania' in field.techName].field.repeatingSectionGrid['kraj' in field.techName].field.__userAnswer)"
+                    }
+                  ],
+                  "questionOrder": 5,
+                  "tooltipMessage": "",
+                  "defaultValue": "MLPZ.postCode",
+                  "defaultValueType": "EXTERNAL_SYSTEM"
+                }
+              },
+              {
+                "x": 0,
+                "y": 6,
+                "rows": 1,
+                "cols": 3,
+                "field": {
+                  "id": "6297e669-333d-5426-8dae-d9fc80e87bc6",
+                  "type": "TEXT_FIELD",
+                  "techName": "ulica",
+                  "title": "Ulica",
+                  "description": "",
+                  "options": [],
+                  "validation": [],
+                  "readOnly": false,
+                  "repeatingSectionGrid": [],
+                  "states": [
+                    {
+                      "type": "SHOW",
+                      "query": "(\"Polska\" in tabs['Dane' in title].questions['adres_zamieszkania' in field.techName].field.repeatingSectionGrid['kraj' in field.techName].field.__userAnswer)"
+                    }
+                  ],
+                  "questionOrder": 6,
+                  "tooltipMessage": "",
+                  "defaultValue": "MLPZ.street",
+                  "defaultValueType": "EXTERNAL_SYSTEM"
+                }
+              },
+              {
+                "x": 0,
+                "y": 7,
+                "rows": 1,
+                "cols": 3,
+                "field": {
+                  "id": "2ac2b432-6659-505d-9934-0a6385b6b4de",
+                  "type": "TEXT_FIELD",
+                  "techName": "numer_budynku",
+                  "title": "Numer budynku",
+                  "description": "",
+                  "options": [],
+                  "validation": [],
+                  "readOnly": false,
+                  "repeatingSectionGrid": [],
+                  "states": [],
+                  "questionOrder": 7,
+                  "tooltipMessage": "",
+                  "defaultValue": "MLPZ.building",
+                  "defaultValueType": "EXTERNAL_SYSTEM"
+                }
+              },
+              {
+                "x": 0,
+                "y": 8,
+                "rows": 1,
+                "cols": 3,
+                "field": {
+                  "id": "9ae5e4b8-b5be-515e-a3fe-a3cfa2c590a8",
+                  "type": "TEXT_FIELD",
+                  "techName": "numer_lokalu",
+                  "title": "Numer lokalu",
+                  "description": "",
+                  "options": [],
+                  "validation": [],
+                  "readOnly": false,
+                  "repeatingSectionGrid": [],
+                  "states": [],
+                  "questionOrder": 8,
+                  "tooltipMessage": "",
+                  "defaultValue": "MLPZ.apartment",
+                  "defaultValueType": "EXTERNAL_SYSTEM"
+                }
+              }
+            ],
+            "states": [],
+            "questionOrder": 5,
+            "tooltipMessage": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "64e9127e-7da8-51f8-8f06-73394127bc16",
+      "title": "Wniosek o wynajęcie/użyczenie świetlicy wiejskiej",
+      "type": "MAIN",
+      "questions": [
+        {
+          "x": 0,
+          "y": 0,
+          "rows": 2,
+          "cols": 3,
+          "field": {
+            "id": "c7cf3ad4-0136-56a5-b497-bc4e26ae86b5",
+            "type": "SECTION",
+            "techName": "dane_wnioskodawcy",
+            "title": "Dane wnioskodawcy",
+            "description": "<html><head></head><body></body></html>",
+            "options": [],
+            "validation": [],
+            "readOnly": false,
+            "repeatingSectionGrid": [
+              {
+                "x": 0,
+                "y": 0,
+                "rows": 1,
+                "cols": 3,
+                "field": {
+                  "id": "9594d040-6a27-5bf0-9ed9-cfa0fdbb47b4",
+                  "type": "TEXT_FIELD",
+                  "techName": "miejscowosc_i_data",
+                  "title": "Miejscowość i data",
+                  "description": "<html><head></head><body><p>Miejscowość i data wypełnienia formularza</p></body></html>",
+                  "options": [],
+                  "validation": [],
+                  "readOnly": false,
+                  "repeatingSectionGrid": [],
+                  "states": [],
+                  "questionOrder": 0,
+                  "tooltipMessage": ""
+                }
+              }
+            ],
+            "states": [],
+            "questionOrder": 0,
+            "tooltipMessage": ""
+          }
+        },
+        {
+          "x": 0,
+          "y": 2,
+          "rows": 3,
+          "cols": 3,
+          "field": {
+            "id": "f2a2796e-42d0-5e88-8c6c-d0bd32c089fa",
+            "type": "SECTION",
+            "techName": "szczegoly_wydarzenia",
+            "title": "Szczegóły wydarzenia",
+            "description": "<html><head></head><body></body></html>",
+            "options": [],
+            "validation": [],
+            "readOnly": false,
+            "repeatingSectionGrid": [
+              {
+                "x": 0,
+                "y": 0,
+                "rows": 1,
+                "cols": 3,
+                "field": {
+                  "id": "5180a59b-5f53-5512-ae42-0bbd39ef770e",
+                  "type": "TEXT_FIELD",
+                  "techName": "cel_wynajecia_swietlicy",
+                  "title": "Cel wynajęcia świetlicy",
+                  "description": "",
+                  "options": [],
+                  "validation": [
+                    "REQUIRED"
+                  ],
+                  "readOnly": false,
+                  "repeatingSectionGrid": [],
+                  "states": [],
+                  "questionOrder": 0,
+                  "tooltipMessage": ""
+                }
+              },
+              {
+                "x": 0,
+                "y": 1,
+                "rows": 1,
+                "cols": 3,
+                "field": {
+                  "id": "d3782e86-c869-5013-af76-b456a011cbde",
+                  "type": "NUMBER",
+                  "techName": "przewidywana_ilosc_uczestnikow",
+                  "title": "Przewidywana ilość uczestników",
+                  "description": "",
+                  "options": [],
+                  "validation": [
+                    "REQUIRED"
+                  ],
+                  "readOnly": false,
+                  "repeatingSectionGrid": [],
+                  "states": [],
+                  "questionOrder": 1,
+                  "tooltipMessage": ""
+                }
+              }
+            ],
+            "states": [],
+            "questionOrder": 2,
+            "tooltipMessage": ""
+          }
+        },
+        {
+          "x": 0,
+          "y": 5,
+          "rows": 3,
+          "cols": 3,
+          "field": {
+            "id": "107db2ec-bfe1-5fa9-a938-21707e6dc9f4",
+            "type": "SECTION",
+            "techName": "okres_wynajmu",
+            "title": "Okres wynajmu",
+            "description": "<html><head></head><body></body></html>",
+            "options": [],
+            "validation": [],
+            "readOnly": false,
+            "repeatingSectionGrid": [
+              {
+                "x": 0,
+                "y": 0,
+                "rows": 1,
+                "cols": 3,
+                "field": {
+                  "id": "128114c3-cb29-5439-b9c1-b232b27d31b7",
+                  "type": "DATEPICKER",
+                  "techName": "termin_wynajecia_od",
+                  "title": "Termin wynajęcia (od)",
+                  "description": "",
+                  "options": [],
+                  "validation": [
+                    "REQUIRED"
+                  ],
+                  "readOnly": false,
+                  "repeatingSectionGrid": [],
+                  "states": [],
+                  "questionOrder": 0,
+                  "tooltipMessage": ""
+                }
+              },
+              {
+                "x": 0,
+                "y": 1,
+                "rows": 1,
+                "cols": 3,
+                "field": {
+                  "id": "16420f5f-e662-588a-931f-4b360d3f0861",
+                  "type": "DATEPICKER",
+                  "techName": "termin_wynajecia_do",
+                  "title": "Termin wynajęcia (do)",
+                  "description": "",
+                  "options": [],
+                  "validation": [
+                    "REQUIRED"
+                  ],
+                  "readOnly": false,
+                  "repeatingSectionGrid": [],
+                  "states": [],
+                  "questionOrder": 1,
+                  "tooltipMessage": ""
+                }
+              }
+            ],
+            "states": [],
+            "questionOrder": 5,
+            "tooltipMessage": ""
+          }
+        },
+        {
+          "x": 0,
+          "y": 8,
+          "rows": 2,
+          "cols": 3,
+          "field": {
+            "id": "61136889-43cd-52c3-a109-adee1574e3b3",
+            "type": "SECTION",
+            "techName": "osoba_odpowiedzialna",
+            "title": "Osoba odpowiedzialna",
+            "description": "<html><head></head><body></body></html>",
+            "options": [],
+            "validation": [],
+            "readOnly": false,
+            "repeatingSectionGrid": [
+              {
+                "x": 0,
+                "y": 0,
+                "rows": 1,
+                "cols": 3,
+                "field": {
+                  "id": "b7a0a363-e6e8-5479-a794-ad5f1158f249",
+                  "type": "TEXT_FIELD",
+                  "techName": "osoba_odpowiedzialna_za_porzadek_i_bezpieczenstwo",
+                  "title": "Osoba odpowiedzialna za porządek i bezpieczeństwo",
+                  "description": "",
+                  "options": [],
+                  "validation": [
+                    "REQUIRED"
+                  ],
+                  "readOnly": false,
+                  "repeatingSectionGrid": [],
+                  "states": [],
+                  "questionOrder": 0,
+                  "tooltipMessage": ""
+                }
+              }
+            ],
+            "states": [],
+            "questionOrder": 8,
+            "tooltipMessage": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "2b007f91-5ee6-57c5-a520-43b823a1b825",
+      "title": "Kontakt i zgody",
+      "type": "MAIN",
+      "questions": [
+        {
+          "x": 0,
+          "y": 0,
+          "rows": 2,
+          "cols": 3,
+          "field": {
+            "id": "be2c2360-0d89-53f1-acc8-555b5ede67d1",
+            "type": "SECTION",
+            "techName": "zgoda_wyrazenie",
+            "title": "Zgody i oświadczenia",
+            "description": "<html><head></head><body></body></html>",
+            "options": [],
+            "validation": [],
+            "readOnly": false,
+            "repeatingSectionGrid": [
+              {
+                "x": 0,
+                "y": 0,
+                "rows": 1,
+                "cols": 3,
+                "field": {
+                  "id": "2aaac3d7-3f50-5faa-baa0-46e9dbc33b35",
+                  "type": "CONSENT_SECTION",
+                  "techName": "zgoda",
+                  "title": "",
+                  "description": "",
+                  "options": [],
+                  "validation": [],
+                  "readOnly": false,
+                  "repeatingSectionGrid": [],
+                  "states": [],
+                  "questionOrder": 0,
+                  "tooltipMessage": "",
+                  "consentSectionConfig": {
+                    "consents": [
+                      {
+                        "description": "<html><head></head><body><p>Wyrażam zgodę na przetwarzanie moich danych osobowych zgodnie z klauzulą informacyjną.</p></body></html>",
+                        "required": true
+                      },
+                      {
+                        "description": "<html><head></head><body><p>Oświadczam, że zapoznałem/am się z warunkami wynajmu świetlicy wiejskiej.</p></body></html>",
+                        "required": true
+                      },
+                      {
+                        "description": "<html><head></head><body><p>Oświadczam, że w czasie najmu odpowiadam za ład i porządek w świetlicy oraz na terenie przyległym do świetlicy.</p></body></html>",
+                        "required": true
+                      },
+                      {
+                        "description": "<html><head></head><body><p>Oświadczam, że zobowiązuję się do przestrzegania przepisów sanitarnych, BHP i p.poż. w czasie trwania przedsięwzięcia.</p></body></html>",
+                        "required": true
+                      },
+                      {
+                        "description": "<html><head></head><body><p>Oświadczam, że na okres wynajmu ponoszę pełną odpowiedzialność za powierzone mienie.</p></body></html>",
+                        "required": true
+                      }
+                    ],
+                    "files": []
+                  }
+                }
+              }
+            ],
+            "states": [],
+            "questionOrder": 0,
+            "tooltipMessage": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "d0c5b029-cd6d-57cc-8428-47ac5b0985c2",
+      "title": "Strona końcowa",
+      "type": "FINISH",
+      "questions": [
+        {
+          "x": 0,
+          "y": 0,
+          "rows": 2,
+          "cols": 3,
+          "field": {
+            "id": "12efe1be-fa14-5037-80f1-3b2dfc942dd1",
+            "type": "SECTION",
+            "techName": "podglad_uzupelnionego_wniosku",
+            "title": "Podgląd uzupełnionego wniosku",
+            "description": "<html><head></head><body></body></html>",
+            "options": [],
+            "validation": [],
+            "readOnly": false,
+            "repeatingSectionGrid": [
+              {
+                "x": 0,
+                "y": 0,
+                "rows": 1,
+                "cols": 3,
+                "field": {
+                  "id": "e12e34ca-efb8-5395-bd74-76f64403d7db",
+                  "type": "TEXT_BLOCK",
+                  "techName": "podglad_1",
+                  "title": "",
+                  "description": "<html><head></head><body><p>Zanim przejdziesz do wyboru sposobu podpisu, sprawdź dane na podglądzie. Jeśli zobaczysz błędy, wróć do edycji.</p></body></html>",
+                  "options": [],
+                  "validation": [],
+                  "readOnly": false,
+                  "repeatingSectionGrid": [],
+                  "states": [],
+                  "questionOrder": 0,
+                  "tooltipMessage": ""
+                }
+              }
+            ],
+            "states": [],
+            "questionOrder": 0,
+            "tooltipMessage": ""
+          }
+        }
+      ]
+    }
+  ],
+  "flow": {
+    "links": [
+      {
+        "id": "86f6b2d1-93fc-5c00-926b-16be6af3f6f4",
+        "source": "24656a59-cb80-5997-bc13-d8386dd068fd",
+        "target": "64e9127e-7da8-51f8-8f06-73394127bc16"
+      },
+      {
+        "id": "b89b5495-076b-5864-ba9e-e739c9fcd26e",
+        "source": "64e9127e-7da8-51f8-8f06-73394127bc16",
+        "target": "2b007f91-5ee6-57c5-a520-43b823a1b825"
+      },
+      {
+        "id": "3e9e7de0-0f68-539c-bfdc-db91a227f513",
+        "source": "2b007f91-5ee6-57c5-a520-43b823a1b825",
+        "target": "d0c5b029-cd6d-57cc-8428-47ac5b0985c2"
+      }
+    ]
+  }
+}
