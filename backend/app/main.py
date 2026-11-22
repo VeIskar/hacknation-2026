@@ -10,7 +10,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app import lint, quality
 from app.analysis import analyze
-from app.auth import AuthError, require_token
+from app.auth import AuthError, check_config, require_token
 from app.config import Settings, get_settings
 from app.errors import AppError
 from app.extract import extract
@@ -39,7 +39,8 @@ UPLOAD_BODY = {
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    get_settings()  # zła wartość w .env zatrzymuje start z nazwą zmiennej, a nie daje 500 później
+    # Zła wartość w .env zatrzymuje start z nazwą zmiennej, a nie daje 500 później. Dotyczy też JWT.
+    check_config(get_settings())
     yield
 
 

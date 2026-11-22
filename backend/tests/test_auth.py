@@ -1,5 +1,6 @@
 """M1.2: JWT według SPEC.md, „API contract” (401, `Authorization: Bearer`, /health otwarte)."""
 
+import os
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 
@@ -191,3 +192,61 @@ def test_script_without_secret_fails(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "JWT_SECRET" in captured.err
+
+
+# Start API (lifespan): zła konfiguracja JWT zatrzymuje start, zanim /health zgłosi gotowość.
+@pytest.fixture
+def env(monkeypatch: pytest.MonkeyPatch) -> Iterator[pytest.MonkeyPatch]:
+    # Wszystko, co czyta Settings.from_env: np. LLM_PROVIDER=edenai z shella zatrzymałby start innym błędem.
+    for name in list(os.environ):
+        if name.startswith(("JWT_", "LLM_")) or name in {"MAX_FILE_SIZE_MB", "OCR_LANG", "ADD_VALIDATORS"}:
+            monkeypatch.delenv(name)
+    get_settings.cache_clear()
+    yield monkeypatch
+    get_settings.cache_clear()
+
+
+def started(env: pytest.MonkeyPatch, **values: str) -> TestClient:
+    for name, value in values.items():
+        env.setenv(name, value)
+    return TestClient(app, raise_server_exceptions=False)
+
+
+@pytest.mark.parametrize("values", [
+    {},
+    {"JWT_ENABLED": "false", "JWT_SECRET": "krotki", "JWT_ALGORITHM": "RS256"},
+], ids=["domyslnie", "wylaczone-z-blednymi-wartosciami"])
+def test_jwt_disabled_starts_without_secret_as_in_demo(env: pytest.MonkeyPatch, values: dict[str, str]) -> None:
+    with started(env, **values) as client:
+        assert client.get("/health").status_code == 200
+        assert post(client).status_code == 200
+
+
+@pytest.mark.parametrize("algorithm", ["HS256", "HS384", "HS512"])
+def test_valid_hmac_config_starts_and_authorizes(env: pytest.MonkeyPatch, algorithm: str) -> None:
+    secret = "k" * {"HS256": 32, "HS384": 48, "HS512": 64}[algorithm]
+    with started(env, JWT_ENABLED="true", JWT_SECRET=secret, JWT_ALGORITHM=algorithm) as client:
+        assert client.get("/health").status_code == 200
+        assert post(client).status_code == 401
+        settings = Settings(jwt_enabled=True, jwt_secret=secret, jwt_algorithm=algorithm)
+        assert post(client, bearer(create_token(settings))).status_code == 200
+
+
+@pytest.mark.parametrize(("values", "variable"), [
+    ({"JWT_SECRET": "x7Qz" * 7 + "abc"}, "JWT_SECRET"),
+    ({"JWT_SECRET": "x7Qz" * 15 + "abc", "JWT_ALGORITHM": "HS512"}, "JWT_SECRET"),
+    ({}, "JWT_SECRET"),
+    ({"JWT_SECRET": "x7Qz" * 16, "JWT_ALGORITHM": "RS256"}, "JWT_ALGORITHM"),
+    ({"JWT_SECRET": "x7Qz" * 16, "JWT_ALGORITHM": "none"}, "JWT_ALGORITHM"),
+    ({"JWT_SECRET": "x7Qz" * 16, "JWT_ALGORITHM": "wklejony-sekret-Zr81"}, "JWT_ALGORITHM"),
+], ids=["hs256-31-bajtow", "hs512-63-bajty", "brak-sekretu", "rs256", "none", "sekret-w-algorytmie"])
+def test_bad_jwt_config_stops_startup_without_health_or_secret(
+    env: pytest.MonkeyPatch, values: dict[str, str], variable: str,
+) -> None:
+    served = []
+    with pytest.raises(RuntimeError, match=variable) as caught, started(env, JWT_ENABLED="true", **values) as client:
+        served.append(client.get("/health").status_code)
+    assert served == []
+    message = str(caught.value)
+    for value in values.values():
+        assert value not in message or value in {"HS256", "HS384", "HS512"}
