@@ -50,19 +50,25 @@ Judges reward simplicity and accessibility. Tokens live in frontend/src/index.cs
 
 ## Two zones (lead decision, 21.11)
 
-- Workbench (the official's tool: loading, waiting, source view, dependency map, report) may
-  have a signature look: its own typeface, a paper and ink palette, motion. Still: contrast
-  4.5:1, visible focus outline, prefers-reduced-motion, no decorative gradients, no glass,
-  no glow, no emoji.
+- Workbench (the official's tool: loading, waiting, source view, JSON, report) follows
+  "Visual direction: Jasny urząd" below.
 - eUsługa preview (what a citizen sees) follows "Forms" above and the COI standards strictly.
   The workbench frames it and never restyles it.
 - Motion: allowed when it shows where something came from or where it went.
 - Fonts: font files in the repo, no CDN. OFL-1.1 allowed for unmodified font files only,
   recorded in DECISIONS.md.
 
-## Workbench depth (lead decision, 22.11; overrides "Look" for the workbench only)
+## Visual direction: Jasny urząd (lead decision, 22.11; overrides "Look" for the workbench)
 
-- Three surfaces: desk (background), sheet (paper, eUsługa frame), panel (inspector).
-  A sheet has one soft shadow, the same everywhere. No other shadows.
-- Radius 8-12 px on panels and buttons. Paper sheets keep A4 proportions and square corners.
-- One primary colour per zone: ink in the workbench, action blue inside the eUsługa preview.
+- White page. Light grey #F3F5F8 only for areas with a job: the file drop zone, the waiting
+  panel, the JSON panel header.
+- Navy #10284F for the service bar, headings, the current step and the selected element.
+  Primary actions #0052A5 everywhere, in the workbench and in the eUsługa preview.
+- Yellow only marks a paper source: pale fill #FFF4C7 with a 2 px #D9A900 underline, number
+  tabs #FFE38A. Never on buttons, steps or focus.
+- Radius 4 px for controls and tags, 6 px for panels. Paper sheets keep square corners.
+- Shadows: the paper sheet, and a 2 px bottom shadow on the primary button. Nothing else.
+- No eyebrow above headings, no coloured bar down one side of a box, monospace only for JSON.
+- Motion only when it shows where something came from or where it went: under 300 ms,
+  ease-out, off under prefers-reduced-motion.
+- Reference screens: frontend/design/jasny-urzad/ (outside git).
