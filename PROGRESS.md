@@ -8,6 +8,17 @@
 
 (at most 10 lines for the current step)
 
+Krok M1.3-web (COI, baza `origin/main` `5e5f876`):
+
+- Przypnij obrazy `web`, uruchom nginx jako UID 101 na porcie 8080 z zapisem tylko do `tmpfs`.
+- Zachowaj port hosta 5173, fallback SPA i proxy `/api/`. Uaktualnij README i opis architektury.
+- Zbuduj trzy obrazy i uruchom Compose na x86 bez GPU. Sprawdź UID, porty, uprawnienia, SPA i proxy z JWT.
+- Uruchom bramkę i e2e. W raporcie wskaż testy do powtórzenia po scaleniu frontu.
+
+Finalizacja M1.3-web (`2459f84`, F3a/F3b/F4a): zbuduj Compose i potwierdź UID oraz uprawnienia nginx.
+Uruchom repozytoryjne e2e i próby PDF.js, mobile, dostępności oraz JWT na obrazie z fixture modelu.
+Sprawdź błędne ustawienia JWT, uruchom pełną bramkę i niezależne review, zapisz werdykt wdrożenia.
+
 Krok L1 (lider, gałąź `lead/mentor-2111`): dokumenty po rozmowie z mentorem COI (2026-11-21), bez zmian w kodzie.
 
 - `DECISIONS.md`: D8 (trzy zasady sensownej cyfryzacji potwierdzone przez mentora) i D9 (Eden AI; treść D9 zmieniła się w kroku L2).
@@ -69,6 +80,8 @@ Krok L4 (lider): integracja L1–L3 z `main` `65c0259` po akceptacji lidera (D8�
 - lider → Paweł (E1, `eval.py`): raport podaje użyty model i dostawcę oraz nazwy słowników spoza pliku COI. Zapytania do Eden AI uruchamia człowiek z kluczem.
 - lider → mentor COI: (1) ile RAM-u ma maszyna obrony, (2) czy będzie stabilny internet, (3) który słownik stosować do adresu zamieszkania: `TERYT_4G_DOWODOWY` ze Standardów i wzorców czy Województwo, Powiat, Gmina, Miejscowość z pliku słowników.
 
+- Deployment → backend (JWT): przy `JWT_ENABLED=true` odrzuć brakujący lub za krótki `JWT_SECRET` i nieobsługiwany `JWT_ALGORITHM` na starcie API. Obie błędne konfiguracje przeszły teraz healthcheck, a żądanie z Bearerem dostało 500 przed i za nginx.
+
 ## Log
 
 (one line per step: done / next / blocker)
@@ -77,3 +90,5 @@ Krok L4 (lider): integracja L1–L3 z `main` `65c0259` po akceptacji lidera (D8�
 - L2 (decyzje po konsultacji z COI): done D9 (Eden AI jako wyjątek, Ollama zostaje), D10, D11 w `DECISIONS.md`; `SPEC.md` i `DELEGACJA.md` z zadaniami M1.7 i K3.1; baza `6945cc1` (L4: `65c0259`); wpływ na kod i właścicieli plików w „Requests” / next: akceptacja lidera, commit człowieka, PR do `main`, potem K3 (#11) → M1.7 → K3.1 → M1.4 / blocker brak; otwarte: model po stronie Eden AI i pomiar czasu (człowiek z kluczem), wartości limitów pod D11, wariant na całe sekcje lub strony w formularzu 9 (zmiana kontraktu `FormAnalysis`), prośby z PR #11 do lidera (sygnatura `analyze` w rozdz. 2.2, osobny komunikat dla za długiego dokumentu).
 - L3 (odpowiedzi mentorów z Discorda): done D9 pkt 7 i 8 (tylko modele otwarte; Qwen3.5-9B: Apache-2.0, w publicznym katalogu Eden AI pod ośmioma identyfikatorami, wymuszony schemat zadeklarowany), D12, D13, D14; `SPEC.md`, `DELEGACJA.md`, `SZABLONY_SEKCJI.md`; prośby do Mikołaja, Marcina, Pawła i mentora w „Requests” / next: akceptacja lidera, commit człowieka, PR do `main`; pomiar Qwen3.5-9B przez Eden AI przez człowieka z kluczem / blocker brak; otwarte: RAM i internet na obronie, słownik adresu zamieszkania, sposób wyłączenia myślenia i czas odpowiedzi w Eden AI.
 - L4 (integracja z `main` `65c0259`): done L1–L3 na aktualnym `main`, D10 i `DELEGACJA.md` zgodne z P1.4 i M1.4 / next: commit człowieka, push, PR / blocker brak.
+- M1.3-web (`5e5f876`): done nginx jako UID 101, Compose i smoke SPA/proxy/JWT na x86 bez GPU, `GATE: PASS (all)` / next jeden PR i e2e na docelowym obrazie po scaleniu frontu / blocker akceptacja na `main` zatrzymuje się na brakującym ekranie „Wczytaj formularz”, potwierdzone na czystej bazie.
+- M1.3-web finalizacja (`2459f84`): done build i Compose, 4/4 repo e2e, 5/5 dodatkowych prób PDF.js/mobile/JWT, cztery uwagi niezależnego review domknięte, `GATE: PASS (all)` / next walidacja parametrów JWT na starcie API / blocker dla merge: za krótki sekret i błędny algorytm przechodzą healthcheck, a żądanie z Bearerem zwraca 500.
