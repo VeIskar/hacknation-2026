@@ -171,6 +171,9 @@ export function Preview({ form, selectedId = null, onSelect }: Props) {
         return (
           <section key={section.id} className="eu-section" aria-labelledby={headingId} {...select}>
             <h4 id={headingId}>{section.title}</h4>
+            {section.type === 'REPEATING_SECTION' && (
+              <p className="eu-note">W eUsłudze tę sekcję można dodać kilka razy. Podgląd pokazuje jedną.</p>
+            )}
             {!isRichTextEmpty(section.description) && (
               <div className="eu-note">
                 <RichText html={section.description} />

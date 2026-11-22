@@ -1,5 +1,8 @@
 import { plural } from './format.ts'
 import type { FormStats } from './format.ts'
+import { fieldsOf, isSection } from './preview/answers.ts'
+import { editableRegistryField, initialData } from './preview/initialData.ts'
+import { KNOWN_VALIDATORS, validatorNames } from './preview/validators.ts'
 import type { CoiForm } from './types.ts'
 
 // Kontrola techniczna w przeglądarce: podzbiór Reguł technicznych COI (DELEGACJA, zadanie P2).
@@ -59,7 +62,7 @@ export function technicalProblems(form: CoiForm): string[] {
     count(tab.id)
     for (const { field: section } of tab.questions) {
       count(section.id)
-      if (section.type !== 'SECTION') problems.push(`Pole „${section.title || section.techName}” leży poza sekcją.`)
+      if (!isSection(section)) problems.push(`Pole „${section.title || section.techName}” leży poza sekcją.`)
       for (const { field } of section.repeatingSectionGrid) {
         count(field.id)
         if (field.repeatingSectionGrid.length > 0) problems.push(`Pole „${field.title || field.techName}” ma zagnieżdżone pola.`)
@@ -68,6 +71,15 @@ export function technicalProblems(form: CoiForm): string[] {
         }
       }
     }
+  }
+  for (const field of tabs.flatMap(fieldsOf)) {
+    const name = `„${field.title || field.techName}”`
+    for (const validator of validatorNames(field)) {
+      if (!KNOWN_VALIDATORS.includes(validator)) problems.push(`Pole ${name} ma walidator spoza listy COI: ${validator}.`)
+    }
+    const initial = initialData(field)
+    if (initial && !initial.known) problems.push(`Pole ${name} ma dane inicjalne spoza listy COI: ${initial.key || 'brak źródła'}.`)
+    if (editableRegistryField(field)) problems.push(`Pole ${name} ma dane ${initial?.source?.from}, a można je zmienić.`)
   }
   const repeated = [...ids].filter(([, times]) => times > 1).length
   if (repeated > 0) problems.push(`${plural(repeated, ['identyfikator powtarza', 'identyfikatory powtarzają', 'identyfikatorów powtarza'])} się.`)

@@ -83,3 +83,33 @@ describe('structureProblems', () => {
     ])
   })
 })
+
+describe('reguły COI dla pól', () => {
+  it('zgłasza walidator spoza listy, nieznane dane inicjalne i pole z rejestru do zmiany', () => {
+    const form = linked(
+      makeForm([
+        makeTab('Dane', [
+          makeSection('dane', [
+            makeField({ techName: 'a', title: 'A', validation: ['REQUIRED', 'TELEFON'] }),
+            makeField({ techName: 'b', title: 'B', defaultValue: 'MLPZ.city', defaultValueType: 'EXTERNAL_SYSTEM' }),
+            makeField({ techName: 'c', title: 'C', defaultValue: 'PESEL.name', defaultValueType: 'EXTERNAL_SYSTEM' }),
+            makeField({ techName: 'd', title: 'D', defaultValue: 'MLPZ.street', defaultValueType: 'EXTERNAL_SYSTEM' }),
+            makeField({ techName: 'e', title: 'E', validation: ['EPUAP', 'ADE', 'SERIAL_NUMBER_ID_CARD'] }),
+          ]),
+        ]),
+        makeTab('Koniec', [makeSection('koniec', [makeField({ techName: 'tekst', type: 'TEXT_BLOCK' })])], 'FINISH'),
+      ]),
+    )
+    expect(technicalProblems(form)).toEqual([
+      'Pole „A” ma walidator spoza listy COI: TELEFON.',
+      'Pole „B” ma dane inicjalne spoza listy COI: MLPZ.city.',
+      'Pole „C” ma dane z rejestru PESEL, a można je zmienić.',
+    ])
+  })
+
+  it('sekcja powtarzająca się jest sekcją, nie polem poza sekcją', () => {
+    const copy = structuredClone(good)
+    copy.tabs[0].questions[0].field.type = 'REPEATING_SECTION'
+    expect(technicalProblems(copy)).toEqual([])
+  })
+})

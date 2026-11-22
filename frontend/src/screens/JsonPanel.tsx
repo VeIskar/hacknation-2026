@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { jsonTokens } from '../jsonTokens.ts'
+import { SECTION_TYPES } from '../preview/answers.ts'
 import type { CoiForm } from '../types.ts'
 
 export type JsonMode = 'element' | 'plik'
@@ -49,7 +50,7 @@ export function JsonPanel({ form, fullJson, selection, mode, open, onToggle, pan
   const elementJson = useMemo(() => (cell ? JSON.stringify(cell, null, 2) : ''), [cell])
   const whole = mode === 'plik' || !cell
   const title = whole ? 'Cały plik JSON' : 'JSON wybranego elementu'
-  const kind = cell?.field?.type === 'SECTION' ? 'sekcja' : 'element'
+  const kind = SECTION_TYPES.has(cell?.field?.type ?? '') ? 'sekcja' : 'element'
   const where = cell ? `Strona „${tab?.title ?? ''}”, ${kind} „${cell.field?.title ?? ''}”.` : ''
 
   return (

@@ -45,6 +45,18 @@ export function isIdCard(value: string): boolean {
   return weightedSum(values, ID_CARD_WEIGHTS) % 10 === values[3]
 }
 
+// Adres do e-Doręczeń (ADE): AE:PL-XXXXX-XXXXX-YYYYY-ZZ, gdzie X to cyfra, Y litera, ZZ cyfry.
+// Instrukcje e-Doręczeń na gov.pl podają wzór, ale nie algorytm sumy ZZ, więc sprawdzamy kształt.
+export function isAde(value: string): boolean {
+  return /^AE:PL-\d{5}-\d{5}-[A-Z]{5}-\d{2}$/.test(value.toUpperCase())
+}
+
+// Elektroniczna Skrzynka Podawcza ePUAP: /identyfikator-podmiotu/skrytka, np. /rdos-wroclaw/skrytka
+// albo /PAAtom/SkrytkaESP (adresy w BIP urzędów). Bez spacji i bez innych ukośników.
+export function isEpuap(value: string): boolean {
+  return /^\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(value)
+}
+
 export function isZipCode(value: string): boolean {
   return /^\d{2}-\d{3}$/.test(value)
 }
@@ -93,7 +105,12 @@ const FORMAT_CHECKS: Record<string, (value: string) => string | null> = {
     if (!/^[A-Za-z]{3}\d{6}$/.test(card)) return 'Wpisz 3 litery i 6 cyfr numeru dowodu osobistego'
     return isIdCard(card) ? null : 'Sprawdź numer dowodu osobistego, bo jeden znak jest błędny'
   },
+  EPUAP: (value) => (isEpuap(value) ? null : 'Wpisz adres skrzynki ePUAP w formacie /identyfikator/skrytka'),
+  ADE: (value) => (isAde(value.replace(/\s/g, '')) ? null : 'Wpisz adres do e-Doręczeń w formacie AE:PL-12345-67890-ABCDE-12'),
 }
+
+/** Dziewięć nazw z Reguł technicznych COI. REQUIRED sprawdza pustą odpowiedź, reszta format. */
+export const KNOWN_VALIDATORS: readonly string[] = ['REQUIRED', ...Object.keys(FORMAT_CHECKS)]
 
 export function validatorNames(field: CoiField): string[] {
   return Array.isArray(field.validation) ? field.validation : []
@@ -110,7 +127,7 @@ export function firstMissingConsent(field: CoiField, answer: Answer | undefined)
   return consents.findIndex((consent, i) => consent.required && !checked.includes(String(i)))
 }
 
-/** Komunikat pierwszego niespełnionego walidatora albo `null`. Nieznane nazwy są pomijane. */
+/** Komunikat pierwszego niespełnionego walidatora albo `null`. Nieznane nazwy pomija, a zgłasza je check.ts. */
 export function validateField(field: CoiField, answer: Answer | undefined): string | null {
   if (field.type === 'CONSENT_SECTION') {
     return firstMissingConsent(field, answer) >= 0 ? 'Zaznacz zgodę, bo jest wymagana' : null

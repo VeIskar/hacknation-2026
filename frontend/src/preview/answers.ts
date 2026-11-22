@@ -7,7 +7,7 @@ export type Answer = string | string[]
 export type Answers = Readonly<Record<string, Answer>>
 
 const LIST_TYPES = new Set(['SELECT', 'CHECKBOX', 'CONSENT_SECTION'])
-const NO_ANSWER_TYPES = new Set(['SECTION', 'TEXT_BLOCK', 'INFO_SECTION'])
+const NO_ANSWER_TYPES = new Set(['SECTION', 'REPEATING_SECTION', 'TEXT_BLOCK', 'INFO_SECTION'])
 
 export function takesAnswer(field: CoiField): boolean {
   return !NO_ANSWER_TYPES.has(field.type)
@@ -30,8 +30,11 @@ function initialAnswer(field: CoiField): Answer {
   return Array.isArray(raw) ? (raw[0] ?? '') : raw
 }
 
+/** Typy sekcji z Reguł technicznych COI: zwykła i powtarzająca się. */
+export const SECTION_TYPES: ReadonlySet<string> = new Set(['SECTION', 'REPEATING_SECTION'])
+
 export function isSection(field: CoiField): boolean {
-  return field.type === 'SECTION'
+  return SECTION_TYPES.has(field.type)
 }
 
 /** Pola strony, które przyjmują odpowiedź albo ją pokazują: pola sekcji i pola poza sekcją. */

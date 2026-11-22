@@ -2,7 +2,23 @@ import { describe, expect, it } from 'vitest'
 import { DEMO_ENTITY, DEMO_ID_CARD, INITIAL_DATA } from '../data/demo.ts'
 import { makeField, makeSection, makeTab } from './testForm.ts'
 import { fieldFocusId } from './ids.ts'
-import { firstMissingConsent, isEmail, isIdCard, isNip, isPesel, isRegon, isZipCode, pageErrors, validateField } from './validators.ts'
+import {
+  KNOWN_VALIDATORS,
+  firstMissingConsent,
+  isAde,
+  isEmail,
+  isEpuap,
+  isIdCard,
+  isNip,
+  isPesel,
+  isRegon,
+  isZipCode,
+  pageErrors,
+  validateField,
+} from './validators.ts'
+
+// Lista walidatorów API (`_VALIDATORS` w backend/app/lint.py), czytana tylko do porównania.
+const lint = Object.values(import.meta.glob('../../../backend/app/lint.py', { eager: true, query: '?raw', import: 'default' }) as Record<string, string>)[0] ?? ''
 
 describe('sumy kontrolne', () => {
   it('PESEL: 11 cyfr i zgodna cyfra kontrolna', () => {
@@ -87,7 +103,7 @@ describe('validateField', () => {
   })
 
   it('nieznany walidator i pusty obiekt zamiast tablicy niczego nie blokują', () => {
-    expect(validateField(makeField({ techName: 'x', validation: ['EPUAP'] }), 'cokolwiek')).toBeNull()
+    expect(validateField(makeField({ techName: 'x', validation: ['NIEZNANY'] }), 'cokolwiek')).toBeNull()
     expect(validateField(makeField({ techName: 'y', validation: {} }), '')).toBeNull()
   })
 
@@ -160,5 +176,45 @@ describe('pole poza sekcją', () => {
     const loose = makeField({ techName: 'luzne', validation: ['REQUIRED'] })
     const tab = makeTab('Dane', [loose])
     expect(pageErrors(tab, {}, new Set())).toEqual([{ fieldId: loose.id, sectionTitle: 'Dane', message: 'Uzupełnij pole „luzne”' }])
+  })
+})
+
+describe('EPUAP, ADE i lista z API', () => {
+  it('ePUAP: /identyfikator/skrytka jak w BIP urzędów', () => {
+    expect(isEpuap('/rdos-wroclaw/skrytka')).toBe(true)
+    expect(isEpuap('/PAAtom/SkrytkaESP')).toBe(true)
+    expect(isEpuap('/gn9u55ai9v/SkrytkaESP')).toBe(true)
+    expect(isEpuap('rdos-wroclaw/skrytka')).toBe(false)
+    expect(isEpuap('/rdos wroclaw/skrytka')).toBe(false)
+    expect(isEpuap('/rdos-wroclaw/')).toBe(false)
+    expect(isEpuap('/a/b/c')).toBe(false)
+    expect(isEpuap('anna@example.com')).toBe(false)
+  })
+
+  it('ADE: AE:PL-, dwie grupy 5 cyfr, 5 liter i 2 cyfry', () => {
+    expect(isAde('AE:PL-12345-67890-ABCDE-12')).toBe(true)
+    expect(isAde('ae:pl-12345-67890-abcde-12')).toBe(true)
+    expect(isAde('AE:PL-12345-67890-ABCD1-12')).toBe(false)
+    expect(isAde('AE:DE-12345-67890-ABCDE-12')).toBe(false)
+    expect(isAde('AE:PL-1234-67890-ABCDE-12')).toBe(false)
+    expect(isAde('anna@example.com')).toBe(false)
+  })
+
+  it('komunikaty mówią, jak poprawić, i przepuszczają spacje w ADE', () => {
+    const epuap = makeField({ techName: 'skrzynka', validation: ['EPUAP'] })
+    const ade = makeField({ techName: 'ade', validation: ['REQUIRED', 'ADE'] })
+    expect(validateField(epuap, 'skrytka')).toBe('Wpisz adres skrzynki ePUAP w formacie /identyfikator/skrytka')
+    expect(validateField(epuap, ' /rdos-wroclaw/skrytka ')).toBeNull()
+    expect(validateField(epuap, '')).toBeNull()
+    expect(validateField(ade, '')).toBe('Uzupełnij pole „ade”')
+    expect(validateField(ade, 'AE:PL-12345-67890-ABCDE')).toBe('Wpisz adres do e-Doręczeń w formacie AE:PL-12345-67890-ABCDE-12')
+    expect(validateField(ade, 'AE:PL- 12345-67890-ABCDE-12')).toBeNull()
+  })
+
+  it.skipIf(!lint)('front zna każdy walidator, który API przepuszcza', () => {
+    const block = lint.match(/_VALIDATORS = \{([^}]*)\}/)?.[1] ?? ''
+    const fromApi = [...block.matchAll(/"([A-Z_]+)"/g)].map((match) => match[1])
+    expect(fromApi).toHaveLength(9)
+    expect([...KNOWN_VALIDATORS].sort()).toEqual([...fromApi].sort())
   })
 })

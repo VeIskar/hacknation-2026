@@ -4,6 +4,7 @@ import { DICTIONARIES } from '../data/demo.ts'
 import type { CoiField } from '../types.ts'
 import type { Answer } from './answers.ts'
 import { fieldDomId } from './ids.ts'
+import { attributeOf, initialHint } from './initialData.ts'
 import { RichText } from './RichText.tsx'
 import { isRichTextEmpty } from './richText.ts'
 import { isRequired, validatorNames } from './validators.ts'
@@ -21,27 +22,29 @@ const FORMAT_HINTS: Record<string, string> = {
   REGON: '9 albo 14 cyfr',
   ZIP_CODE: 'Format: 00-000',
   SERIAL_NUMBER_ID_CARD: '3 litery i 6 cyfr',
+  EPUAP: 'Format: /identyfikator/skrytka',
+  ADE: 'Format: AE:PL-12345-67890-ABCDE-12',
 }
 
-// Dane z rejestru mówią, czym jest pole, więc przeglądarka może je podpowiedzieć.
+// Atrybut danych inicjalnych mówi, czym jest pole, więc przeglądarka może je podpowiedzieć.
 const AUTOCOMPLETE: Record<string, string> = {
-  'MLPZ.name': 'given-name',
-  'MLPZ.surname': 'family-name',
-  'MLPZ.postCode': 'postal-code',
-  'MLPZ.phoneNumber': 'tel',
-  'MLPZ.email': 'email',
+  name: 'given-name',
+  secondName: 'additional-name',
+  surname: 'family-name',
+  postCode: 'postal-code',
+  phoneNumber: 'tel',
+  email: 'email',
 }
 
 // Podgląd nie jest połączony z rejestrem: wartości pochodzą z src/data/demo.ts i podpowiedź
-// mówi to wprost, żeby nikt nie wziął ich za prawdziwą integrację.
+// mówi to wprost, razem ze źródłem (preview/initialData.ts).
 function hintFor(field: CoiField): string | null {
-  const fromRegistry = field.defaultValueType === 'EXTERNAL_SYSTEM'
-  if (field.readOnly) return fromRegistry ? 'Przykładowe dane z rejestru. Nie możesz ich zmienić.' : 'Tego pola nie możesz zmienić.'
+  const initial = initialHint(field)
+  if (field.readOnly) return initial
   const names = validatorNames(field)
   const format = Object.keys(FORMAT_HINTS).find((name) => names.includes(name))
-  const registry = fromRegistry ? 'Przykładowe dane z rejestru. Możesz je zmienić.' : null
-  if (format && registry) return `${FORMAT_HINTS[format]}. ${registry}`
-  return format ? FORMAT_HINTS[format] : registry
+  if (format && initial) return `${FORMAT_HINTS[format]}. ${initial}`
+  return format ? FORMAT_HINTS[format] : initial
 }
 
 type FieldSize = 'kod' | 'numer'
@@ -49,20 +52,24 @@ type FieldSize = 'kod' | 'numer'
 /** Krótkie pole dla krótkiej wartości: kod pocztowy i numery o stałej długości. */
 function sizeOf(field: CoiField): FieldSize | undefined {
   const names = validatorNames(field)
-  if (names.includes('ZIP_CODE') || field.defaultValue === 'MLPZ.postCode') return 'kod'
-  if (['PESEL', 'NIP', 'REGON', 'SERIAL_NUMBER_ID_CARD'].some((name) => names.includes(name)) || field.defaultValue === 'MLPZ.pesel') return 'numer'
+  const attribute = attributeOf(field)
+  if (names.includes('ZIP_CODE') || /postCode|PostalCode/.test(attribute)) return 'kod'
+  if (['PESEL', 'NIP', 'REGON', 'SERIAL_NUMBER_ID_CARD'].some((name) => names.includes(name)) || attribute === 'pesel') return 'numer'
   return undefined
 }
 
 function inputProps(field: CoiField) {
   const names = validatorNames(field)
-  const source = typeof field.defaultValue === 'string' ? field.defaultValue : ''
-  const email = names.includes('EMAIL') || source === 'MLPZ.email'
+  const attribute = attributeOf(field)
+  const email = names.includes('EMAIL') || attribute === 'email'
   const digitsOnly = names.includes('PESEL') || names.includes('NIP') || names.includes('REGON')
+  // Adresy skrzynek mają wielkie litery i ukośniki: bez autokorekty i bez wielkiej litery na starcie.
+  const address = names.includes('EPUAP') || names.includes('ADE')
   return {
-    type: email ? 'email' : source === 'MLPZ.phoneNumber' ? 'tel' : 'text',
+    type: email ? 'email' : attribute === 'phoneNumber' ? 'tel' : 'text',
     inputMode: field.type === 'NUMBER' ? ('decimal' as const) : digitsOnly ? ('numeric' as const) : undefined,
-    autoComplete: AUTOCOMPLETE[source] ?? 'off',
+    autoComplete: AUTOCOMPLETE[attribute] ?? 'off',
+    ...(address && { spellCheck: false, autoCapitalize: 'off', autoCorrect: 'off' }),
   }
 }
 

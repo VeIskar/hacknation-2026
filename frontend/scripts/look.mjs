@@ -645,6 +645,78 @@ async function anyJsonChecks(browser, files) {
     await context.close()
   }
   if (files.length > 0) await brokenJsonCheck(browser, files.at(-1))
+  const f9 = files.find((path) => basename(path) === 'F9.coi.json')
+  if (f9) for (const [width, height] of viewports) await realValidatorChecks(browser, f9, { width, height })
+  const nadplata = files.find((path) => path.includes('NadpłatyPodatku'))
+  if (nadplata) await registryHintCheck(browser, nadplata)
+}
+
+async function openJson(browser, path, viewport) {
+  const raw = await readFile(path, 'utf-8')
+  const context = await browser.newContext({ viewport, locale: 'pl-PL' })
+  const page = await context.newPage()
+  const errors = watch(page)
+  await page.route('**/api/forms', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: raw }))
+  await page.goto(web)
+  await page.getByLabel('Plik formularza').setInputFiles({ name: 'wniosek.pdf', mimeType: 'application/pdf', buffer: samplePdf() })
+  await page.getByRole('button', { name: 'Analizuj formularz' }).click()
+  await page.getByRole('heading', { level: 1, name: 'Podgląd eUsługi' }).waitFor({ timeout: 20_000 })
+  return { context, page, errors, form: JSON.parse(raw) }
+}
+
+// Wynik API dla formularza 9: walidatory dowodu i ePUAP w przeglądarce, za dwoma warunkami SHOW.
+async function realValidatorChecks(browser, path, viewport) {
+  const label = `F9 z API ${viewport.width}`
+  const { context, page, errors } = await openJson(browser, path, viewport)
+  const hint = page.locator('.eu-field', { hasText: 'Imię' }).first().locator('.eu-hint')
+  check(`${label}: imię z konta oznaczone jako przykładowe i zablokowane`, ((await hint.textContent()) ?? '').includes('Przykładowe dane z Twojego konta. Nie możesz ich zmienić.'))
+  if (!(await nextPage(page))) {
+    check(`${label}: przejście na stronę wniosku`, false)
+    return context.close()
+  }
+  const club = page.getByRole('region', { name: 'Dane wnioskodawcy (Klub sportowy)' })
+  check(`${label}: sekcja klubu ukryta przed wyborem`, (await club.count()) === 0)
+  await page.getByRole('radio', { name: 'Wnioskodawca – Klub sportowy' }).check()
+  await club.waitFor()
+  await page.getByRole('checkbox', { name: 'Wypełnij dane pełnomocnika' }).check()
+  await page.getByRole('checkbox', { name: 'Wypełnij dane klubu' }).check()
+  await page.getByRole('radio', { name: 'Skrzynka ePUAP' }).check()
+  const card = page.getByLabel('Seria i numer dowodu osobistego pełnomocnika')
+  const epuap = page.getByLabel('Adres skrzynki ePUAP')
+  await card.fill('ABA300001')
+  await epuap.fill('skrytka')
+  await page.getByRole('button', { name: 'Dalej' }).click()
+  await page.locator('.eu-summary').waitFor()
+  const summary = (await page.locator('.eu-summary').textContent()) ?? ''
+  check(`${label}: podsumowanie zgłasza błędny numer dowodu`, summary.includes('Sprawdź numer dowodu osobistego, bo jeden znak jest błędny'))
+  check(`${label}: podsumowanie zgłasza zły adres ePUAP`, summary.includes('Wpisz adres skrzynki ePUAP w formacie /identyfikator/skrytka'))
+  check(`${label}: oba pola mają aria-invalid`, (await card.getAttribute('aria-invalid')) === 'true' && (await epuap.getAttribute('aria-invalid')) === 'true')
+  await page.screenshot({ path: join(shots, `f3-06-walidatory-api-${viewport.width}.png`), fullPage: true })
+  const axe = await new AxeBuilder({ page }).withTags(axeTags).analyze()
+  check(`${label}: axe z błędami walidacji`, axe.violations.length === 0, axe.violations.map((violation) => violation.id).join(', '))
+  await card.fill('ABA300000')
+  await epuap.fill('/rdos-wroclaw/skrytka')
+  await page.getByRole('radio', { name: 'eDoręczenia' }).check()
+  check(`${label}: „eDoręczenia” chowa pole ePUAP`, (await epuap.count()) === 0)
+  await page.getByRole('button', { name: 'Dalej' }).click()
+  await page.locator('.eu-summary').waitFor()
+  const after = (await page.locator('.eu-summary').textContent()) ?? ''
+  check(`${label}: poprawione pola znikają z podsumowania`, !after.includes('dowodu osobistego') && !after.includes('ePUAP'))
+  check(`${label}: brak błędów JavaScript`, errors.length === 0, errors.join(' | '))
+  await context.close()
+}
+
+// Wzorzec COI z folderu 5 ma PESEL.name, PESEL.surname i PESEL.pesel tylko do odczytu.
+async function registryHintCheck(browser, path) {
+  const label = 'wzorzec 5'
+  const { context, page } = await openJson(browser, path, { width: 1440, height: 900 })
+  const pesel = page.getByLabel('Numer PESEL')
+  const hint = page.locator('.eu-field', { has: pesel }).locator('.eu-hint')
+  check(`${label}: PESEL z rejestru ma przykładową wartość`, (await pesel.inputValue()) === '85071201244', await pesel.inputValue())
+  check(`${label}: podpowiedź podaje rejestr PESEL i blokadę`, ((await hint.textContent()) ?? '').includes('Przykładowe dane z rejestru PESEL. Nie możesz ich zmienić.'))
+  const street = page.locator('.eu-field', { has: page.getByLabel(/^Ulica/) }).first().locator('.eu-hint')
+  check(`${label}: ulica z konta jest do zmiany`, ((await street.textContent()) ?? '').includes('Przykładowe dane z Twojego konta. Możesz je zmienić.'))
+  await context.close()
 }
 
 // Plik bez `id` w jednym polu: podgląd działa na kopii, ale znak kontroli mówi o pliku z API,

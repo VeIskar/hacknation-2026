@@ -1,3 +1,4 @@
+import { isSection } from './preview/answers.ts'
 import type { CoiField, CoiForm } from './types.ts'
 
 /** "42 s" albo "2 min 05 s". Sekundy obcinamy w dół: licznik nie wyprzedza zegara. */
@@ -65,7 +66,7 @@ export function formStats(form: CoiForm): FormStats {
   for (const tab of form.tabs) {
     for (const { field: section } of tab.questions) {
       // Pole poza sekcją liczy się jako pole, nie jako sekcja.
-      if (section.type !== 'SECTION') {
+      if (!isSection(section)) {
         countField(section)
         continue
       }
