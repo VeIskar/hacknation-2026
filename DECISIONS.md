@@ -53,6 +53,15 @@ F2 (web):
 | ------------- | ------------------------------------------------------------------------------------- | ------- |
 | jsonata 2.2.2 | warunki SHOW z JSON-a COI liczone w podglądzie tym samym językiem zapytań, bez własnego parsera | MIT     |
 
+F2.5 (web):
+
+- Kierunek „Jasny urząd” (decyzja lidera, 2026-11-22, DESIGN.md) zastępuje „Zakreślacz”. Żółtego nie ma
+  w interfejsie, dopóki nie pokazujemy źródeł na papierze (F4).
+- Jeden krój: Atkinson Hyperlegible Next, także w podglądzie eUsługi. Brygada 1918 nie jest używana;
+  plik zostaje w `frontend/src/fonts/brygada/` do decyzji o usunięciu i nie trafia do paczki.
+- Dane `MLPZ.*` w podglądzie mają podpowiedź „Przykładowe dane z rejestru”: podgląd nie łączy się z rejestrem.
+- `look.mjs` sprawdza folder 9 na JSON-ie zbudowanym przez generator z `analysis_form9.json`, bez modelu.
+
 ## Event: api
 
 Decyzje lidera po recenzji P0 (2026-11-21). Kod: `backend/app/errors.py`, `backend/app/models.py`.

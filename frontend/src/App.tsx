@@ -1,10 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import { ApiError, UNKNOWN_ERROR, analyzeForm, isAbort } from './api.ts'
+import { AppBar } from './components/AppBar.tsx'
+import { DownloadIcon } from './components/icons.tsx'
 import { SourcePage } from './components/SourcePage.tsx'
 import { jsonFileName } from './format.ts'
+import { Inspector } from './screens/Inspector.tsx'
+import type { InspectorTab } from './screens/Inspector.tsx'
 import { ResultPanel } from './screens/ResultPanel.tsx'
 import { UploadPanel } from './screens/UploadPanel.tsx'
 import { WaitingPanel } from './screens/WaitingPanel.tsx'
+import { sourceKind } from './source.ts'
 import type { CoiForm } from './types.ts'
 
 type Phase =
@@ -18,7 +23,7 @@ const TITLES: Record<Phase['name'], string> = {
   result: 'Podgląd eUsługi',
 }
 
-const JSON_REGION_ID = 'json-formularza'
+const JSON_PANEL_ID = 'panel-json'
 const ERROR_ID = 'plik-blad'
 
 function downloadJson(form: CoiForm, json: string) {
@@ -37,10 +42,11 @@ function App() {
   const [file, setFile] = useState<File | null>(null)
   const [phase, setPhase] = useState<Phase>({ name: 'upload' })
   const [error, setError] = useState<string | null>(null)
-  const [jsonShown, setJsonShown] = useState(false)
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>('karta')
   const abortRef = useRef<AbortController | null>(null)
   const headingRef = useRef<HTMLHeadingElement>(null)
   const shownPhase = useRef(phase.name)
+  const focusJson = useRef(false)
   const title = TITLES[phase.name]
 
   // Po zmianie ekranu fokus trafia na nagłówek, żeby czytnik ekranu ogłosił nowy ekran.
@@ -52,6 +58,14 @@ function App() {
     const alert = document.getElementById(ERROR_ID)
     ;(alert ?? headingRef.current)?.focus()
   }, [phase.name, title])
+
+  // „Pokaż JSON” stoi w pasku narzędzi, a JSON w panelu bocznym, na wąskim ekranie pod formularzem.
+  // Fokus idzie więc za treścią, którą przycisk odsłonił.
+  useEffect(() => {
+    if (!focusJson.current) return
+    focusJson.current = false
+    document.getElementById(JSON_PANEL_ID)?.focus()
+  })
 
   function chooseFile(next: File | null) {
     setFile(next)
@@ -70,7 +84,7 @@ function App() {
     setPhase({ name: 'waiting', startedAt })
     try {
       const form = await analyzeForm(file, { signal: controller.signal })
-      setJsonShown(false)
+      setInspectorTab('karta')
       setPhase({ name: 'result', form, json: JSON.stringify(form, null, 2), elapsedMs: performance.now() - startedAt })
     } catch (failure) {
       setPhase({ name: 'upload' })
@@ -82,64 +96,69 @@ function App() {
   function startOver() {
     setFile(null)
     setError(null)
-    setJsonShown(false)
+    setInspectorTab('karta')
     setPhase({ name: 'upload' })
   }
 
-  return (
-    <main className="wb">
-      <header className="wb-top">
-        <div>
-          <h1 ref={headingRef} tabIndex={-1}>
-            {title}
-          </h1>
-          <p className="wb-id">
-            <b>PrzeFormuj</b>
-            {phase.name === 'upload' || !file ? ' zamienia plik wniosku w eUsługę i plik JSON.' : `, plik: ${file.name}`}
-          </p>
-        </div>
-        {phase.name === 'result' && (
-          <div className="wb-akcje">
-            <button
-              type="button"
-              className="b"
-              aria-expanded={jsonShown}
-              aria-controls={JSON_REGION_ID}
-              onClick={() => setJsonShown((shown) => !shown)}
-            >
-              {jsonShown ? 'Ukryj JSON' : 'Pokaż JSON'}
-            </button>
-            <button type="button" className="b b-main" onClick={() => downloadJson(phase.form, phase.json)}>
-              Pobierz JSON
-            </button>
-            <button type="button" className="b" onClick={startOver}>
-              Wczytaj inny plik
-            </button>
-          </div>
-        )}
-      </header>
+  function toggleJson() {
+    const next: InspectorTab = inspectorTab === 'json' ? 'karta' : 'json'
+    focusJson.current = next === 'json'
+    setInspectorTab(next)
+  }
 
-      <div className="scena">
+  const paper = file !== null && sourceKind(file) !== 'other'
+  const layout = phase.name === 'result' ? (paper ? 'wynik' : 'wynik-bez-papieru') : paper ? 'dwa' : 'start'
+
+  return (
+    <div className="wb">
+      <AppBar phase={phase.name} />
+      <main className="wb-wrap wb-main" data-uklad={layout}>
+        <div className="wb-naglowek">
+          <div>
+            <h1 ref={headingRef} tabIndex={-1}>
+              {title}
+            </h1>
+            <p className="wb-id">{phase.name === 'upload' || !file ? 'Zamień plik wniosku w eUsługę i plik JSON.' : `Plik: ${file.name}`}</p>
+          </div>
+          {phase.name === 'result' && (
+            <div className="narzedzia" role="group" aria-label="Akcje">
+              <button type="button" className="b b-main" onClick={() => downloadJson(phase.form, phase.json)}>
+                <DownloadIcon />
+                Pobierz JSON
+              </button>
+              <button type="button" className="b" aria-pressed={inspectorTab === 'json'} onClick={toggleJson}>
+                Pokaż JSON
+              </button>
+              <button type="button" className="b-link" onClick={startOver}>
+                Wczytaj inny plik
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Papier stoi w DOM przed panelem, w tej samej kolejności co na ekranie. Pojawia się
+            dopiero po wyborze pliku, a panel nie zmienia miejsca w drzewie, więc pole pliku
+            nie traci wyboru. */}
+        {paper && file && <SourcePage file={file} />}
+
         <div className="panel">
           {phase.name === 'upload' && <UploadPanel file={file} error={error} errorId={ERROR_ID} onChoose={chooseFile} onSubmit={analyze} />}
-          {phase.name === 'waiting' && (
-            <WaitingPanel startedAt={phase.startedAt} onCancel={() => abortRef.current?.abort()} />
-          )}
-          {phase.name === 'result' && (
-            <ResultPanel
-              form={phase.form}
-              json={phase.json}
-              elapsedMs={phase.elapsedMs}
-              jsonShown={jsonShown}
-              jsonRegionId={JSON_REGION_ID}
-            />
-          )}
+          {phase.name === 'waiting' && <WaitingPanel startedAt={phase.startedAt} onCancel={() => abortRef.current?.abort()} />}
+          {phase.name === 'result' && <ResultPanel form={phase.form} />}
         </div>
-        <section className="papier" aria-label="Podgląd pliku">
-          <SourcePage file={file} />
-        </section>
-      </div>
-    </main>
+
+        {phase.name === 'result' && (
+          <Inspector
+            form={phase.form}
+            json={phase.json}
+            elapsedMs={phase.elapsedMs}
+            tab={inspectorTab}
+            onTabChange={setInspectorTab}
+            jsonPanelId={JSON_PANEL_ID}
+          />
+        )}
+      </main>
+    </div>
   )
 }
 

@@ -25,7 +25,7 @@ export function WaitingPanel({ startedAt, onCancel }: Props) {
       </p>
       {/* Licznik zmienia się co sekundę, więc czytnik ekranu go nie ogłasza. Ogłasza zdanie niżej. */}
       <p className="czas" role="timer" aria-live="off" aria-labelledby="czas-etykieta">
-        <span className="zakreslone-pas">{formatElapsed(elapsed)}</span>
+        {formatElapsed(elapsed)}
       </p>
       <p className="zdanie" role="status">
         Serwer czyta plik, a model układa z niego strony, sekcje i pola eUsługi.

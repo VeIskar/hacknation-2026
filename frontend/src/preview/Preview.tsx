@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent, MouseEvent } from 'react'
+import { AlertIcon } from '../components/icons.tsx'
 import type { CoiField, CoiForm, CoiTab } from '../types.ts'
 import { initialAnswers, isEmptyAnswer, takesAnswer } from './answers.ts'
 import type { Answer, Answers } from './answers.ts'
@@ -109,7 +110,10 @@ export function Preview({ form }: { form: CoiForm }) {
         // czytnik ekranu przeczytałby podsumowanie dwa razy.
         <div className="eu-summary" ref={summaryRef} tabIndex={-1}>
           <div role="alert">
-            <h4>Popraw błędy na tej stronie</h4>
+            <h4>
+              <AlertIcon size={22} />
+              Popraw błędy na tej stronie
+            </h4>
             <ul>
             {shownErrors.map((error) => {
               const field = findField(tab, error.fieldId)

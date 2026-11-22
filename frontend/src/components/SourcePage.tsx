@@ -1,58 +1,179 @@
 import { useEffect, useRef, useState } from 'react'
-import { renderFirstPage } from '../pdf.ts'
+import type { CSSProperties, KeyboardEvent, RefObject } from 'react'
+import { openPdf } from '../pdf.ts'
+import type { PdfDocument } from '../pdf.ts'
+import { sourceKind } from '../source.ts'
 
-type Kind = 'pdf' | 'image' | 'other'
+const A4_RATIO = 595 / 842
+const THUMBNAIL_WIDTH = 48
+const MAX_THUMBNAILS = 24
+// Zmiana szerokości okna idzie serią zdarzeń. Rysujemy raz, po chwili ciszy.
+const RENDER_DELAY_MS = 80
 
-function kindOf(file: File): Kind {
-  const name = file.name.toLowerCase()
-  if (name.endsWith('.pdf')) return 'pdf'
-  if (/\.(jpe?g|jpe|png)$/.test(name)) return 'image'
-  return 'other'
+function paint(target: HTMLCanvasElement, source: HTMLCanvasElement) {
+  target.width = source.width
+  target.height = source.height
+  target.getContext('2d')?.drawImage(source, 0, 0)
 }
 
-type PdfState = { status: 'loading' } | { status: 'ready'; pageCount: number } | { status: 'failed' }
+/** Szerokość elementu w pikselach CSS. Zero, dopóki element jest zwinięty. */
+function useWidth(ref: RefObject<HTMLElement | null>): number {
+  const [width, setWidth] = useState(0)
+  useEffect(() => {
+    const element = ref.current
+    if (!element) return
+    const observer = new ResizeObserver(([entry]) => setWidth(Math.round(entry.contentRect.width)))
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [ref])
+  return width
+}
 
-// Szerokość renderu w pikselach CSS. Arkusz na ekranie jest węższy, CSS go skaluje.
-const RENDER_WIDTH = 640
+interface ThumbnailsProps {
+  pdf: PdfDocument
+  current: number
+  onSelect: (pageNumber: number) => void
+}
 
-function PdfPage({ file }: { file: File }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const [state, setState] = useState<PdfState>({ status: 'loading' })
+function Thumbnails({ pdf, current, onSelect }: ThumbnailsProps) {
+  const count = Math.min(pdf.pageCount, MAX_THUMBNAILS)
+  const canvases = useRef<(HTMLCanvasElement | null)[]>([])
+  const buttons = useRef<(HTMLButtonElement | null)[]>([])
 
   useEffect(() => {
-    let current = true
-    const canvas = canvasRef.current
-    if (!canvas) return
-    renderFirstPage(file, canvas, RENDER_WIDTH, () => current)
-      .then((page) => {
-        if (current && page) setState({ status: 'ready', pageCount: page.pageCount })
-      })
-      .catch(() => {
-        if (current) setState({ status: 'failed' })
-      })
+    let live = true
+    void (async () => {
+      for (let pageNumber = 1; pageNumber <= Math.min(pdf.pageCount, MAX_THUMBNAILS) && live; pageNumber++) {
+        try {
+          const page = await pdf.renderPage(pageNumber, THUMBNAIL_WIDTH)
+          const canvas = canvases.current[pageNumber - 1]
+          if (live && canvas) paint(canvas, page.canvas)
+        } catch {
+          return
+        }
+      }
+    })()
     return () => {
-      current = false
+      live = false
     }
-  }, [file])
+  }, [pdf])
+
+  // Jeden przystanek Tab dla całego rzędu, strzałki wybierają stronę.
+  function onKeyDown(event: KeyboardEvent) {
+    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key]
+    const next = event.key === 'Home' ? 1 : event.key === 'End' ? count : step ? current + step : null
+    if (next === null || next < 1 || next > count) return
+    event.preventDefault()
+    onSelect(next)
+    buttons.current[next - 1]?.focus()
+  }
 
   return (
     <>
-      <canvas
-        ref={canvasRef}
-        className="arkusz-obraz"
-        role="img"
-        aria-label={`Pierwsza strona pliku ${file.name}`}
-        hidden={state.status !== 'ready'}
-        data-ready={state.status === 'ready'}
-      />
-      {state.status === 'loading' && <p className="arkusz-zdanie">Wczytuję pierwszą stronę pliku.</p>}
-      {state.status === 'failed' && <p className="arkusz-zdanie">Nie udało się pokazać pierwszej strony tego pliku.</p>}
-      {state.status === 'ready' && <figcaption className="arkusz-podpis">Strona 1 z {state.pageCount}</figcaption>}
+      <div className="miniatury" role="group" aria-label="Strony oryginału" onKeyDown={onKeyDown}>
+        {Array.from({ length: count }, (_, i) => i + 1).map((pageNumber) => (
+          <button
+            key={pageNumber}
+            ref={(element) => {
+              buttons.current[pageNumber - 1] = element
+            }}
+            type="button"
+            className="miniatura"
+            aria-label={`Strona ${pageNumber}`}
+            aria-pressed={pageNumber === current}
+            tabIndex={pageNumber === current ? 0 : -1}
+            onClick={() => onSelect(pageNumber)}
+          >
+            <canvas
+              ref={(element) => {
+                canvases.current[pageNumber - 1] = element
+              }}
+              aria-hidden="true"
+            />
+            <span aria-hidden="true">{pageNumber}</span>
+          </button>
+        ))}
+      </div>
+      {pdf.pageCount > count && <p className="papier-podpis">Miniatury pokazują pierwsze {count} stron.</p>}
     </>
   )
 }
 
-function ImagePage({ file }: { file: File }) {
+function PdfPaper({ file }: { file: File }) {
+  const [pdf, setPdf] = useState<PdfDocument | null>(null)
+  const [failed, setFailed] = useState(false)
+  const [pageNumber, setPageNumber] = useState(1)
+  const [ratio, setRatio] = useState(A4_RATIO)
+  const [ready, setReady] = useState(false)
+  const sheetRef = useRef<HTMLElement>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const width = useWidth(sheetRef)
+
+  useEffect(() => {
+    let current = true
+    let opened: PdfDocument | null = null
+    openPdf(file)
+      .then((next) => {
+        opened = next
+        if (current) setPdf(next)
+        else void next.destroy()
+      })
+      .catch(() => {
+        if (current) setFailed(true)
+      })
+    return () => {
+      current = false
+      void opened?.destroy()
+    }
+  }, [file])
+
+  useEffect(() => {
+    if (!pdf || width === 0) return
+    let current = true
+    const timer = setTimeout(() => {
+      pdf
+        .renderPage(pageNumber, width)
+        .then((page) => {
+          if (!current || !canvasRef.current) return
+          paint(canvasRef.current, page.canvas)
+          setRatio(page.ratio)
+          setReady(true)
+        })
+        .catch(() => {
+          if (current) setFailed(true)
+        })
+    }, RENDER_DELAY_MS)
+    return () => {
+      current = false
+      clearTimeout(timer)
+    }
+  }, [pdf, pageNumber, width])
+
+  const many = pdf !== null && pdf.pageCount > 1
+  return (
+    <div className="papier-strony" data-strony={many ? 'wiele' : 'jedna'} style={{ '--proporcja': ratio } as CSSProperties}>
+      <figure className="arkusz" ref={sheetRef}>
+        <canvas
+          ref={canvasRef}
+          role="img"
+          aria-label={`Strona ${pageNumber} pliku ${file.name}`}
+          hidden={!ready || failed}
+          data-ready={ready && !failed}
+        />
+        {!ready && !failed && <p className="arkusz-zdanie">Wczytuję pierwszą stronę pliku.</p>}
+        {failed && <p className="arkusz-zdanie">Nie udało się pokazać pierwszej strony tego pliku.</p>}
+      </figure>
+      {pdf && ready && !failed && (
+        <p className="papier-podpis">
+          Strona {pageNumber} z {pdf.pageCount}
+        </p>
+      )}
+      {pdf && many && !failed && <Thumbnails pdf={pdf} current={pageNumber} onSelect={setPageNumber} />}
+    </div>
+  )
+}
+
+function ImagePaper({ file }: { file: File }) {
   const imageRef = useRef<HTMLImageElement>(null)
 
   // Adres obiektu żyje tylko z tym komponentem, więc trafia prosto do elementu, bez stanu.
@@ -64,26 +185,33 @@ function ImagePage({ file }: { file: File }) {
     return () => URL.revokeObjectURL(objectUrl)
   }, [file])
 
-  return <img ref={imageRef} className="arkusz-obraz" alt={`Wczytany plik ${file.name}`} data-ready="true" />
+  return (
+    <div className="papier-strony" data-strony="jedna">
+      <figure className="arkusz arkusz-obraz">
+        <img ref={imageRef} alt={`Wczytany plik ${file.name}`} data-ready="true" />
+      </figure>
+    </div>
+  )
 }
 
-/** Papier: pierwsza strona wybranego pliku. Plik nie opuszcza przeglądarki drugi raz. */
-export function SourcePage({ file }: { file: File | null }) {
-  if (!file) {
-    return (
-      <div className="arkusz arkusz-pusty">
-        <p className="arkusz-zdanie">Tu zobaczysz pierwszą stronę pliku.</p>
-      </div>
-    )
-  }
-  const kind = kindOf(file)
+const CONTENT_ID = 'papier-tresc'
+
+/**
+ * Papier: oryginał wybranego pliku, renderowany w przeglądarce. Na wąskim ekranie jest zwinięty
+ * do przycisku, na szerokim stoi obok i zostaje przy przewijaniu. Wołaj tylko dla PDF-a i obrazu.
+ */
+export function SourcePage({ file }: { file: File }) {
+  const [open, setOpen] = useState(false)
   const fileKey = `${file.name}:${file.size}:${file.lastModified}`
   return (
-    <figure className={kind === 'other' ? 'arkusz arkusz-pusty' : 'arkusz'}>
-      {/* key: nowy plik to nowy komponent, więc stan podglądu zaczyna się od zera. */}
-      {kind === 'pdf' && <PdfPage key={fileKey} file={file} />}
-      {kind === 'image' && <ImagePage key={fileKey} file={file} />}
-      {kind === 'other' && <p className="arkusz-zdanie">Pierwszą stronę pokazujemy dla plików PDF, JPG i PNG.</p>}
-    </figure>
+    <section className="papier" aria-label="Oryginał" data-open={open}>
+      <button type="button" className="b papier-przelacznik" aria-expanded={open} aria-controls={CONTENT_ID} onClick={() => setOpen(!open)}>
+        {open ? 'Ukryj oryginał' : 'Pokaż oryginał'}
+      </button>
+      <div className="papier-tresc" id={CONTENT_ID}>
+        {/* key: nowy plik to nowy komponent, więc strona i stan podglądu zaczynają od zera. */}
+        {sourceKind(file) === 'pdf' ? <PdfPaper key={fileKey} file={file} /> : <ImagePaper key={fileKey} file={file} />}
+      </div>
+    </section>
   )
 }

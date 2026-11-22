@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import type { FormEvent } from 'react'
+import { UploadIcon } from '../components/icons.tsx'
 import { formatBytes } from '../format.ts'
 
 interface Props {
@@ -9,6 +10,8 @@ interface Props {
   onChoose: (file: File | null) => void
   onSubmit: () => void
 }
+
+const FORMATS = ['PDF', 'DOC', 'DOCX', 'ODS', 'XLSX', 'JPG', 'PNG']
 
 export function UploadPanel({ file, error, errorId, onChoose, onSubmit }: Props) {
   const inputRef = useRef<HTMLInputElement>(null)
@@ -25,14 +28,16 @@ export function UploadPanel({ file, error, errorId, onChoose, onSubmit }: Props)
       <label className="pole-etykieta" htmlFor="plik">
         Plik formularza
       </label>
-      <p className="pole-opis" id="plik-opis">
-        PDF, DOC, DOCX, ODS, XLSX, JPG albo PNG.
+      <p className="sr-only" id="plik-opis">
+        Formaty: PDF, DOC, DOCX, ODS, XLSX, JPG albo PNG.
       </p>
       {/* Prawdziwy input wypełnia całą strefę i jest przezroczysty: klik, klawiatura i upuszczenie
-          pliku działają natywnie. Obrys fokusu rysuje strefa przez :has(:focus-visible). */}
+          pliku działają natywnie. Przycisk w strefie to tylko rysunek, a obrys fokusu rysuje strefa
+          przez :has(:focus-visible). */}
       <div
         className="strefa"
         data-over={over}
+        data-plik={file ? 'tak' : 'nie'}
         onDragEnter={() => setOver(true)}
         onDragLeave={() => setOver(false)}
         onDrop={() => setOver(false)}
@@ -47,24 +52,39 @@ export function UploadPanel({ file, error, errorId, onChoose, onSubmit }: Props)
           aria-invalid={error ? true : undefined}
           onChange={(event) => onChoose(event.target.files?.[0] ?? null)}
         />
-        <p className="strefa-tekst" id="plik-stan">
-          {file ? (
-            <>
-              <span className="zakreslone">{file.name}</span> {formatBytes(file.size)}. Możesz wybrać inny plik.
-            </>
-          ) : over ? (
-            'Upuść plik.'
-          ) : (
-            'Przeciągnij plik tutaj albo wybierz go z dysku.'
-          )}
-        </p>
+        {file ? (
+          <>
+            <p className="strefa-plik" id="plik-stan">
+              <b className="strefa-nazwa">{file.name}</b> <span className="strefa-rozmiar">{formatBytes(file.size)}</span>
+            </p>
+            <span className="b strefa-przycisk" aria-hidden="true">
+              Zmień plik
+            </span>
+          </>
+        ) : (
+          <>
+            <UploadIcon />
+            <p className="strefa-glowne" id="plik-stan">
+              {over ? 'Upuść plik tutaj' : 'Przeciągnij plik tutaj'}
+            </p>
+            <span className="b b-main strefa-przycisk" aria-hidden="true">
+              Wybierz plik
+            </span>
+            <ul className="formaty" aria-hidden="true">
+              {FORMATS.map((format) => (
+                <li key={format}>{format}</li>
+              ))}
+            </ul>
+          </>
+        )}
       </div>
       {error && (
         <p className="blad" id={errorId} role="alert" tabIndex={-1}>
           {error}
         </p>
       )}
-      <button type="submit" className="b b-main b-krok">
+      {/* Jeden przycisk główny naraz: przed wyborem pliku jest nim „Wybierz plik” w strefie. */}
+      <button type="submit" className={file ? 'b b-main b-krok' : 'b b-krok'}>
         Analizuj formularz
       </button>
     </form>

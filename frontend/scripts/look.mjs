@@ -2,16 +2,26 @@
 // do frontend/shots/. Sprawdza też krok 8 (zły typ pliku), pobranie pliku JSON i podgląd eUsługi:
 // dane z rejestru, warunek SHOW, błąd walidacji, przejście do strony końcowej.
 //
+// Papier na zrzutach ma być prawdziwy. Skrypt szuka materiałów COI (poza gitem) w LOOK_MATERIALY,
+// w materialy/ obok repozytorium i w głównym katalogu roboczym gita. Pełny przepływ idzie na
+// PDF-ie z folderu 5 (zrzuty f1-* i f2-*), a krótki, do wyniku, na PDF-ie z folderu 9 (p9-*).
+// Bez materiałów zostaje plik generowany tutaj i skrypt mówi o tym na końcu.
+//
+// Modelu skrypt nie woła. JSON formularza buduje prawdziwy generator API z analizy zapisanej
+// w backend/tests/fixtures/: fields.json dla folderu 5 i analysis_form9.json dla folderu 9.
+// Drugie API stoi na osobnym porcie, a przeglądarka kieruje do niego żądanie krótkiego przepływu.
+//
 // Użycie (z katalogu frontend/):
-//   node scripts/look.mjs                      plik PDF generowany tutaj
-//   node scripts/look.mjs /sciezka/wniosek.pdf prawdziwy plik, np. z materialy/ (poza gitem)
+//   node scripts/look.mjs                      PDF-y z materialy/ albo plik generowany tutaj
+//   node scripts/look.mjs /sciezka/wniosek.pdf wskazany plik w pełnym przepływie
 //
 // Skrypt startuje własne API z LLM_FIXTURE i własny serwer Vite na osobnych portach, więc nie
 // trafi w API bez atrapy ani w serwery innej sesji. Na końcu oba zatrzymuje.
 import { AxeBuilder } from '@axe-core/playwright'
 import { chromium } from '@playwright/test'
-import { spawn } from 'node:child_process'
-import { mkdir, readFile } from 'node:fs/promises'
+import { execFileSync, spawn } from 'node:child_process'
+import { existsSync } from 'node:fs'
+import { mkdir, readFile, readdir } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -23,6 +33,8 @@ const webPort = Number(process.env.LOOK_WEB_PORT ?? 5183)
 const api = `http://localhost:${apiPort}`
 const web = `http://localhost:${webPort}`
 const fixture = join(root, 'backend', 'tests', 'fixtures', 'fields.json')
+const secondApi = `http://localhost:${apiPort + 1}`
+const secondFixture = join(root, 'backend', 'tests', 'fixtures', 'analysis_form9.json')
 const axeTags = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']
 const viewports = [
   [1440, 900],
@@ -51,6 +63,31 @@ function samplePdf() {
   pdf += offsets.map((offset) => `${String(offset).padStart(10, '0')} 00000 n \n`).join('')
   pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`
   return Buffer.from(pdf, 'latin1')
+}
+
+// Materiały COI leżą poza gitem, zwykle tylko w głównym katalogu roboczym, nie w worktree.
+function materialsDir() {
+  const candidates = [process.env.LOOK_MATERIALY, join(root, 'materialy')]
+  try {
+    const common = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: root, encoding: 'utf-8' })
+    candidates.push(join(dirname(common.trim()), 'materialy'))
+  } catch {
+    // Poza repozytorium gita zostają dwa pierwsze miejsca.
+  }
+  return candidates.find((path) => path && existsSync(path)) ?? null
+}
+
+async function firstPdf(directory, folderPrefix) {
+  const folder = (await readdir(directory)).find((name) => name.startsWith(folderPrefix))
+  if (!folder) return null
+  const pdf = (await readdir(join(directory, folder))).find((name) => name.toLowerCase().endsWith('.pdf'))
+  return pdf ? join(directory, folder, pdf) : null
+}
+
+async function realPdfs() {
+  const directory = materialsDir()
+  if (!directory) return { main: null, second: null }
+  return { main: await firstPdf(directory, '5. '), second: await firstPdf(directory, '9. ') }
 }
 
 async function responds(url) {
@@ -160,29 +197,62 @@ async function preview(page, width, shot) {
   await shot('04-strona-koncowa')
 }
 
-async function walk(browser, source, [width, height]) {
-  const context = await browser.newContext({ viewport: { width, height }, acceptDownloads: true, locale: 'pl-PL' })
-  const page = await context.newPage()
-  const errors = []
-  page.on('pageerror', (error) => errors.push(String(error)))
-  // Każdy stan dostaje zrzut i kontrolę axe z tymi samymi tagami co tests/e2e/a11y.spec.ts.
-  const shot = async (target, name, prefix = 'f1') => {
-    await target.screenshot({ path: join(shots, `${prefix}-${name}-${width}.png`), fullPage: true })
-    const result = await new AxeBuilder({ page: target }).withTags(axeTags).analyze()
-    const found = result.violations.map((violation) => `${violation.id} (${violation.nodes[0].target.join(' ')})`)
-    check(`${width}: axe ${name}`, found.length === 0, found.join(', '))
-  }
+// Papier stoi obok od 1200 px. Węziej jest zwinięty do przycisku „Pokaż oryginał”.
+const PAPER_BESIDE_FROM = 1200
 
-  // Zegar Playwrighta pozwala pokazać licznik po ponad minucie bez czekania minuty.
-  await page.clock.install()
+// Podgląd, liczby, JSON i nazwa pliku mają dotyczyć jednego dokumentu. Liczymy z JSON-a pokazanego
+// w panelu i porównujemy z resztą ekranu. Działa dla każdego formularza, nie tylko dla atrapy.
+async function sameDocument(page, source, label) {
+  const showJson = page.getByRole('button', { name: 'Pokaż JSON' })
+  await showJson.click()
+  const form = JSON.parse(await page.locator('.json').textContent())
+  const sections = form.tabs.flatMap((tab) => tab.questions.map((cell) => cell.field))
+  const fields = sections.flatMap((section) => section.repeatingSectionGrid.map((cell) => cell.field))
+  const card = Object.fromEntries(
+    await page.locator('.karta > div').evaluateAll((rows) => rows.map((row) => [row.querySelector('dt').textContent, row.querySelector('dd').textContent])),
+  )
+  const shown = `${card.Strony} stron, ${card.Sekcje} sekcji, ${card.Pola} pól`
+  const counted = `${form.tabs.length} stron, ${sections.length} sekcji, ${fields.length} pól`
+  check(`${label}: karta liczy to samo co JSON`, shown === counted, `karta ${shown}, JSON ${counted}`)
+  await showJson.click()
+  check(`${label}: krok podglądu liczy strony z JSON-a`, await page.getByText(`Krok 1 z ${form.tabs.length}`, { exact: true }).isVisible())
+  check(`${label}: tytuł wniosku pochodzi z JSON-a`, await page.getByRole('heading', { level: 2, name: form.title, exact: true }).isVisible(), form.title)
+  check(`${label}: pierwsza strona podglądu to pierwsza strona JSON-a`, await page.getByRole('heading', { level: 3, name: form.tabs[0].title, exact: true }).isVisible())
+  check(`${label}: nazwa pliku na ekranie to wczytany plik`, await page.getByText(source.name).first().isVisible(), source.name)
+  const always = form.tabs[0].questions.map((cell) => cell.field).filter((section) => section.states.length === 0)
+  const missing = []
+  for (const section of always) {
+    if ((await page.getByRole('region', { name: section.title, exact: true }).count()) === 0) missing.push(section.title)
+  }
+  check(`${label}: każda sekcja bez warunku jest w podglądzie (${always.length})`, missing.length === 0, missing.join(', '))
+  return form
+}
+
+// Stany wspólne dla każdego pliku: pusty start, wybrany plik, oczekiwanie i wynik.
+// `apiUrl` kieruje żądanie analizy do innego API niż to, które stoi za serwerem Vite.
+async function toResult(page, source, width, shot, label, apiUrl = null) {
   await page.goto(web)
   await page.getByRole('heading', { level: 1, name: 'Wczytaj formularz' }).waitFor()
   await page.evaluate(() => document.fonts.ready)
+  check(`${label}: start nie pokazuje papieru przed wyborem pliku`, (await page.getByRole('region', { name: 'Oryginał' }).count()) === 0)
   await shot(page, '01-pusty')
 
   await page.getByLabel('Plik formularza').setInputFiles(source)
-  await page.locator('[data-ready="true"]').waitFor({ timeout: 20_000 })
-  await shot(page, '02-plik-wybrany')
+  const sheet = page.locator('[data-ready="true"]')
+  if (width >= PAPER_BESIDE_FROM) {
+    await sheet.waitFor({ timeout: 20_000 })
+    await shot(page, '02-plik-wybrany')
+  } else {
+    const toggle = page.getByRole('button', { name: 'Pokaż oryginał' })
+    await toggle.waitFor()
+    // Pytamy o całą treść papieru, nie o płótno: płótno jest niewidoczne także wtedy, gdy PDF jeszcze się rysuje.
+    check(`${label}: wąski ekran zwija papier do przycisku`, !(await page.locator('#papier-tresc').isVisible()))
+    await shot(page, '02-plik-wybrany')
+    await toggle.click()
+    await sheet.waitFor({ timeout: 20_000 })
+    await shot(page, '02b-oryginal')
+    await page.getByRole('button', { name: 'Ukryj oryginał' }).click()
+  }
 
   // Oczekiwanie: atrapa odpowiada od razu, więc odpowiedź wstrzymujemy tutaj, nie w aplikacji.
   let release
@@ -191,7 +261,7 @@ async function walk(browser, source, [width, height]) {
   })
   await page.route('**/api/forms', async (route) => {
     await held
-    await route.continue()
+    await route.continue(apiUrl ? { url: `${apiUrl}/api/forms` } : {})
   })
   await page.getByRole('button', { name: 'Analizuj formularz' }).click()
   await page.getByRole('heading', { level: 1, name: 'Analiza formularza' }).waitFor()
@@ -200,11 +270,74 @@ async function walk(browser, source, [width, height]) {
   release()
 
   await page.getByRole('heading', { level: 1, name: 'Podgląd eUsługi' }).waitFor({ timeout: 20_000 })
+  await page.unroute('**/api/forms')
   await shot(page, '04-wynik')
+}
 
-  await page.getByRole('button', { name: 'Pokaż JSON' }).click()
+function watch(page) {
+  const errors = []
+  page.on('pageerror', (error) => errors.push(String(error)))
+  return errors
+}
+
+// Każdy stan dostaje zrzut i kontrolę axe z tymi samymi tagami co tests/e2e/a11y.spec.ts.
+function shooter(prefix, width, label) {
+  return async (target, name, group = prefix) => {
+    await target.screenshot({ path: join(shots, `${group}-${name}-${width}.png`), fullPage: true })
+    const result = await new AxeBuilder({ page: target }).withTags(axeTags).analyze()
+    const found = result.violations.map((violation) => `${violation.id} (${violation.nodes[0].target.join(' ')})`)
+    check(`${label}: axe ${name}`, found.length === 0, found.join(', '))
+  }
+}
+
+// Krótki przepływ na drugim pliku: wielostronicowy PDF pokazuje miniatury i przyklejony papier.
+async function walkShort(browser, source, [width, height], prefix) {
+  const label = `${prefix} ${width}`
+  const context = await browser.newContext({ viewport: { width, height }, locale: 'pl-PL' })
+  const page = await context.newPage()
+  const errors = watch(page)
+  const shot = shooter(prefix, width, label)
+  await page.clock.install()
+  await toResult(page, source, width, shot, label, secondApi)
+  const form = await sameDocument(page, source, label)
+  check(`${label}: formularz z folderu 9 ma inny tytuł niż atrapa folderu 5`, !form.title.includes('nadpłaty'), form.title)
+  if (width >= PAPER_BESIDE_FROM) {
+    const thumbnails = page.getByRole('group', { name: 'Strony oryginału' }).getByRole('button')
+    if ((await thumbnails.count()) > 1) {
+      await thumbnails.nth(1).click()
+      await page.getByText(/^Strona 2 z \d+$/).waitFor()
+      check(`${label}: miniatura przełącza stronę papieru`, (await thumbnails.nth(1).getAttribute('aria-pressed')) === 'true')
+      await page.getByRole('button', { name: 'Dalej' }).scrollIntoViewIfNeeded()
+      const top = await page.getByRole('region', { name: 'Oryginał' }).evaluate((element) => element.getBoundingClientRect().top)
+      check(`${label}: papier zostaje w oknie przy przewijaniu`, top >= 0 && top < 40, String(Math.round(top)))
+      await page.screenshot({ path: join(shots, `${prefix}-05-przewiniete-${width}.png`) })
+    }
+  }
+  check(`${label}: brak błędów JavaScript na stronie`, errors.length === 0, errors.join(' | '))
+  await context.close()
+}
+
+async function walk(browser, source, [width, height]) {
+  const context = await browser.newContext({ viewport: { width, height }, acceptDownloads: true, locale: 'pl-PL' })
+  const page = await context.newPage()
+  const errors = watch(page)
+  const shot = shooter('f1', width, String(width))
+
+  // Zegar Playwrighta pozwala pokazać licznik po ponad minucie bez czekania minuty.
+  await page.clock.install()
+  await toResult(page, source, width, shot, String(width))
+  await sameDocument(page, source, String(width))
+
+  const showJson = page.getByRole('button', { name: 'Pokaż JSON' })
+  await showJson.click()
   const jsonVisible = await page.getByText(/"techName":\s*"twoje_dane"/).first().isVisible()
   check(`${width}: „Pokaż JSON” pokazuje tekst JSON-a`, jsonVisible)
+  check(`${width}: fokus idzie do panelu z JSON-em`, await page.evaluate(() => document.activeElement?.id === 'panel-json'))
+  if (width >= PAPER_BESIDE_FROM) {
+    const form = await page.locator('.rama').boundingBox()
+    const panel = await page.locator('.inspektor').boundingBox()
+    check(`${width}: JSON stoi obok formularza, nie nad nim`, panel.x >= form.x + form.width, `${Math.round(panel.x)} i ${Math.round(form.x + form.width)}`)
+  }
   await shot(page, '05-json')
 
   const [download] = await Promise.all([
@@ -216,7 +349,8 @@ async function walk(browser, source, [width, height]) {
   check(`${width}: „Pobierz JSON” daje plik .json`, name.endsWith('.json'), name)
   check(`${width}: pierwsza strona to „Dane”, ostatnia to FINISH`, form.tabs[0].title === 'Dane' && form.tabs.at(-1).type === 'FINISH')
 
-  await page.getByRole('button', { name: 'Ukryj JSON' }).click()
+  await showJson.click()
+  check(`${width}: drugi klik wraca do karty`, await page.getByRole('tab', { name: 'Karta' }).getAttribute('aria-selected') === 'true')
   await preview(page, width, (name) => shot(page, name, 'f2'))
 
   // Krok 8 z "Demo flow": nazwa .pdf, treść nie jest PDF-em.
@@ -247,14 +381,17 @@ async function walk(browser, source, [width, height]) {
 async function main() {
   for (const [url, label] of [
     [`${api}/health`, `port ${apiPort}`],
+    [`${secondApi}/health`, `port ${apiPort + 1}`],
     [web, `port ${webPort}`],
   ]) {
     if (await responds(url)) throw new Error(`${label} jest zajęty. Ustaw LOOK_API_PORT albo LOOK_WEB_PORT.`)
   }
-  const sourcePath = process.argv[2]
-  const source = sourcePath
-    ? { name: basename(sourcePath), mimeType: 'application/pdf', buffer: await readFile(sourcePath) }
+  const fromFile = async (path) => ({ name: basename(path), mimeType: 'application/pdf', buffer: await readFile(path) })
+  const real = process.argv[2] ? { main: process.argv[2], second: null } : await realPdfs()
+  const source = real.main
+    ? await fromFile(real.main)
     : { name: 'Wniosek o wydanie zaświadczenia.pdf', mimeType: 'application/pdf', buffer: samplePdf() }
+  const second = real.second ? await fromFile(real.second) : null
 
   await mkdir(shots, { recursive: true })
   start(
@@ -266,17 +403,27 @@ async function main() {
     cwd: frontend,
     env: { ...process.env, API_URL: api },
   })
+  if (second) {
+    start(
+      join(root, 'backend', '.venv', 'bin', 'python'),
+      ['-m', 'uvicorn', 'app.main:app', '--app-dir', join(root, 'backend'), '--port', String(apiPort + 1), '--log-level', 'warning'],
+      { cwd: root, env: { ...process.env, LLM_FIXTURE: secondFixture } },
+    )
+    await waitFor(`${secondApi}/health`, 'drugie API')
+  }
   await waitFor(`${api}/health`, 'API')
   await waitFor(web, 'Vite')
 
   const browser = await chromium.launch()
   try {
     for (const viewport of viewports) await walk(browser, source, viewport)
+    if (second) for (const viewport of viewports) await walkShort(browser, second, viewport, 'p9')
   } finally {
     await browser.close()
   }
   console.log('mapa zależności: ekranu jeszcze nie ma (etap 4), bez zrzutu')
-  console.log(`zrzuty: ${shots}/f1-*.png i f2-*.png`)
+  console.log(real.main ? `papier: ${source.name}${second ? ` i ${second.name}` : ''}` : 'papier: plik generowany w skrypcie, bo nie ma materialy/')
+  console.log(`zrzuty: ${shots}/f1-*.png, f2-*.png${second ? ' i p9-*.png' : ''}`)
 }
 
 process.on('exit', stopAll)

@@ -1,16 +1,12 @@
-/* Strefa eUsługi: to widzi mieszkaniec. DESIGN.md "Forms" i tokeny ink, muted, paper, line,
-   action, error. Żadna reguła warsztatu (warsztat.css) nie sięga do środka i odwrotnie. */
+/* Strefa eUsługi: to widzi mieszkaniec. DESIGN.md "Forms" i wzorce „Jasny urząd”: ten sam krój
+   i ten sam kolor akcji co w warsztacie, ale żadna reguła warsztatu nie sięga do środka. */
 
 .eu {
   margin: 0;
-  padding: 1.5rem 1.5rem 2rem;
-  border: 1px solid var(--color-line);
+  padding: 1.25rem 1rem 1.5rem;
+  border-radius: inherit;
   background: var(--color-paper);
   color: var(--color-ink);
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  font-size: 1.125rem;
-  line-height: 1.5;
-  letter-spacing: 0;
   /* Długie słowo w tytule z modelu nie może rozepchnąć strony na wąskim ekranie. */
   overflow-wrap: anywhere;
 }
@@ -25,15 +21,17 @@
 }
 
 .eu-step {
-  margin: 0;
+  margin: 0 0 0.25rem;
   color: var(--color-muted);
+  font-size: 1rem;
+  line-height: 1.375rem;
 }
 
 .eu-page {
-  margin: 0 0 1.5rem;
-  font-size: 1.75rem;
-  font-weight: 700;
-  line-height: 1.2;
+  margin: 0 0 1.25rem;
+  font-size: 1.625rem;
+  line-height: 2rem;
+  font-weight: 800;
 }
 
 .eu-section {
@@ -41,12 +39,11 @@
 }
 
 .eu-section h4,
-.eu-review h4,
-.eu-summary h4 {
-  margin: 0 0 0.75rem;
-  font-size: 1.375rem;
+.eu-review h4 {
+  margin: 0 0 1rem;
+  font-size: 1.3125rem;
+  line-height: 1.75rem;
   font-weight: 700;
-  line-height: 1.3;
 }
 
 .eu p {
@@ -58,38 +55,48 @@
   padding-block: 0.75rem;
   color: var(--color-action);
   text-decoration: underline;
-  text-underline-offset: 0.15em;
+  text-underline-offset: 3px;
 }
 
-.eu-note {
-  max-width: 36rem;
-  margin: 0 0 1rem;
+.eu a:hover {
+  color: var(--color-action-hover);
 }
 
+.eu-note,
 .eu-text {
-  max-width: 36rem;
-  margin: 0 0 1.25rem;
+  max-width: 32rem;
+  margin: 0 0 1rem;
+  font-size: 1rem;
+  line-height: 1.5rem;
 }
 
 .eu-text-title {
-  font-weight: 600;
+  font-weight: 700;
 }
+
+/* Pola */
 
 .eu-field {
   margin: 0 0 1.5rem;
 }
 
-.eu-field[data-invalid] {
-  padding-left: 1rem;
-  border-left: 4px solid var(--color-error);
-}
-
 .eu label,
 .eu legend {
   display: block;
-  margin: 0 0 0.25rem;
+  margin: 0;
   padding: 0;
-  font-weight: 600;
+  font-size: 1.125rem;
+  line-height: 1.625rem;
+  font-weight: 700;
+}
+
+.eu legend {
+  margin-bottom: 0.5rem;
+}
+
+/* Etykieta bez podpowiedzi stoi bezpośrednio nad kontrolką. */
+.eu label + :is(input, textarea, .eu-locked, .eu-select, .eu-upload) {
+  margin-top: 0.5rem;
 }
 
 .eu-optional {
@@ -98,19 +105,29 @@
 }
 
 .eu-hint {
-  margin: 0 0 0.375rem;
+  margin: 0 0 0.5rem;
   color: var(--color-muted);
   font-size: 1rem;
+  line-height: 1.5rem;
 }
 
-.eu-hint p {
+.eu .eu-hint p {
   margin: 0;
 }
 
-.eu-error {
-  margin: 0 0 0.375rem;
+.eu .eu-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.375rem;
+  margin: 0 0 0.5rem;
   color: var(--color-error);
+  font-size: 1rem;
+  line-height: 1.5rem;
   font-weight: 700;
+}
+
+.eu-error .ikona {
+  margin-top: 3px;
 }
 
 .eu input:not([type='radio'], [type='checkbox'], [type='file']),
@@ -118,19 +135,30 @@
 .eu textarea {
   display: block;
   width: 100%;
-  max-width: 24rem;
-  min-height: 44px;
-  padding: 0.5rem 0.75rem;
-  border: 2px solid var(--color-line);
-  border-radius: 4px;
+  max-width: 32rem;
+  height: 48px;
+  padding: 0 14px;
+  border: 2px solid var(--color-muted);
+  border-radius: var(--radius-control);
   background: var(--color-paper);
   color: inherit;
   font: inherit;
 }
 
 .eu textarea {
-  max-width: 36rem;
+  height: auto;
+  padding-block: 0.625rem;
   resize: vertical;
+}
+
+.eu-field[data-size='kod'] > :is(input, .eu-locked) {
+  max-width: 9rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.eu-field[data-size='numer'] > :is(input, .eu-locked) {
+  max-width: 17.5rem;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Ikona kalendarza jest osobnym przystankiem Tab i nie dziedziczy obrysu pola. */
@@ -140,67 +168,54 @@
 }
 
 .eu input[type='date']::-webkit-calendar-picker-indicator:focus-visible {
-  outline: 3px solid var(--color-ink);
+  outline: 3px solid var(--color-navy);
   outline-offset: 1px;
 }
 
-.eu-upload {
+/* Pole wypełnione i zablokowane: kłódka, szare tło i jasna ramka. Że nie da się go zmienić,
+   mówi też zdanie pod etykietą, połączone z polem przez aria-describedby. */
+.eu-locked {
   position: relative;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.25rem 0.75rem;
-  max-width: 36rem;
-  min-height: 44px;
+  max-width: 32rem;
 }
 
-.eu-upload input {
+.eu-locked .ikona {
   position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  opacity: 0;
-  cursor: pointer;
+  top: 16px;
+  left: 14px;
+  color: var(--color-muted);
 }
 
-/* Input jest przezroczysty, więc obrys fokusu rysuje strefa. */
-.eu-upload:has(input:focus-visible) {
-  outline: 3px solid var(--color-ink);
-  outline-offset: 3px;
+.eu .eu-locked input {
+  padding-left: 40px;
+  border-color: var(--color-line);
+  background: var(--color-area);
 }
 
-@supports not selector(:has(*)) {
-  .eu-upload:focus-within {
-    outline: 3px solid var(--color-ink);
-    outline-offset: 3px;
-  }
-}
-
-.eu-upload-button {
-  display: inline-flex;
-  align-items: center;
-  min-height: 44px;
-  padding: 0.5rem 1rem;
-  border: 2px solid var(--color-action);
-  border-radius: 4px;
-  color: var(--color-action);
-  font-weight: 600;
-}
-
-.eu-upload-state {
-  overflow-wrap: anywhere;
-}
-
-/* Pole tylko do odczytu: szare tło i linia przerywana, żeby różnicy nie niósł sam kolor. */
-.eu input[readonly],
 .eu textarea[readonly] {
-  border-style: dashed;
-  background: #f0f0f0;
+  border-color: var(--color-line);
+  background: var(--color-area);
 }
 
-.eu [aria-invalid='true']:not([type='radio'], [type='checkbox']) {
+.eu-select {
+  position: relative;
+  max-width: 20rem;
+}
+
+.eu .eu-select select {
+  padding-right: 40px;
+  appearance: none;
+}
+
+.eu-select .ikona {
+  position: absolute;
+  top: 15px;
+  right: 14px;
+  pointer-events: none;
+}
+
+.eu [aria-invalid='true']:not([type='radio'], [type='checkbox'], [type='file']) {
   border-color: var(--color-error);
-  border-width: 3px;
 }
 
 .eu fieldset {
@@ -227,21 +242,98 @@
   accent-color: var(--color-action);
 }
 
+.eu-upload {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  max-width: 32rem;
+  padding: 0.75rem;
+  border: 2px solid var(--color-line);
+  border-radius: var(--radius-control);
+}
+
+.eu-field[data-invalid] .eu-upload {
+  border-color: var(--color-error);
+}
+
+.eu-upload input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+/* Input jest przezroczysty, więc obrys fokusu rysuje strefa. */
+.eu-upload:has(input:focus-visible) {
+  outline: 3px solid var(--color-navy);
+  outline-offset: 2px;
+}
+
+@supports not selector(:has(*)) {
+  .eu-upload:focus-within {
+    outline: 3px solid var(--color-navy);
+    outline-offset: 2px;
+  }
+}
+
+.eu-upload-button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 1rem;
+  border: 2px solid var(--color-action);
+  border-radius: var(--radius-control);
+  background: var(--color-paper);
+  color: var(--color-action);
+  font-size: 1.0625rem;
+  font-weight: 700;
+}
+
+.eu-upload-state {
+  color: var(--color-muted);
+  font-size: 1rem;
+  overflow-wrap: anywhere;
+}
+
+/* Podsumowanie błędów */
+
 .eu-summary {
   max-width: 36rem;
-  margin: 0 0 2rem;
-  padding: 1rem 1.25rem;
-  border: 3px solid var(--color-error);
+  margin: 0 0 1.75rem;
+  padding: 1rem;
+  border: 2px solid var(--color-error);
+  border-radius: var(--radius-panel);
+}
+
+.eu-summary h4 {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin: 0 0 0.5rem;
+  font-size: 1.1875rem;
+  line-height: 1.625rem;
+  font-weight: 700;
+}
+
+.eu-summary h4 .ikona {
+  margin-top: 2px;
+  color: var(--color-error);
 }
 
 .eu-summary ul {
   margin: 0;
-  padding: 0;
+  padding: 0 0 0 1.875rem;
   list-style: none;
+  font-size: 1rem;
+  line-height: 1.5rem;
 }
 
 .eu-summary li {
-  margin: 0 0 0.5rem;
+  margin: 0 0 0.375rem;
 }
 
 .eu-summary a {
@@ -253,11 +345,18 @@
   font-weight: 700;
 }
 
+.eu-summary a:hover {
+  color: var(--color-error);
+}
+
 .eu-summary-where {
   display: block;
   color: var(--color-muted);
-  font-size: 1rem;
+  font-size: 0.9375rem;
+  line-height: 1.375rem;
 }
+
+/* Strona końcowa */
 
 .eu-review-page {
   margin: 0 0 2rem;
@@ -269,18 +368,21 @@
 
 .eu-review dl > div {
   padding: 0.5rem 0;
-  border-bottom: 1px solid #d0d0d0;
+  border-bottom: 1px solid var(--color-line);
 }
 
 .eu-review dt {
   color: var(--color-muted);
   font-size: 1rem;
+  line-height: 1.5rem;
 }
 
 .eu-review dd {
   margin: 0;
   overflow-wrap: anywhere;
 }
+
+/* Nawigacja */
 
 .eu-nav {
   display: flex;
@@ -290,21 +392,37 @@
 }
 
 .eu-button {
+  display: inline-flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
   min-width: 44px;
-  min-height: 44px;
-  padding: 0.5rem 1.5rem;
+  min-height: 52px;
+  padding: 0 1.75rem;
   border: 2px solid var(--color-action);
-  border-radius: 4px;
+  border-radius: var(--radius-control);
   background: var(--color-action);
+  box-shadow: var(--shadow-button);
   color: var(--color-action-ink);
   font: inherit;
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
+}
+
+.eu-button:hover {
+  border-color: var(--color-action-hover);
+  background: var(--color-action-hover);
 }
 
 .eu-button-second {
   background: var(--color-paper);
+  box-shadow: none;
   color: var(--color-action);
+}
+
+.eu-button-second:hover {
+  background: var(--color-paper);
+  color: var(--color-action-hover);
 }
 
 .eu-link {
@@ -315,14 +433,29 @@
   background: none;
   color: var(--color-action);
   font: inherit;
-  font-weight: 600;
+  font-weight: 700;
   text-decoration: underline;
-  text-underline-offset: 0.15em;
+  text-underline-offset: 3px;
   cursor: pointer;
 }
 
-@media (max-width: 899px) {
+.eu-link:hover {
+  color: var(--color-action-hover);
+}
+
+@media (min-width: 900px) {
   .eu {
-    padding: 1.25rem 1rem 1.5rem;
+    padding: 1.75rem 1.75rem 2rem;
+  }
+
+  .eu-page {
+    margin-bottom: 1.5rem;
+    font-size: 1.875rem;
+    line-height: 2.25rem;
+  }
+
+  .eu-button {
+    flex: none;
+    min-height: 48px;
   }
 }

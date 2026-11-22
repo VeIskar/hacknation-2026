@@ -1,100 +1,350 @@
-/* Warsztat urzędnika, kierunek "Zakreślacz". Strefy eUsługi ten plik nie styluje. */
+/* Warsztat urzędnika w kierunku „Jasny urząd” (DESIGN.md, wzorce w frontend/design/jasny-urzad/).
+   Biała strona, szare pole tylko dla obszarów z zadaniem, granat dla paska, nagłówków i wyboru. */
 
 .wb {
+  display: flex;
+  flex-direction: column;
   min-height: 100vh;
-  padding: 0 2rem 2.5rem;
 }
 
-.wb-top {
+.wb-wrap {
+  width: 100%;
+  max-width: 1440px;
+  margin-inline: auto;
+  padding-inline: clamp(1.25rem, 5.5vw, 5rem);
+}
+
+.ikona {
+  flex: none;
+}
+
+/* Pasek usługi i linia wersji testowej */
+
+.pasek {
+  background: var(--color-navy);
+  color: var(--color-paper);
+}
+
+.pasek-wiersz {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 1rem 1.5rem;
-  padding: 1.5rem 0 1.25rem;
+  gap: 0 1rem;
+  min-height: 56px;
 }
 
-.wb-top h1 {
+.pasek-marka {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  margin: 0 auto 0 0;
+  font-size: 1.25rem;
+  line-height: 1.75rem;
+  font-weight: 800;
+}
+
+.pasek-opis {
   margin: 0;
-  font-family: var(--font-tytul);
-  font-size: 2.75rem;
-  font-weight: 600;
-  line-height: 1.1;
-  letter-spacing: -0.01em;
+  color: var(--color-navy-soft);
+  font-size: 0.9375rem;
+  line-height: 1.375rem;
 }
 
-.wb-id {
-  margin: 0.25rem 0 0;
-  color: var(--color-szary);
-  overflow-wrap: anywhere;
+.wersja {
+  border-bottom: 1px solid var(--color-line);
 }
 
-.wb-id b {
-  color: var(--color-atrament);
+.wersja-wiersz {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  padding-block: 0.625rem;
+  font-size: 0.9375rem;
+  line-height: 1.375rem;
+}
+
+.wersja-znak {
+  padding: 0 0.5rem;
+  border: 2px solid var(--color-navy);
+  border-radius: var(--radius-control);
+  color: var(--color-navy);
+  font-size: 0.8125rem;
+  line-height: 1.25rem;
+}
+
+/* Etapy pracy */
+
+.etapy {
+  padding-top: 1.75rem;
+}
+
+.etapy-skrot {
+  display: none;
+}
+
+.etapy-lista {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin: 0;
+  padding: 0 0 1.75rem;
+  border-bottom: 1px solid var(--color-line);
+  list-style: none;
+}
+
+.etap {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.etap:last-child {
+  flex: 0 0 auto;
+}
+
+.etap:not(:last-child)::after {
+  content: '';
+  flex: 1;
+  height: 2px;
+  margin-left: 0.5rem;
+  background: var(--color-line);
+}
+
+.etap[data-stan='zrobiony']:not(:last-child)::after {
+  background: var(--color-navy);
+}
+
+.etap-znak {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 2px solid var(--color-edge);
+  border-radius: 50%;
+  color: var(--color-muted);
+  font-size: 1rem;
   font-weight: 700;
 }
 
-.wb-akcje {
+.etap[data-stan='zrobiony'] .etap-znak {
+  border-color: var(--color-navy);
+  color: var(--color-navy);
+}
+
+.etap[data-stan='biezacy'] .etap-znak {
+  border-color: var(--color-navy);
+  background: var(--color-navy);
+  color: var(--color-paper);
+  font-weight: 800;
+}
+
+.etap-opis {
+  display: flex;
+  flex-direction: column;
+}
+
+.etap-nazwa {
+  color: var(--color-muted);
+  font-size: 1.0625rem;
+  line-height: 1.5rem;
+}
+
+.etap[data-stan='zrobiony'] .etap-nazwa {
+  color: var(--color-ink);
+  font-weight: 700;
+}
+
+.etap[data-stan='biezacy'] .etap-nazwa {
+  color: var(--color-navy);
+  font-weight: 800;
+}
+
+.etap-stan {
+  color: var(--color-muted);
+  font-size: 0.9375rem;
+  line-height: 1.25rem;
+}
+
+/* Układ */
+
+.wb-main {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(0, 46rem);
+  grid-template-areas: 'naglowek' 'papier' 'panel' 'inspektor';
+  align-content: start;
+  gap: 0 2rem;
+  padding-top: 2rem;
+  padding-bottom: 4rem;
+}
+
+.wb-naglowek {
+  display: flex;
+  grid-area: naglowek;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1.25rem 2rem;
+  padding-bottom: 1.75rem;
+}
+
+.wb-naglowek h1 {
+  margin: 0 0 0.5rem;
+  color: var(--color-navy);
+  font-size: 2rem;
+  line-height: 2.375rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.wb-id {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 1rem;
+  line-height: 1.5rem;
+  overflow-wrap: anywhere;
+}
+
+.narzedzia {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  align-items: center;
+  gap: 0.75rem 1rem;
 }
+
+.narzedzia .b {
+  flex: 1 1 100%;
+  min-height: 52px;
+}
+
+.panel {
+  grid-area: panel;
+  min-width: 0;
+}
+
+/* Przyciski: główny z dolnym cieniem, drugi z ramką, trzeci jako odsyłacz */
 
 .b {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 0.5rem;
   min-width: 44px;
-  min-height: 44px;
-  padding: 0.5rem 1rem;
-  border: 2px solid var(--color-atrament);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--color-atrament);
+  min-height: 48px;
+  padding: 0 1.375rem;
+  border: 2px solid var(--color-action);
+  border-radius: var(--radius-control);
+  background: var(--color-paper);
+  color: var(--color-action);
   font: inherit;
+  font-size: 1.125rem;
   font-weight: 700;
   cursor: pointer;
 }
 
 .b:hover {
-  background: var(--color-paper);
+  border-color: var(--color-action-hover);
+  color: var(--color-action-hover);
 }
 
 .b-main {
-  background: var(--color-atrament);
-  color: var(--color-paper);
+  background: var(--color-action);
+  box-shadow: var(--shadow-button);
+  color: var(--color-action-ink);
 }
 
 .b-main:hover {
-  background: #3a3f45;
+  background: var(--color-action-hover);
+  color: var(--color-action-ink);
+}
+
+/* Wciśnięty przełącznik to element wybrany: granatowe wypełnienie zamiast ramki. */
+.b[aria-pressed='true'] {
+  border-color: var(--color-navy);
+  background: var(--color-navy);
+  color: var(--color-paper);
+}
+
+.b-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-action);
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.b-link:hover {
+  color: var(--color-action-hover);
 }
 
 .b-krok {
   margin-top: 1.5rem;
 }
 
-.scena {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 2rem;
+/* Papier */
+
+.papier {
+  grid-area: papier;
+  min-width: 0;
+  margin-bottom: 1.5rem;
 }
 
-.panel {
-  max-width: 40rem;
+/* Wąski ekran: wiersz z odsyłaczem, jak rozwijany akapit, a nie kolejny przycisk. */
+.papier-przelacznik {
+  width: 100%;
+  justify-content: flex-start;
+  min-height: 52px;
+  padding: 0;
+  border: 0;
+  border-block: 1px solid var(--color-line);
+  border-radius: 0;
+  background: none;
+  font-size: 1.0625rem;
 }
 
+.papier-tresc {
+  display: none;
+  margin-top: 1rem;
+}
+
+.papier[data-open='true'] .papier-tresc {
+  display: block;
+}
+
+/* Kartka: proporcje strony (A4, dopóki plik nie powie inaczej), proste rogi, jedyny cień. */
 .arkusz {
+  position: relative;
+  aspect-ratio: var(--proporcja, 0.7067);
   margin: 0;
-  border: 1px solid var(--color-obrys);
+  overflow: hidden;
+  border: 1px solid var(--color-line);
   background: var(--color-paper);
+  box-shadow: var(--shadow-sheet);
 }
 
-.arkusz-pusty {
-  border: 1px dashed var(--color-obrys);
-  background: transparent;
+.arkusz canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .arkusz-obraz {
+  aspect-ratio: auto;
+}
+
+.arkusz-obraz img {
   display: block;
   width: 100%;
   height: auto;
@@ -102,73 +352,225 @@
 
 .arkusz-zdanie {
   margin: 0;
-  padding: 1.25rem 1.5rem;
-  color: var(--color-szary);
-}
-
-.arkusz-podpis {
-  padding: 0.5rem 0.75rem;
-  border-top: 1px solid var(--color-obrys);
-  color: var(--color-szary);
+  padding: 1.5rem;
+  color: var(--color-muted);
   font-size: 1rem;
+  line-height: 1.5rem;
 }
 
-/* Papier stoi po lewej na każdym ekranie, od wczytania do wyniku. W DOM jest drugi,
-   żeby klawiatura i czytnik ekranu trafiały najpierw na pole pliku. */
-@media (min-width: 900px) {
-  .scena {
-    grid-template-columns: minmax(16rem, 30rem) minmax(0, 40rem);
-    align-items: start;
-    gap: 0 6rem;
-  }
-
-  .papier {
-    position: sticky;
-    top: 1.5rem;
-    grid-row: 1;
-    grid-column: 1;
-  }
-
-  .panel {
-    grid-row: 1;
-    grid-column: 2;
-  }
-
-  /* Cała strona A4 mieści się w oknie pod nagłówkiem. */
-  .arkusz {
-    width: min(100%, calc((100vh - 11rem) * 595 / 842));
-  }
-
-  .arkusz-pusty {
-    aspect-ratio: 595 / 842;
-  }
+.papier-podpis {
+  margin: 0.75rem 0 0;
+  color: var(--color-muted);
+  font-size: 0.9375rem;
+  line-height: 1.375rem;
 }
 
-.pole-etykieta {
+.miniatury {
+  display: flex;
+  gap: 0.625rem;
+  margin: 0.5rem -0.375rem 0;
+  padding: 0.375rem;
+  overflow-x: auto;
+}
+
+.miniatura {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  width: 3.25rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-muted);
+  font: inherit;
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.miniatura canvas {
   display: block;
-  margin: 0 0 0.25rem;
-  font-size: 1.25rem;
+  width: 100%;
+  aspect-ratio: 595 / 842;
+  border: 1px solid var(--color-edge);
+  background: var(--color-paper);
+}
+
+.miniatura span {
+  min-width: 1.5rem;
+  border-radius: var(--radius-control);
+  line-height: 1.4;
+}
+
+/* Wybrana strona: grubsza granatowa ramka i numer na granatowym tle. */
+.miniatura[aria-pressed='true'] canvas {
+  border: 3px solid var(--color-navy);
+}
+
+.miniatura[aria-pressed='true'] span {
+  background: var(--color-navy);
+  color: var(--color-paper);
   font-weight: 700;
 }
 
-.pole-opis {
+/* Rama eUsługi. Wnętrze należy do eusluga.css. */
+.rama {
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-panel);
+}
+
+.tytul-wniosku {
+  margin: 0 0 1rem;
+  font-size: 1.25rem;
+  line-height: 1.75rem;
+  font-weight: 700;
+}
+
+/* Panel boczny */
+
+.inspektor {
+  display: flex;
+  grid-area: inspektor;
+  flex-direction: column;
+  min-width: 0;
+  margin-top: 2rem;
+  overflow: hidden;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-panel);
+  background: var(--color-paper);
+}
+
+.zakladki {
+  display: flex;
+  flex: none;
+  gap: 0.25rem;
+  padding: 0.25rem 0.75rem 0;
+  border-bottom: 1px solid var(--color-line);
+  background: var(--color-area);
+}
+
+.zakladka {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0.5rem 0.875rem 0.375rem;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  background: none;
+  color: var(--color-muted);
+  font: inherit;
+  font-size: 1.0625rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* Wybrana zakładka: granatowa kreska pod spodem i grubszy krój. */
+.zakladka[aria-selected='true'] {
+  border-bottom-color: var(--color-navy);
+  color: var(--color-navy);
+  font-weight: 800;
+}
+
+/* Panel przycina zawartość, więc obrys fokusu rysujemy do środka. */
+.zakladka:focus-visible,
+.inspektor-panel:focus-visible {
+  outline-offset: -3px;
+}
+
+.inspektor-panel {
+  min-height: 0;
+  padding: 1.25rem;
+  overflow: auto;
+}
+
+.inspektor-json {
+  max-height: 60vh;
+}
+
+.karta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.25rem 1.5rem;
+  margin: 0;
+}
+
+.karta dt {
+  color: var(--color-muted);
+  font-size: 0.9375rem;
+  line-height: 1.375rem;
+}
+
+.karta dd {
+  margin: 0;
+  color: var(--color-navy);
+  font-size: 1.75rem;
+  line-height: 2.25rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.karta-szeroki {
+  grid-column: 1 / -1;
+}
+
+.karta-zrodlo {
+  margin: 1.5rem 0 0;
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-line);
+  color: var(--color-muted);
+  font-size: 0.9375rem;
+  line-height: 1.375rem;
+}
+
+.json {
+  margin: 0;
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+  font-size: 0.8125rem;
+  line-height: 1.3125rem;
+  tab-size: 2;
+}
+
+/* Wczytanie pliku */
+
+.pole-etykieta {
+  display: block;
   margin: 0 0 0.75rem;
-  color: var(--color-szary);
+  font-size: 1.1875rem;
+  line-height: 1.625rem;
+  font-weight: 700;
 }
 
 .strefa {
   position: relative;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  min-height: 9rem;
-  padding: 1.5rem;
-  border: 2px dashed var(--color-atrament);
-  border-radius: 6px;
-  background: var(--color-paper);
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 3rem 2rem;
+  border: 2px dashed var(--color-edge);
+  border-radius: var(--radius-panel);
+  background: var(--color-area);
+  text-align: center;
+}
+
+.strefa .ikona {
+  color: var(--color-navy);
 }
 
 .strefa[data-over='true'] {
   border-style: solid;
+  border-color: var(--color-navy);
+}
+
+.strefa[data-plik='tak'] {
+  flex-flow: row wrap;
+  justify-content: space-between;
+  gap: 0.75rem 1.5rem;
+  padding: 1rem 1.25rem;
+  border: 2px solid var(--color-line);
+  text-align: left;
 }
 
 .strefa input {
@@ -182,135 +584,260 @@
 
 /* Input jest przezroczysty, więc jego obrysu nie widać. Ten sam obrys rysuje strefa. */
 .strefa:has(input:focus-visible) {
-  outline: 3px solid var(--color-ink);
-  outline-offset: 3px;
+  outline: 3px solid var(--color-navy);
+  outline-offset: 2px;
 }
 
 /* Przeglądarka bez :has() (Firefox przed 121) pominęłaby regułę wyżej i fokus byłby niewidoczny. */
 @supports not selector(:has(*)) {
   .strefa:focus-within {
-    outline: 3px solid var(--color-ink);
-    outline-offset: 3px;
+    outline: 3px solid var(--color-navy);
+    outline-offset: 2px;
   }
 }
 
-.strefa-tekst {
+.strefa-glowne {
+  margin: 0.25rem 0 0;
+  color: var(--color-navy);
+  font-size: 1.1875rem;
+  line-height: 1.625rem;
+  font-weight: 700;
+}
+
+.strefa-plik {
+  min-width: 0;
   margin: 0;
   overflow-wrap: anywhere;
 }
 
-.zakreslone {
-  padding: 0.05em 0.3em;
-  border-radius: 3px;
-  background: var(--color-zakreslacz);
-  color: var(--color-atrament);
+.strefa-rozmiar {
+  color: var(--color-muted);
+  font-size: 0.9375rem;
+  white-space: nowrap;
+}
+
+.formaty {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.375rem;
+  margin: 0.25rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.formaty li {
+  padding: 0 0.5rem;
+  border: 1px solid var(--color-edge);
+  border-radius: var(--radius-control);
+  background: var(--color-paper);
+  color: var(--color-muted);
+  font-size: 0.8125rem;
+  line-height: 1.375rem;
   font-weight: 700;
-  box-decoration-break: clone;
-  -webkit-box-decoration-break: clone;
-}
-
-/* Duży tekst: pociągnięcie zakreślacza pod dolną częścią liter, nie żółta tablica. */
-.zakreslone-pas {
-  position: relative;
-  display: inline-block;
-  isolation: isolate;
-}
-
-.zakreslone-pas::before {
-  content: '';
-  position: absolute;
-  z-index: -1;
-  right: -0.12em;
-  bottom: 0.14em;
-  left: -0.12em;
-  height: 0.4em;
-  border-radius: 3px;
-  background: var(--color-zakreslacz);
 }
 
 .blad {
   margin: 1rem 0 0;
-  padding: 0.75rem 1rem;
+  padding: 1rem;
   border: 2px solid var(--color-error);
-  border-radius: 6px;
-  background: var(--color-paper);
+  border-radius: var(--radius-panel);
   font-weight: 700;
 }
 
+/* Oczekiwanie */
+
+.czekanie {
+  max-width: 40em;
+  padding: 1.5rem 1.25rem;
+  border-radius: var(--radius-panel);
+  background: var(--color-area);
+}
+
 .czas-etykieta {
-  margin: 0 0 0.25rem;
-  font-size: 1.25rem;
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 1.0625rem;
+  line-height: 1.5rem;
   font-weight: 700;
 }
 
 .czas {
-  margin: 0 0 1.5rem 0.4rem;
-  font-size: 3.5rem;
+  margin: 0.25rem 0 1.25rem;
+  color: var(--color-navy);
+  font-size: 2.125rem;
+  line-height: 2.5rem;
   font-weight: 800;
-  line-height: 1.15;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.01em;
   font-variant-numeric: tabular-nums;
 }
 
 .zdanie {
-  max-width: 32rem;
   margin: 0 0 0.5rem;
 }
 
-.tytul-wniosku {
-  margin: 0 0 1rem;
-  font-family: var(--font-tytul);
-  font-size: 1.75rem;
-  font-weight: 600;
-  line-height: 1.2;
-}
-
-.karta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem 2.5rem;
-  margin: 0 0 1.5rem;
-}
-
-.karta dt {
-  color: var(--color-szary);
+.zdanie + .zdanie {
+  color: var(--color-muted);
   font-size: 1rem;
+  line-height: 1.5rem;
 }
 
-.karta dd {
-  margin: 0;
-  font-size: 1.375rem;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
+.czekanie .b-krok {
+  width: 100%;
+  min-height: 52px;
 }
 
-.json {
-  max-height: 70vh;
-  margin: 0;
-  padding: 1rem;
-  overflow: auto;
-  border: 1px solid var(--color-obrys);
-  background: var(--color-paper);
-  font-family: ui-monospace, 'Cascadia Mono', Menlo, Consolas, monospace;
-  font-size: 0.9375rem;
-  line-height: 1.5;
-  tab-size: 2;
-}
-
+/* Wąski ekran: etapy jako jedno zdanie z paskiem trzech odcinków. */
 @media (max-width: 899px) {
-  .wb {
-    padding: 0 1rem 2rem;
+  .pasek-wiersz {
+    min-height: 52px;
   }
 
-  .wb-top h1 {
-    font-size: 2.125rem;
+  .pasek-opis {
+    display: none;
   }
 
-  .wb-akcje .b {
-    flex: 1 1 calc(50% - 0.25rem);
+  .etapy {
+    padding-block: 1rem;
+    border-bottom: 1px solid var(--color-line);
+  }
+
+  .etapy-skrot {
+    display: block;
+  }
+
+  .etapy-skrot p {
+    margin: 0 0 0.5rem;
+    font-size: 1rem;
+    line-height: 1.375rem;
+  }
+
+  .etapy-skrot b {
+    color: var(--color-navy);
+  }
+
+  .etapy-pasek {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 4px;
+    height: 6px;
+  }
+
+  .etapy-pasek span {
+    border-radius: 3px;
+    background: var(--color-line);
+  }
+
+  .etapy-pasek span[data-pelny='true'] {
+    background: var(--color-navy);
+  }
+
+  .etapy-lista {
+    display: none;
+  }
+}
+
+@media (min-width: 900px) {
+  .wb-main {
+    padding-top: 3.5rem;
+    padding-bottom: 6rem;
+  }
+
+  .wb-naglowek h1 {
+    margin-bottom: 0.75rem;
+    font-size: 2.75rem;
+    line-height: 3.125rem;
+  }
+
+  .wb-id {
+    font-size: 1.125rem;
+    line-height: 1.75rem;
+  }
+
+  .narzedzia .b {
+    flex: none;
+    min-height: 48px;
+  }
+
+  .tytul-wniosku {
+    font-size: 1.5rem;
+    line-height: 2rem;
+  }
+
+  .czekanie {
+    padding: 2rem;
   }
 
   .czas {
-    font-size: 2.75rem;
+    font-size: 2.5rem;
+    line-height: 3rem;
+  }
+
+  .czekanie .b-krok {
+    width: auto;
+    min-height: 48px;
+  }
+}
+
+/* Szeroki ekran: narzędzie na pełną szerokość. Papier stoi po lewej i zostaje przy przewijaniu,
+   bo cała kartka mieści się w oknie. */
+@media (min-width: 1200px) {
+  .wb-main[data-uklad='dwa'] {
+    grid-template-columns: minmax(18rem, 26rem) minmax(0, 40rem);
+    grid-template-rows: auto 1fr;
+    grid-template-areas: 'papier naglowek' 'papier panel';
+    column-gap: 4rem;
+  }
+
+  .wb-main[data-uklad='wynik'] {
+    grid-template-columns: minmax(18rem, 0.62fr) minmax(0, 1fr) minmax(17rem, 0.5fr);
+    grid-template-areas: 'naglowek naglowek naglowek' 'papier panel inspektor';
+  }
+
+  .wb-main[data-uklad='wynik-bez-papieru'] {
+    grid-template-columns: minmax(0, 46rem) minmax(17rem, 26rem);
+    grid-template-areas: 'naglowek naglowek' 'panel inspektor';
+  }
+
+  .papier {
+    position: sticky;
+    top: 1rem;
+    align-self: start;
+    margin-bottom: 0;
+  }
+
+  .papier-przelacznik {
+    display: none;
+  }
+
+  .papier-tresc,
+  .papier[data-open='true'] .papier-tresc {
+    display: block;
+    margin-top: 0;
+  }
+
+  .papier-strony {
+    --papier-dodatki: 3.5rem;
+  }
+
+  .papier-strony[data-strony='wiele'] {
+    --papier-dodatki: 10.5rem;
+  }
+
+  /* Szerokość z wysokości okna: kartka z podpisem i miniaturami nie wychodzi poza ekran. */
+  .arkusz {
+    width: min(100%, calc((100vh - 2rem - var(--papier-dodatki)) * var(--proporcja, 0.7067)));
+  }
+
+  .inspektor {
+    position: sticky;
+    top: 1rem;
+    align-self: start;
+    max-height: calc(100vh - 2rem);
+    margin-top: 0;
+  }
+
+  .inspektor-json {
+    max-height: none;
   }
 }

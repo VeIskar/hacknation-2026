@@ -2,7 +2,7 @@
 @import './warsztat.css' layer(components);
 @import './eusluga.css' layer(components);
 
-/* Kroje bez zmian, z repozytorium, bez CDN (D15 w DECISIONS.md). Licencje: src/fonts/<kroj>/OFL.txt. */
+/* Krój bez zmian, z repozytorium, bez CDN (D15 w DECISIONS.md). Licencja: src/fonts/atkinson/OFL.txt. */
 @font-face {
   font-family: 'Atkinson Hyperlegible Next';
   src: url('./fonts/atkinson/AtkinsonHyperlegibleNext[wght].ttf') format('truetype');
@@ -10,48 +10,48 @@
   font-display: swap;
 }
 
-@font-face {
-  font-family: 'Brygada 1918';
-  src: url('./fonts/brygada/Brygada1918[wght].ttf') format('truetype');
-  font-weight: 400 700;
-  font-display: swap;
-}
-
-/* Two zones, see DESIGN.md. Strefa eUsługi: ink, muted, paper, line, action, error.
-   Warsztat: blat, atrament, szary, obrys i zakreślacz. Kontrast zmierzony (PROGRESS.web.md, F0). */
+/* Kierunek „Jasny urząd” (DESIGN.md). Jedna paleta dla warsztatu i podglądu eUsługi. */
 @theme {
-  --color-ink: #1a1a1a;
-  --color-muted: #4a4a4a;
+  --color-ink: #1a2130;
+  --color-muted: #4d5768;
   --color-paper: #ffffff;
-  --color-line: #6b6b6b;
-  --color-action: #0b5cad;
+  /* Szare pole tylko tam, gdzie obszar ma zadanie: strefa pliku, oczekiwanie, nagłówek panelu. */
+  --color-area: #f3f5f8;
+  /* Linie porządkujące. Granice kontrolek rysuje muted albo edge. */
+  --color-line: #d5dbe3;
+  --color-edge: #8a95a8;
+  /* Pasek usługi, nagłówki, etap bieżący i element wybrany. */
+  --color-navy: #10284f;
+  --color-navy-soft: #c9d3e6;
+  --color-action: #0052a5;
+  --color-action-hover: #00438a;
+  --color-action-deep: #002d5e;
   --color-action-ink: #ffffff;
-  --color-error: #b00020;
+  --color-error: #c3272f;
 
-  --color-blat: #e9eae6;
-  --color-atrament: #16181b;
-  --color-szary: #4a4f55;
-  --color-obrys: #6a7077;
-  /* Tylko wypełnienie pod ciemnym tekstem. Nigdy obrys fokusu, przycisk ani pasy. */
-  --color-zakreslacz: #ffd60a;
+  /* Dwa cienie w całej aplikacji: kartka papieru i dolna krawędź przycisku głównego. */
+  --shadow-sheet: 0 1px 2px rgb(16 40 79 / 0.1), 0 6px 16px -6px rgb(16 40 79 / 0.18);
+  --shadow-button: 0 2px 0 #002d5e;
 
-  --font-warsztat: 'Atkinson Hyperlegible Next', system-ui, sans-serif;
-  --font-tytul: 'Brygada 1918', Georgia, serif;
+  --radius-control: 4px;
+  --radius-panel: 6px;
+
+  --font-sans: 'Atkinson Hyperlegible Next', system-ui, sans-serif;
 }
 
 @layer base {
   body {
     margin: 0;
-    background: var(--color-blat);
-    color: var(--color-atrament);
-    font-family: var(--font-warsztat);
+    background: var(--color-paper);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
     font-size: 1.125rem;
-    line-height: 1.5;
+    line-height: 1.75rem;
   }
 
   /* Never remove this ring: the keyboard test in tests/e2e/a11y.spec.ts checks it. */
   :focus-visible {
-    outline: 3px solid var(--color-ink);
-    outline-offset: 3px;
+    outline: 3px solid var(--color-navy);
+    outline-offset: 2px;
   }
 }

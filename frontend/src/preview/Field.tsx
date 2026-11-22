@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { AlertIcon, ChevronIcon, LockIcon } from '../components/icons.tsx'
 import { DICTIONARIES } from '../data/demo.ts'
 import type { CoiField } from '../types.ts'
 import type { Answer } from './answers.ts'
@@ -30,13 +31,26 @@ const AUTOCOMPLETE: Record<string, string> = {
   'MLPZ.email': 'email',
 }
 
+// Podgląd nie jest połączony z rejestrem: wartości pochodzą z src/data/demo.ts i podpowiedź
+// mówi to wprost, żeby nikt nie wziął ich za prawdziwą integrację.
 function hintFor(field: CoiField): string | null {
-  if (field.readOnly) {
-    return field.defaultValueType === 'EXTERNAL_SYSTEM' ? 'Dane z rejestru. Nie możesz ich zmienić.' : 'Tego pola nie możesz zmienić.'
-  }
+  const fromRegistry = field.defaultValueType === 'EXTERNAL_SYSTEM'
+  if (field.readOnly) return fromRegistry ? 'Przykładowe dane z rejestru. Nie możesz ich zmienić.' : 'Tego pola nie możesz zmienić.'
   const names = validatorNames(field)
   const format = Object.keys(FORMAT_HINTS).find((name) => names.includes(name))
-  return format ? FORMAT_HINTS[format] : null
+  const registry = fromRegistry ? 'Przykładowe dane z rejestru. Możesz je zmienić.' : null
+  if (format && registry) return `${FORMAT_HINTS[format]}. ${registry}`
+  return format ? FORMAT_HINTS[format] : registry
+}
+
+type FieldSize = 'kod' | 'numer'
+
+/** Krótkie pole dla krótkiej wartości: kod pocztowy i numery o stałej długości. */
+function sizeOf(field: CoiField): FieldSize | undefined {
+  const names = validatorNames(field)
+  if (names.includes('ZIP_CODE') || field.defaultValue === 'MLPZ.postCode') return 'kod'
+  if (['PESEL', 'NIP', 'REGON'].some((name) => names.includes(name)) || field.defaultValue === 'MLPZ.pesel') return 'numer'
+  return undefined
 }
 
 function inputProps(field: CoiField) {
@@ -91,14 +105,17 @@ export function Field({ field, answer, error, onChange }: Props) {
       )}
       {error && (
         <p className="eu-error" id={`${id}-blad`}>
-          <span className="eu-sr">Błąd: </span>
-          {error}
+          <AlertIcon />
+          <span>
+            <span className="eu-sr">Błąd: </span>
+            {error}
+          </span>
         </p>
       )}
     </>
   )
   const wrap = (body: ReactNode) => (
-    <div className="eu-field" data-invalid={invalid}>
+    <div className="eu-field" data-invalid={invalid} data-size={sizeOf(field)}>
       {body}
     </div>
   )
@@ -192,14 +209,17 @@ export function Field({ field, answer, error, onChange }: Props) {
       <>
         {label}
         {notes}
-        <select {...shared} value={value} onChange={(event) => onChange(event.target.value ? [event.target.value] : [])}>
-          <option value="">Wybierz</option>
-          {names.map((name) => (
-            <option key={name} value={name}>
-              {name}
-            </option>
-          ))}
-        </select>
+        <div className="eu-select">
+          <select {...shared} value={value} onChange={(event) => onChange(event.target.value ? [event.target.value] : [])}>
+            <option value="">Wybierz</option>
+            {names.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+          <ChevronIcon />
+        </div>
       </>,
     )
   }
@@ -253,11 +273,27 @@ export function Field({ field, answer, error, onChange }: Props) {
     )
   }
 
+  const input = (
+    <input
+      {...shared}
+      {...inputProps(field)}
+      value={field.type === 'SELECT' ? list.join(', ') : text}
+      readOnly={field.readOnly}
+      onChange={(event) => onChange(event.target.value)}
+    />
+  )
   return wrap(
     <>
       {label}
       {notes}
-      <input {...shared} {...inputProps(field)} value={field.type === 'SELECT' ? list.join(', ') : text} readOnly={field.readOnly} onChange={(event) => onChange(event.target.value)} />
+      {field.readOnly ? (
+        <div className="eu-locked">
+          <LockIcon />
+          {input}
+        </div>
+      ) : (
+        input
+      )}
     </>,
   )
 }
