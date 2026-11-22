@@ -190,6 +190,116 @@ jak DOCX w K2.1. `openpyxl` i `odfpy` z DELEGACJA niepotrzebne, więc `requireme
   72 MB (39 MB po samym imporcie). Przed limitami recenzja zmierzyła 416–867 MB dla jednego
   długiego wiersza, głębokiego zagnieżdżenia i komórki z milionem elementów.
 
+K2-FINAL (Mikołaj, decyzja lidera 2026-11-21: jedno zadanie zamiast K2.5–K2.7):
+
+| What         | Why                                                                              | Licence      |
+| ------------ | -------------------------------------------------------------------------------- | ------------ |
+| olefile 0.47 | kontener OLE2 binarnego DOC (7 z 9 plików `.doc` COI); czysty Python, bez zależności | BSD-2-Clause |
+
+Bez innych nowych zależności. Leptonica (BSD-2-Clause) jest już w obrazie API jako biblioteka
+Tesseracta (`libleptonica6` z pakietu `tesseract-ocr`, M1.3); wołamy ją przez `ctypes`.
+
+- **Piaskownica.** `extract` czyta plik w osobnym procesie (`python -m app.extract.worker`), nie w
+  wątku żądania. Limit czasu 60 s, limit przestrzeni adresowej 1,5 GiB i limit CPU 60 s na proces,
+  dziedziczone przez Tesseracta. Po limicie czasu albo sygnale ginie cała grupa procesów. Wątku
+  Pythona nie da się przerwać, więc sam limit czasu w wątku zostawiałby odczyt w tle (recenzja
+  K2.3). Proces odczytu dostaje tylko `PATH`, `LD_LIBRARY_PATH`, `TESSDATA_PREFIX`, `LANG`, `LC_ALL`
+  i `PYTHONDONTWRITEBYTECODE`: bez `JWT_SECRET` i `LLM_API_KEY`. Wymaga Linuksa (obraz API).
+  Najwyżej 2 odczyty naraz (semafor w `sandbox.read`), kolejne żądania czekają do 60 s, potem 500
+  „Coś poszło nie tak. Spróbuj ponownie.” z ostrzeżeniem w logu: każdy odczyt to proces do 1,5 GiB
+  i do 4 procesów Tesseracta z tym samym limitem, a API dzieli maszynę z modelem.
+  Ze stderr procesu API trzyma tylko ostatnie 300 bajtów, a proces odczytu wyłącza logowanie
+  bibliotek: PDF 26 kB z zapętlonym formularzem dawał 54 MB ostrzeżeń pypdf w pamięci API
+  (recenzja K2-FINAL, nr 2). Jedno wywołanie Tesseracta ma limit 30 s, połowę limitu odczytu.
+- **Kody.** Zły plik, limit czasu, limit pamięci i sygnał to 400 „Nie udało się odczytać treści
+  pliku.”. Brak Tesseracta, brak danych języka z `OCR_LANG`, brak Leptoniki przy obrazie wyższym
+  niż 32767 pikseli, brak `olefile` i proces, który nie oddał wyniku, to 500 z powodem w logu.
+  Tesseract zgłasza brak języka na stderr („Failed loading language”), także z kodem 0, gdy
+  wczytał inny z podanych języków; inne błędy Tesseracta to wina pliku, czyli 400. Nieprzewidziany wyjątek czytnika to 400 i ostrzeżenie w logu z typem błędu i miejscem
+  w kodzie, bez komunikatu wyjątku, bo ten mógłby cytować dokument (D3).
+- **DOC.** Word 97–2003: tablica kawałków (Clx), długości historii z FIB, pola tekstowe. Tekst
+  główny, potem przypisy, nagłówki i stopki (raz). Kody pól odpadają, zostaje ich wynik. Word 6/95
+  i pliki zaszyfrowane dają 400. Formatowania akapitów nie czytamy: wiersz tabeli kończy podwójny
+  znak komórki, więc pusta komórka w środku wiersza łamie go wcześniej (tekst zostaje cały), a tekst
+  ukryty i skreślony w trybie zmian też wchodzi. Żaden z 7 plików DOC z COI nie ma tabeli.
+- **Pola tekstowe (DOC i DOCX).** Foldery 2 i 8 to formularze przerobione z PDF: każdy fragment
+  wiersza jest osobnym polem, a kolejność pól w pliku nie jest kolejnością czytania (folder 8 w DOC:
+  od dołu strony). Pola jednego akapitu układamy po położeniu: z góry na dół, a pola o górnej
+  krawędzi w obrębie 90 twipów tworzą wiersz od lewej. DOCX zapisuje pole dwa razy (`mc:Choice`
+  i `mc:Fallback`); przed K2-FINAL czytnik oddawał oba, stąd 31 tys. znaków dla folderu 8. Teraz
+  15 784 znaki, tyle samo z DOC i z DOCX.
+- **DOCX.** XML czytany strumieniowo, blok po bloku. Dochodzą przypisy, nagłówki i stopki oraz
+  przestrzeń nazw Strict. Obrazy z `word/media`, do których odwołuje się treść (PNG i JPG, co
+  najmniej 32 piksele boku i 20 tys. pikseli, najwyżej 20 sztuk i 20 MB każdy), idą do OCR. Tekst
+  staje w miejscu obrazu. Odpadają wiersze, które dokument już zawiera (porównanie po literach
+  i cyfrach), pojedyncze znaki i wynik krótszy niż 8 znaków (logo). Ten sam obraz czytamy raz.
+  Obrazy mają wspólny budżet 400 mln pikseli jak w PDF; obraz ponad budżet pomijamy z ostrzeżeniem.
+  `mc:AlternateContent` między akapitami i w komórce tabeli daje jedną gałąź, jak w akapicie.
+  Znaki sterujące (C1, `&#13;`) zamieniamy jak w PDF i arkuszach.
+- **PDF.** Najwyżej 100 stron i 1 mln znaków. Strona z mniej niż 20 literami i cyframi w warstwie
+  tekstowej idzie do OCR: obrazy narysowane na stronie (operator `Do`, także przez Form XObject),
+  od góry do dołu, najwyżej 10 na stronę, 40 i 400 mln pikseli na dokument. JPEG trafia do
+  Tesseracta bez zmian, faks CCITT z nagłówkiem TIFF, raster (szarość, RGB, paleta, maska) jako PNG.
+  Szukanie obrazów pomija formularz, który rysuje siebie albo przodka, parsuje każdy formularz raz
+  i przegląda najwyżej 200 tys. operacji rysowania na dokument: PDF 24 kB z formularzem rysującym
+  się 10 tys. razy zajmował cały limit 60 s (recenzja K2-FINAL, D2), teraz ułamek sekundy.
+  Formularze zagnieżdżone bez cyklu zatrzymuje ten sam budżet, a `extract_text` z pypdf 7.1.1 ma
+  własny limit 5000 wywołań formularzy (sonda: 4 poziomy po 30 wywołań, 1,6 s). Raster w Flate
+  pypdf 7.1.1 dekoduje najwyżej do 75 MB, czyli ok. 25 mln pikseli RGB albo 75 mln w szarości.
+  Większy raster daje ostrzeżenie o nieobsługiwanym kodowaniu, jak obraz ponad limit pikseli.
+  Skanery zapisują skany jako JPEG albo faks, które idą do OCR bez dekodowania.
+- **PDF bez renderera.** Wyjmowanie obrazów przez `pypdf` obsługuje zwykłe skany, ale nie stronę
+  z tekstem zamienionym na krzywe, skan JBIG2 (dekoder `jbig2dec` jest na AGPL), JPEG 2000, obraz
+  wbudowany w strumień strony ani obrót strony (`/Rotate`). Taka strona zostaje pusta z ostrzeżeniem,
+  a dokument bez żadnego tekstu daje 400. Pełną obsługę dałby renderer `pypdfium2` (Apache-2.0 albo
+  BSD-3-Clause, PDFium na BSD-3-Clause, w kole binarnym biblioteki na licencjach FreeType, libjpeg
+  i podobnych). To nowa zależność binarna, więc decyzja lidera; nie instalowaliśmy jej i nie
+  sprawdzaliśmy. PyMuPDF, Poppler i Ghostscript zostają zabronione.
+- **Wysoki skan.** Tesseract odrzuca obraz o boku ponad 32767 pikseli (folder 9: 1654 × 37424).
+  Obraz wyższy niż dwie kartki A4 swojej szerokości tniemy na pasy po dwie kartki z zakładką
+  2 × 103 piksele (pół cala przy tej szerokości). Pasy czytają do 4 procesów Tesseracta naraz, każdy
+  na jednym wątku. Wiersz niższy niż zakładka jest cały w co najmniej jednym pasie. Ramki
+  z Tesseracta pasują do siebie, gdy wysokości różnią się najwyżej dwukrotnie, środki w pionie
+  leżą nie dalej niż ćwierć niższej ramki, a w poziomie mają wspólną ponad połowę węższej. Każdy
+  wiersz łączymy tylko z najbliższą pasującą kopią z drugiego pasa; z grupy bierzemy kopię dalszą
+  od krawędzi swojego pasa. Wiersz widziany w jednym pasie zostaje, chyba że jego ramka dochodzi
+  do krawędzi pasa (bliżej niż 1/20 zakładki): to strzęp uciętego wiersza. Wyjątek: w gęstym,
+  krzywo zeskanowanym tekście taki wiersz może trafić do grupy sąsiada i zniknąć z nią (model
+  recenzenta z wierszami gubionymi przez Tesseracta w 5% przypadków: ok. 3 na 1000). Poprzednie scalanie
+  (granica w wolnym odstępie, bez niego środek wiersza) przy stykających się wierszach i ramkach
+  przesuniętych o 1 piksel gubiło albo dublowało wiersz (recenzja K2-FINAL, nr 4; 16 ze 150
+  przypadków testu). Pierwsza wersja poprawki łączyła kopie po samym pokryciu w pionie, więc
+  pieczęć, linia tabeli albo krzywy skan spinały kilka wierszy w jedną grupę i ginął wiersz
+  (druga recenzja, nr 1). Granica metody: ramka tego samego wiersza przesunięta między pasami
+  o mniej niż ćwierć jego wysokości i mniej niż pół odstępu między wierszami. Pasy to wycinki tego
+  samego obrazu, więc przesunięcie to 0–2 piksele. Model losowy (12 000 przypadków, wiersze
+  14–120 pikseli, 30% krzywych skanów z ramką do trzech odstępów): 0 błędów. Prawdziwy OCR:
+  cztery kartki skanu z folderu 9 w dwóch pasach z krawędziami zakładki w wierszach dają te same
+  słowa wierszy z zakładki co odczyt całości. Limit to 100 mln pikseli na obraz, sprawdzany
+  z nagłówka pliku przed dekodowaniem.
+- **Pomiar OCR.** Folder 8 (6 kartek): pasy 7,7 s i 99,6% słów z PDF, cały obraz 15,9 s i 99,3%.
+  Folder 9 (16 kartek): 6–8 s i 94,8% słów; odczyt kartka po kartce daje 94,6%, więc braki to
+  błędy OCR drobnego druku, a nie granice pasów.
+- **Pomiar w obrazie API** (Python 3.14.10, Tesseract 5.5.0, bez roota, system plików tylko do
+  odczytu, 71 plików COI, 71 odczytanych, kod po obu recenzjach): DOC 0,56–1,09 s, DOCX
+  0,54–3,38 s, XLSX 0,63–1,24 s, ODS 0,55–1,24 s, PDF 0,71–1,18 s, JPG 1,15–7,02 s, PNG
+  1,20–7,75 s. Start procesu odczytu to ok. 0,5 s z każdego czasu. Najmniejszy limit pamięci, przy którym plik się czyta: PNG z folderu 9
+  512 MB, skany JPG 192 MB, formaty tekstowe 128 MB.
+- **Wrogi PDF z recenzji K2.3** (2,3 MB, 40 stron po 60 MB spacji, ponad 120 s): w kontenerze 400
+  po 65 s, `/health` odpowiada, po żądaniu nie zostaje żaden proces. PDF 24 kB ze 100 stronami
+  i formularzem rysującym siebie 10 tys. razy: 400 po 10 s (wcześniej 60 s), pamięć API 46 MB przed
+  i po żądaniu.
+- **ZIP.** DOCX, XLSX i ODS przyjmują tylko wpisy bez kompresji i deflate. Dla bzip2 i lzma `zipfile`
+  rozpakowuje cały blok naraz, więc limit odczytu nie chroniłby pamięci. DOCX ma wspólny limit 64 MB
+  rozpakowanych bajtów (XML, relacje, obrazy), 16 MB na jedną część XML, 100 poziomów zagnieżdżenia
+  i 500 tys. elementów w bloku. Nieznane albo wielobajtowe kodowanie XML daje 400 (wcześniej 500).
+- **Poza zakresem.** `ExtractedDocument.images` zostaje puste: model dostaje tekst. PDF z AES dalej
+  daje 400 (zależność `cryptography`, decyzja z wpisu pypdf). OCR obrazów osadzonych nie ma
+  terminu dla całego dokumentu: PDF z 40 skanami albo DOCX z 20 skanami na wolnej maszynie może
+  przekroczyć 60 s i dostać 400, choć ma warstwę tekstową. Liczba procesów Tesseracta zależy od
+  `os.cpu_count()`, które nie widzi limitu CPU kontenera. Obraz w DOCX większy niż 100 mln pikseli
+  zużywa budżet pikseli dokumentu i odpada w OCR bez ostrzeżenia.
+
 ## Event: whole project
 
 - **D7 – odpowiedzialność.** Lider rozstrzyga kontrakty, zakres i integrację. `SPEC.md` określa kontrakty, `DECISIONS.md` zapisuje decyzje, `DELEGACJA.md` wyznacza wykonawców, a `PROGRESS*.md` rejestruje postęp i wyniki bramek.

@@ -150,6 +150,28 @@ Krok K2.4 (Mikołaj, `mikolaj/k2-reszta` od `65c0259`): tekst komórek XLSX i OD
 - `backend/tests/test_extract.py`: syntetyczne XLSX i ODS, pliki uszkodzone, bomba powtórzeń, próbki COI 1 i 5; ręcznie foldery 2–4, 6–9.
 - Dowód: RED każdego testu, mutacje, `bash scripts/gate.sh api -rs`.
 
+Krok K2-FINAL (Mikołaj, `mikolaj/k2-final` od `1c3ebd2`): domknięcie odczytu, jedno zadanie zamiast K2.5–K2.7 (decyzja lidera).
+
+- A `extract/doc.py`: binarny DOC przez `olefile` 0.47 (BSD-2-Clause) i własny odczyt tablicy kawałków Word; tekst główny, przypisy i pola tekstowe.
+- B `extract/ocr.py`, `extract/images.py`: obraz wyższy niż limit Tesseracta dzielony na pasy z zakładką; wiersze z granicy pasów trafiają do wyniku raz.
+- C `extract/sandbox.py`, `extract/worker.py`: odczyt w osobnym procesie z limitem czasu, pamięci i CPU; po limicie ginie cała grupa procesów. Limity stron PDF, ZIP w DOCX i pikseli.
+- D `extract/pdf.py`: warstwa tekstowa jak dotąd; strona bez użytecznego tekstu → OCR obrazów osadzonych, wyjętych przez `pypdf`, bez renderera.
+- E `extract/docx.py`: pola tekstowe bez dubli (Choice i Fallback), obrazy z `word/media` → OCR z limitem liczby i rozmiaru, bez powtórzeń tekstu z `document.xml`.
+- Testy: `test_extract.py` i nowe `test_extract_*.py`; RED/GREEN, mutacje, pliki COI z folderów 1–9.
+- Dowód: `bash scripts/gate.sh api -rs` z 0 pominiętych, obraz Docker na Pythonie 3.14, `POST /api/forms` z `LLM_FIXTURE`, niezależna recenzja, macierz formatów z czasami.
+- Poza obszarem (Requests): `olefile==0.47` w `backend/requirements.txt`.
+
+Krok K2-FINAL, poprawki po recenzji (`REVIEW.md`: 2, 3, 4, 5b, D1–D4), każda z testem widzianym na czerwono:
+
+- 2 `sandbox.py`: stderr procesu odczytu czytany z ograniczonym ogonem, semafor równoległych odczytów; `worker.py` bez logowania bibliotek.
+- 3 `ocr.py`, `worker.py`: brak danych języka Tesseracta i brak Leptoniki przy wysokim skanie → 500 z powodem w logu API.
+- 4 `ocr.py`: scalanie pasów przez dopasowanie ramek wierszy (pion i poziom) z obu pasów; test z prawdziwym OCR cięcia w tekście.
+- 5b `ocr.py`: limit jednego Tesseracta wyraźnie niższy od limitu piaskownicy. D3: komentarz `_STRIP_PIXELS` zgodny z `strip_bands`.
+- D1 `docx.py`: `mc:AlternateContent` na poziomie bloku oddaje jedną gałąź. D4: tekst DOCX przez `clean_text`.
+- D2 `pdf.py`: `_collect` ze strażnikiem cykli, pamięcią przetworzonych formularzy i budżetem operacji.
+- Dowód: bramka z 0 pominiętych, mutacje w `mutate.py`, testy i `POST /api/forms` w obrazie Docker (Python 3.14).
+- Druga recenzja: `_same` (wysokość, środki) i łączenie z najbliższą kopią; budżet pikseli DOCX; limit czekania na odczyt 60 s.
+
 ## Requests
 
 (one line per change you need from another area: who asks, what, why)
@@ -181,6 +203,10 @@ Krok K2.4 (Mikołaj, `mikolaj/k2-reszta` od `65c0259`): tekst komórek XLSX i OD
 - Marcin → lider (`DELEGACJA.md`, rozdz. 5): dopisać `LLM_CONTEXT_TOKENS` | `32768` | kontekst modelu, ten sam dla serwera i budżetu analizy (min. 8192).
 - Mikołaj → Marcin (K2.4, `backend/tests/test_api.py`): docstring `test_format_without_reader_yet_is_400` jest nieaktualny, bo XLSX ma już czytnik. Test dalej przechodzi, bo próbka `XLSX` z `samples.py` nie ma arkusza. Proponuję opis „XLSX bez arkusza → 400” albo prawdziwy XLSX → 200.
 - Mikołaj → lider (`.gitignore`): wzorzec `materialy/` pasuje tylko do katalogu, a w worktree `materialy` to dowiązanie do materiałów COI. „Stage all” w GUI doda je do commita (D5). Proponuję wzorzec `materialy` bez ukośnika.
+- Mikołaj → Marcin (K2-FINAL, `backend/requirements.txt`): dopisać `olefile==0.47` (BSD-2-Clause, decyzja lidera, wpis w `DECISIONS.md`). Bez tej linii binarny DOC daje 500 z wpisem „brak biblioteki olefile”; pozostałe formaty działają. `Dockerfile` bez zmian: Leptonica jest już w obrazie z pakietem `tesseract-ocr`.
+- Mikołaj → Marcin (K2-FINAL, `README.md`): `extract` czyta plik w osobnym procesie z limitami (60 s, 1,5 GiB, 100 stron PDF, 100 mln pikseli obrazu); po limicie odpowiedź to 400. Najwyżej 2 odczyty naraz; żądanie, które czeka na odczyt ponad 60 s, dostaje 500 „Coś poszło nie tak. Spróbuj ponownie.”. Start procesu dodaje ok. 0,5 s do każdego żądania.
+- Mikołaj → Marcin (K2-FINAL, `main.py`): zmień `def health()` na `async def health()`. Synchroniczna trasa czeka w tej samej puli 40 wątków co `process_file`; przy zalewie ciężkich plików `/health` odpowiada dopiero po zwolnieniu wątku i healthcheck w compose może uznać API za martwe (druga recenzja K2-FINAL, nr 4).
+- Mikołaj → lider (K2-FINAL, `DELEGACJA.md` rozdz. 3 i 6): K2 czyta DOC przez `olefile`, a XLSX, ODS i DOCX bez `openpyxl`, `odfpy` i `python-docx`. Renderer PDF (`pypdfium2`) to otwarta decyzja z `DECISIONS.md`: bez niego nie czytamy JBIG2, JPEG 2000 ani tekstu zamienionego na krzywe.
 
 ## Log
 
@@ -226,3 +252,5 @@ Krok K2.4 (Mikołaj, `mikolaj/k2-reszta` od `65c0259`): tekst komórek XLSX i OD
 - M1.6: done README: przepływ, wymagania (x86 bez GPU, dysk), obrazy (api, ollama, web; lustro mirror.gcr.io), uruchomienie (compose, `pull_model.sh`, `--build`, `down` bez `-v`), model lokalny albo otwarty przez API (Eden AI), tabela konfiguracji z `env.example`, REST API z `curl` (z JWT i bez) i wszystkimi kodami błędów z SPEC, `generate_forms.py`, praca lokalna; teksty błędów sprawdzone z kodem / next `LLM_CONTEXT_TOKENS` w README po scaleniu gałęzi / blocker: `ADD_VALIDATORS` z `.env` nie działa (generator czyta stałą `app.generator.form.ADD_VALIDATORS`, Paweł).
 - LLM_CONTEXT_TOKENS: done `Settings.llm_context_tokens` (domyślnie 32768, min. 8192, błąd z nazwą zmiennej), compose: `api` dostaje `LLM_CONTEXT_TOKENS`, `ollama` bierze z niej `OLLAMA_CONTEXT_LENGTH` (osobna zmienna usunięta), `env.example`; pomiar `qwen3.5:4b` 16384 → 32768: 3,7 → 4,2 GB; 9 nowych testów czerwonych przed zmianą, 4/4 mutacje wykryte / next Mikołaj przełącza `CONTEXT_TOKENS` w K3 na ustawienie (Request) / blocker brak.
 - K2.4 (`mikolaj/k2-reszta` od `65c0259`): done XLSX i ODS bez nowej zależności (`extract/sheets.py`, `extract/common.py`); 16/16 plików COI (foldery 1–9) z tekstem, XLSX = ODS w 6/7 folderów (folder 3: różnica w samych plikach), API z `LLM_FIXTURE` 16/16 → 200, linter 0 błędów. Recenzja `reviewer`: FIX, naniesione 1–3 i 5 (kodowanie XML → 400, limity głębokości, elementów komórki i 8 MB XML, komórka zamiast wiersza w pamięci, części OPC bez wielkości liter i z `%`); 4 to Request do lidera. 56/56 mutacji wykrytych, pokrycie `sheets.py` i `common.py` 100% linii i gałęzi; `bash scripts/gate.sh api -rs` → 745 passed, 0 pominiętych / next K2.5 binarny DOC (decyzja: `olefile` BSD-2-Clause przez Request do Marcina) / blocker brak; defekt poza krokiem: DOCX z nieznanym kodowaniem XML → 500 (`LookupError`), do kroku limitów.
+- K2-FINAL (`mikolaj/k2-final` od `1c3ebd2`, bez commita): done binarny DOC (`olefile` 0.47 + własny odczyt Clx, historii i pól tekstowych), pasy dla wysokich skanów (folder 9: 1654 × 37424), odczyt w osobnym procesie z limitem czasu, pamięci i CPU, OCR obrazów osadzonych w PDF i DOCX, pola tekstowe DOCX bez dubli, przypisy i stopki DOCX; 71/71 plików COI odczytanych w obrazie API (Python 3.14.10, Tesseract 5.5.0), `POST /api/forms` z `LLM_FIXTURE` w kontenerze: 200 dla 8 formatów, 400 dla uszkodzonego PDF i dla PDF 2,3 MB po 64 s; `bash scripts/gate.sh api -rs` z Tesseractem na PATH → 1012 passed, 0 pominiętych, `GATE: PASS (api)`; w obrazie API testy odczytu 365 passed; mutacje 105/105 wykrytych na końcowym kodzie (jedna wcześniejsza wskazała warunek bez znaczenia, usunięty z `ocr.py`); niezależna recenzja całego diffu (`reviewer`): FIX, zamknięte 5a, otwarte 2, 3, 4, 5b i drobne D1–D4 (`REVIEW.md`) / next poprawki z recenzji z testami RED/GREEN, potem bramka, obraz Docker i commit człowieka; `olefile` w `requirements.txt` (Request) / blocker: werdykt K2 PARTIAL do czasu poprawek z recenzji; bez `olefile` w obrazie DOC daje 500; bez Tesseracta na PATH 5 testów z prawdziwym OCR jest pomijanych.
+- K2-FINAL po recenzjach (bez commita): done 2, 3, 4, 5b, D1–D4 z `REVIEW.md` (każde odtworzone, potem test widziany na czerwono): ogon stderr 300 B i ciche biblioteki w procesie odczytu, 2 odczyty naraz z czekaniem do 60 s, brak danych języka i Leptoniki → 500 z powodem, scalanie pasów po ramkach z najbliższą kopią, OCR jednego obrazu 30 s, jedna gałąź blokowego `mc:AlternateContent`, `clean_text` w DOCX, strażnik cykli i 200 tys. operacji w PDF, budżet pikseli DOCX; druga recenzja `reviewer`: FIX (pieczęcie i krzywe skany w scalaniu) → naprawione → SHIP; `bash scripts/gate.sh api -rs` z Tesseractem → 1213 passed, 0 pominiętych, `GATE: PASS (api)`; obraz Docker (Python 3.14.10, Tesseract 5.5.0) 566 passed, `POST /api/forms` z `LLM_FIXTURE` 200 dla 19 plików z folderów 1, 5, 8, 9, macierz 71/71; mutacje 138/138 (136 w pełnym przebiegu, 2 domknięte testami); model scalania 12 000 przypadków bez błędu / next commit człowieka i PR / blocker: `olefile==0.47` w `requirements.txt` (Marcin) warunkiem scalenia; bez Tesseracta na PATH 7 testów z prawdziwym OCR jest pomijanych.

@@ -1,21 +1,26 @@
+import shutil
 import subprocess
 import tracemalloc
+import zlib
 from collections.abc import Callable
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import Mock
-from zipfile import ZipFile
+from zipfile import ZIP_BZIP2, ZIP_DEFLATED, ZIP_LZMA, ZipFile
 
 import pytest
+from extract_builders import PdfImage, jpeg, png, png_pixels, scanned_pdf
 from pypdf import PdfWriter
-from samples import JPG, PDF, PNG
+from samples import PDF
 
-import app.extract as extract_module
-from app.config import Settings
-from app.errors import AppError, ExtractionError
-from app.extract import extract
+from app.errors import ExtractionError
+from app.extract import docx as docx_reader
+from app.extract import extract as extract_in_child_process
+from app.extract import images, ocr
+from app.extract import pdf as pdf_reader
+from app.extract.readers import read_document
 from app.files import validate_upload
-from app.models import SourceFormat
+from app.models import ExtractedDocument, SourceFormat
 
 MATERIALS = Path(__file__).resolve().parents[2] / "materialy"
 WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -38,6 +43,15 @@ ODS_OPEN = (
 )
 ODS_CLOSE = "</office:spreadsheet></office:body></office:document-content>"
 UNREADABLE = "Nie udało się odczytać treści pliku."
+MC_NS = "http://schemas.openxmlformats.org/markup-compatibility/2006"
+DRAWING_NS = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+SHAPE_NS = "http://schemas.microsoft.com/office/word/2010/wordprocessingShape"
+GRAPHIC_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
+VML_NS = "urn:schemas-microsoft-com:vml"
+STRICT_WORD_NS = "http://purl.oclc.org/ooxml/wordprocessingml/main"
+needs_ocr_engine = pytest.mark.skipif(
+    shutil.which("tesseract") is None or not images.can_cut(), reason="brak programu Tesseract albo biblioteki Leptonica"
+)
 # Szczyt odczytu w test_sheet_memory_does_not_grow_with_rows_or_cells: zmierzone 2,8 MB, z czego
 # 2,6 MB to sam XML, i 1,2 MB. Trzymanie wszystkich wierszy albo całego wiersza dawało 8,8 MB i więcej.
 MEMORY_LIMIT_BYTES = 5 * 1024 * 1024
@@ -63,12 +77,83 @@ PDF_GLYPHS = {
 PDF_CODES = {char: 128 + index for index, char in enumerate(PDF_GLYPHS)}
 
 
+def extract(data: bytes, ext: str) -> ExtractedDocument:
+    """Odczyt w procesie testu, bez piaskownicy: tylko tu działają atrapy OCR i podmienione limity."""
+    reading = read_document(data, ext, language="pol")
+    return ExtractedDocument(
+        source_format=SourceFormat(ext), text=reading.text, ocr_used=reading.ocr_used, warnings=reading.warnings
+    )
+
+
+def document_xml(body: str, *, ns: str = WORD_NS) -> str:
+    namespaces = f'xmlns:w="{ns}" xmlns:mc="{MC_NS}" xmlns:wp="{DRAWING_NS}" xmlns:wps="{SHAPE_NS}"'
+    namespaces += f' xmlns:a="{GRAPHIC_NS}" xmlns:v="{VML_NS}" xmlns:r="{OFFICE_REL_NS}"'
+    return f"<w:document {namespaces}><w:body>{body}</w:body></w:document>"
+
+
 def docx(body: str, *, entry: str = "word/document.xml", trailing: str = "") -> bytes:
     buffer = BytesIO()
     with ZipFile(buffer, "w") as archive:
-        xml = f'<w:document xmlns:w="{WORD_NS}"><w:body>{body}</w:body></w:document>'
-        archive.writestr(entry, xml + trailing)
+        archive.writestr(entry, document_xml(body) + trailing)
     return buffer.getvalue()
+
+
+def docx_package(
+    body: str,
+    *,
+    media: dict[str, bytes] | None = None,
+    targets: dict[str, str] | None = None,
+    parts: dict[str, str] | None = None,
+    compression: int = ZIP_DEFLATED,
+    ns: str = WORD_NS,
+) -> bytes:
+    """DOCX z obrazami i dodatkowymi częściami.
+
+    `media` to nazwa pliku -> bajty; relacja rId{n} wskazuje n-ty obraz. `targets` dopisuje albo
+    podmienia relacje (identyfikator -> cel), a cel zaczynający się od http jest zewnętrzny.
+    """
+    relationships = {f"rId{number}": f"media/{name}" for number, name in enumerate(media or {}, start=1)}
+    relationships.update(targets or {})
+    rows = "".join(
+        f'<Relationship Id="{identifier}" Type="{OFFICE_REL_NS}/image" Target="{target}"'
+        + (' TargetMode="External"/>' if target.startswith("http") else "/>")
+        for identifier, target in relationships.items()
+    )
+    buffer = BytesIO()
+    with ZipFile(buffer, "w", compression) as archive:
+        archive.writestr("word/document.xml", document_xml(body, ns=ns))
+        archive.writestr("word/_rels/document.xml.rels", f'<Relationships xmlns="{PACKAGE_REL_NS}">{rows}</Relationships>')
+        for name, content in (media or {}).items():
+            archive.writestr(f"word/media/{name}", content)
+        for name, content in (parts or {}).items():
+            archive.writestr(name, content)
+    return buffer.getvalue()
+
+
+def paragraph(text: str) -> str:
+    return f"<w:p><w:r><w:t>{text}</w:t></w:r></w:p>"
+
+
+def picture(relationship: str) -> str:
+    """Akapit z obrazem wstawionym w tekście."""
+    blip = f'<a:graphic><a:graphicData><a:blip r:embed="{relationship}"/></a:graphicData></a:graphic>'
+    return f"<w:p><w:r><w:drawing><wp:inline>{blip}</wp:inline></w:drawing></w:r></w:p>"
+
+
+def text_box(content: str, *, top: int | None = None, left: int = 0, fallback: str | None = None) -> str:
+    """Pole tekstowe tak, jak zapisuje je Word: kształt w mc:Choice i jego kopia VML w mc:Fallback."""
+    position = ""
+    if top is not None:
+        position = f"<wp:positionH><wp:posOffset>{left}</wp:posOffset></wp:positionH>"
+        position += f"<wp:positionV><wp:posOffset>{top}</wp:posOffset></wp:positionV>"
+    copy = content if fallback is None else fallback
+    return (
+        '<mc:AlternateContent><mc:Choice Requires="wps"><w:drawing><wp:anchor>'
+        f"{position}<a:graphic><a:graphicData><wps:wsp><wps:txbx><w:txbxContent>{content}</w:txbxContent></wps:txbx>"
+        "</wps:wsp></a:graphicData></a:graphic></wp:anchor></w:drawing></mc:Choice>"
+        f"<mc:Fallback><w:pict><v:shape><v:textbox><w:txbxContent>{copy}</w:txbxContent></v:textbox></v:shape></w:pict>"
+        "</mc:Fallback></mc:AlternateContent>"
+    )
 
 
 def zip_entries(entries: dict[str, str | None]) -> bytes:
@@ -421,82 +506,12 @@ def test_rejects_docx_when_uncompressed_xml_exceeds_limit(monkeypatch: pytest.Mo
     data = docx("<w:p><w:r><w:t>Wniosek</w:t></w:r></w:p>", trailing="  ")
     with ZipFile(BytesIO(data)) as archive:
         xml_size = archive.getinfo("word/document.xml").file_size
-    monkeypatch.setattr(extract_module, "_MAX_DOCUMENT_XML_BYTES", xml_size - 1)
+    monkeypatch.setattr(docx_reader, "MAX_DOCUMENT_XML_BYTES", xml_size)
+    assert extract(data, "docx").text == "Wniosek"
 
+    monkeypatch.setattr(docx_reader, "MAX_DOCUMENT_XML_BYTES", xml_size - 1)
     with pytest.raises(ExtractionError, match="Nie udało się odczytać treści pliku"):
         extract(data, "docx")
-
-
-@pytest.mark.parametrize(
-    ("filename", "data", "expected_format"),
-    [
-        ("skan.JPG", JPG, SourceFormat.JPG),
-        ("skan.jpeg", JPG, SourceFormat.JPG),
-        ("skan.JPE", JPG, SourceFormat.JPG),
-        ("skan.png", PNG, SourceFormat.PNG),
-    ],
-    ids=["jpg", "jpeg", "jpe", "png"],
-)
-def test_extract_image_runs_local_ocr(
-    monkeypatch: pytest.MonkeyPatch, filename: str, data: bytes, expected_format: SourceFormat
-) -> None:
-    command = ["tesseract", "stdin", "stdout", "-l", "pol+eng"]
-    runner = Mock(return_value=subprocess.CompletedProcess(command, 0, " Wniosek\nZałączniki\n\x0c".encode()))
-    monkeypatch.setattr(subprocess, "run", runner)
-    monkeypatch.setattr(extract_module, "get_settings", lambda: Settings(ocr_lang="pol+eng"))
-
-    document = extract(data, validate_upload(filename, data, max_bytes=1024))
-
-    runner.assert_called_once_with(
-        command,
-        input=data,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        check=True,
-        timeout=30,
-    )
-    assert document.source_format is expected_format
-    assert document.text == "Wniosek\nZałączniki"
-    assert document.ocr_used is True
-    assert document.images == []
-
-
-@pytest.mark.parametrize(
-    "outcome",
-    [
-        subprocess.CalledProcessError(1, "tesseract"),
-        subprocess.TimeoutExpired("tesseract", timeout=30),
-        b" \n\x0c",
-        b"\xff",
-    ],
-    ids=["engine-error", "timeout", "empty-text", "bad-encoding"],
-)
-def test_unreadable_image_uses_contract_error(monkeypatch: pytest.MonkeyPatch, outcome: bytes | Exception) -> None:
-    if isinstance(outcome, Exception):
-        runner = Mock(side_effect=outcome)
-    else:
-        runner = Mock(return_value=subprocess.CompletedProcess("tesseract", 0, outcome))
-    monkeypatch.setattr(subprocess, "run", runner)
-
-    with pytest.raises(ExtractionError) as exc_info:
-        extract(PNG, "png")
-
-    runner.assert_called_once()
-    assert exc_info.value.status_code == 400
-    assert exc_info.value.detail == "Nie udało się odczytać treści pliku."
-
-
-def test_missing_tesseract_uses_server_error(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
-    runner = Mock(side_effect=FileNotFoundError(2, "No such file or directory", "tesseract"))
-    monkeypatch.setattr(subprocess, "run", runner)
-
-    with pytest.raises(AppError) as exc_info:
-        extract(PNG, "png")
-
-    runner.assert_called_once()
-    assert exc_info.value.status_code == 500
-    assert exc_info.value.detail == "Coś poszło nie tak. Spróbuj ponownie."
-    assert "Tesseract" in caplog.text
 
 
 XLSX_CELL = '<row r="1"><c r="A1" t="inlineStr"><is><t>Wniosek</t></is></c></row>'
@@ -872,3 +887,673 @@ def test_ods_unpacked_xml_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("app.extract.sheets.MAX_XML_BYTES", size - 1)
     with pytest.raises(ExtractionError, match=UNREADABLE):
         extract(data, "ods")
+
+
+# K2-FINAL: pola tekstowe i obrazy w DOCX, limity ZIP i XML, OCR skanów w PDF.
+
+
+def ocr_by_content(monkeypatch: pytest.MonkeyPatch, results: dict[bytes, str]) -> list[bytes]:
+    """Atrapa Tesseracta: tekst zależy od bajtów obrazu. Zwraca listę obrazów, które dostała."""
+    seen: list[bytes] = []
+
+    def tesseract(command: list[str], **options: bytes) -> subprocess.CompletedProcess:
+        seen.append(options["input"])
+        return subprocess.CompletedProcess(command, 0, results[options["input"]].encode())
+
+    monkeypatch.setattr(subprocess, "run", tesseract)
+    return seen
+
+
+def test_docx_text_box_is_read_once_and_as_separate_lines(ocr_runner: Mock) -> None:
+    # Word zapisuje pole dwa razy (Choice i Fallback). Wcześniej wychodziło „Urząd MiastaUrząd Miasta”.
+    box = text_box(paragraph("Urząd Miasta i Gminy") + paragraph("ul. Dworcowa 29"))
+    data = docx(f"{paragraph('Imię i nazwisko')}<w:p><w:r><w:t>Adres</w:t>{box}</w:r></w:p>{paragraph('PESEL')}")
+
+    assert extract(data, "docx").text == "Imię i nazwisko\nAdres\nUrząd Miasta i Gminy\nul. Dworcowa 29\nPESEL"
+
+
+def test_docx_fallback_is_used_when_choice_has_no_content() -> None:
+    box = text_box("<w:p/>", fallback=paragraph("Tylko w kopii"))
+
+    assert extract(docx(f"<w:p><w:r>{box}</w:r></w:p>"), "docx").text == "Tylko w kopii"
+
+
+def alternate(choice: str, fallback: str) -> str:
+    return f'<mc:AlternateContent><mc:Choice Requires="w14">{choice}</mc:Choice><mc:Fallback>{fallback}</mc:Fallback></mc:AlternateContent>'
+
+
+def test_docx_block_level_alternate_content_gives_one_branch() -> None:
+    # Recenzja K2-FINAL, D1: gałęzie poza akapitem dawały tekst dwa razy, a w komórce tabeli wcale.
+    body = (
+        paragraph("Wniosek")
+        + alternate(paragraph("Dane wnioskodawcy"), paragraph("Dane wnioskodawcy"))
+        + f"<w:tbl><w:tr><w:tc>{alternate(paragraph('PESEL'), paragraph('PESEL (kopia)'))}</w:tc></w:tr></w:tbl>"
+        + alternate("<w:p/>", paragraph("Tylko w kopii"))
+    )
+
+    assert extract(docx(body), "docx").text == "Wniosek\nDane wnioskodawcy\nPESEL\nTylko w kopii"
+
+
+def test_docx_text_drops_control_characters() -> None:
+    # Recenzja K2-FINAL, D4: XML 1.0 dopuszcza znaki C1 i powrót karetki zapisany jako &#13;.
+    body = paragraph("Wniosek&#13;o zwrot") + paragraph("Kwota\u0085100\u009fzł")
+
+    assert extract(docx(body), "docx").text == "Wniosek\no zwrot\nKwota 100 zł"
+
+
+def test_docx_text_boxes_of_one_paragraph_follow_page_layout() -> None:
+    # Dokument przerobiony z PDF (folder 8): fragmenty wiersza w osobnych polach, w pliku od dołu strony.
+    boxes = (
+        text_box(paragraph("Podpis"), top=9_000_000, left=500_000)
+        + text_box(paragraph("zł"), top=3_040_000, left=4_000_000)
+        + text_box(paragraph("Kwota"), top=3_000_000, left=500_000)
+        + text_box(paragraph("WNIOSEK") + paragraph("O ZWROT"), top=1_000_000, left=500_000)
+        + text_box(paragraph("100"), top=3_010_000, left=2_000_000)
+    )
+
+    assert extract(docx(f"<w:p><w:r>{boxes}</w:r></w:p>"), "docx").text == "WNIOSEK\nO ZWROT\nKwota 100 zł\nPodpis"
+
+
+def test_docx_text_boxes_without_position_keep_file_order() -> None:
+    boxes = text_box(paragraph("Drugie w układzie"), top=5_000_000) + text_box(paragraph("Bez położenia"))
+
+    assert extract(docx(f"<w:p><w:r>{boxes}</w:r></w:p>"), "docx").text == "Drugie w układzie\nBez położenia"
+
+
+def test_docx_reads_notes_headers_and_footers_after_body() -> None:
+    def part(root: str, body: str) -> str:
+        return f'<w:{root} xmlns:w="{WORD_NS}">{body}</w:{root}>'
+
+    note = '<w:footnote w:id="{0}"><w:p><w:r><w:footnoteRef/></w:r><w:r><w:t>) {1}</w:t></w:r></w:p></w:footnote>'
+    data = docx_package(
+        '<w:p><w:r><w:t>Adres e-mail</w:t></w:r><w:r><w:footnoteReference w:id="2"/></w:r><w:r><w:t>)</w:t></w:r></w:p>'
+        '<w:p><w:r><w:t>Podpis</w:t></w:r><w:r><w:footnoteReference w:id="3"/></w:r><w:r><w:t>)</w:t></w:r></w:p>',
+        parts={
+            "word/footnotes.xml": part(
+                "footnotes",
+                '<w:footnote w:type="separator" w:id="0"><w:p><w:r><w:separator/></w:r></w:p></w:footnote>'
+                + note.format(2, "Dane nieobowiązkowe.")
+                + note.format(3, "Podpis własnoręczny."),
+            ),
+            "word/endnotes.xml": part("endnotes", f"<w:endnote>{paragraph('Przypis końcowy')}</w:endnote>"),
+            "word/header1.xml": part("hdr", paragraph("Załącznik nr 2")),
+            "word/header2.xml": part("hdr", paragraph("Załącznik nr 2")),
+            "word/footer1.xml": part("ftr", paragraph("* niepotrzebne skreślić")),
+            "word/styles.xml": part("styles", paragraph("Tego nie czytamy")),
+        },
+    )
+
+    assert extract(data, "docx").text == (
+        "Adres e-mail1)\nPodpis2)\n1) Dane nieobowiązkowe.\n2) Podpis własnoręczny.\nPrzypis końcowy\n"
+        "Załącznik nr 2\n* niepotrzebne skreślić"
+    )
+
+
+def test_docx_strict_namespace_is_read() -> None:
+    data = docx_package(paragraph("Wniosek") + f"<w:tbl><w:tr><w:tc>{paragraph('Kwota')}</w:tc></w:tr></w:tbl>", ns=STRICT_WORD_NS)
+
+    assert extract(data, "docx").text == "Wniosek\nKwota"
+
+
+def test_docx_picture_text_is_inserted_where_picture_stands(monkeypatch: pytest.MonkeyPatch) -> None:
+    scan, logo, icon = png(600, 400), png(300, 300, gray=10), png(20, 20)
+    seen = ocr_by_content(monkeypatch, {scan: "Wniosek\n7\nNumer rachunku: 12 3456\n— |\nPodpis wnioskodawcy\n", logo: "ab .\n"})
+    body = paragraph("Wniosek") + picture("rId1") + paragraph("Podpis wnioskodawcy") + picture("rId2") + picture("rId3")
+    data = docx_package(body, media={"skan.png": scan, "logo.png": logo, "ikona.png": icon, "luzem.png": png(500, 500)})
+
+    document = extract(data, "docx")
+
+    # Wiersze, które są już w tekście dokumentu, pojedynczy znak i szum z logo odpadają. Ikona nie idzie do OCR,
+    # tak samo obraz, do którego dokument się nie odwołuje.
+    assert document.text == "Wniosek\nNumer rachunku: 12 3456\nPodpis wnioskodawcy"
+    assert sorted(seen) == sorted([scan, logo])
+    assert document.ocr_used is True
+    assert document.warnings == []
+
+
+def test_docx_without_new_text_from_pictures_does_not_report_ocr(monkeypatch: pytest.MonkeyPatch) -> None:
+    logo = png(300, 300)
+    ocr_by_content(monkeypatch, {logo: "WNIOSEK\n"})
+
+    document = extract(docx_package(paragraph("Wniosek") + picture("rId1"), media={"logo.png": logo}), "docx")
+
+    assert document.text == "Wniosek"
+    assert document.ocr_used is False
+
+
+def test_docx_repeated_picture_is_read_once_and_its_text_stands_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    stamp = png(400, 200)
+    seen = ocr_by_content(monkeypatch, {stamp: "Urząd Gminy Stawiguda\n"})
+    vml = '<w:p><w:r><w:pict><v:shape><v:imagedata r:id="rId2"/></v:shape></w:pict></w:r></w:p>'
+    body = picture("rId1") + paragraph("Strona 1") + picture("rId1") + vml + paragraph("Strona 2")
+    data = docx_package(body, media={"pieczec.png": stamp}, targets={"rId2": "media/pieczec.png"})
+
+    assert extract(data, "docx").text == "Urząd Gminy Stawiguda\nStrona 1\nStrona 2"
+    assert seen == [stamp]
+
+
+def test_docx_pictures_over_limit_are_skipped_with_warning(monkeypatch: pytest.MonkeyPatch) -> None:
+    pictures = {f"skan{number}.png": png(200, 100 + number) for number in range(1, 5)}
+    seen = ocr_by_content(monkeypatch, {content: f"Załącznik numer {name}\n" for name, content in pictures.items()})
+    monkeypatch.setattr(docx_reader, "MAX_PICTURES", 3)
+    body = "".join(picture(f"rId{number}") for number in range(1, 5)) + paragraph("Koniec")
+
+    document = extract(docx_package(body, media=pictures), "docx")
+
+    assert document.text == "Załącznik numer skan1.png\nZałącznik numer skan2.png\nZałącznik numer skan3.png\nKoniec"
+    assert len(seen) == 3
+    assert document.warnings == [docx_reader._OVER_LIMIT]
+
+
+def test_docx_pictures_have_a_pixel_budget_per_document(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Jak w PDF: 20 obrazów po 100 mln pikseli to minuty OCR, a odczyt ma limit czasu.
+    pictures = {"skan1.png": png(200, 101), "skan2.png": png(200, 300), "skan3.png": png(200, 102), "skan4.png": png(200, 103)}
+    seen = ocr_by_content(monkeypatch, {content: f"Załącznik numer {name}\n" for name, content in pictures.items()})
+    monkeypatch.setattr(docx_reader, "MAX_DOCUMENT_PIXELS", 200 * 101 + 200 * 102)
+    body = "".join(picture(f"rId{number}") for number in range(1, 5)) + paragraph("Koniec")
+
+    document = extract(docx_package(body, media=pictures), "docx")
+
+    # Drugi obraz nie mieści się w budżecie, trzeci jeszcze tak, a czwarty już nie: zmieściłby się
+    # sam, ale nie po pierwszym i trzecim.
+    assert document.text == "Załącznik numer skan1.png\nZałącznik numer skan3.png\nKoniec"
+    assert len(seen) == 2
+    assert document.warnings == [docx_reader._OVER_PIXELS]
+
+
+def test_docx_ignores_pictures_it_cannot_use(monkeypatch: pytest.MonkeyPatch) -> None:
+    runner = Mock(side_effect=AssertionError("żaden z tych obrazów nie nadaje się do OCR"))
+    monkeypatch.setattr(subprocess, "run", runner)
+    body = paragraph("Wniosek") + "".join(picture(f"rId{number}") for number in range(1, 6)) + picture("rId9")
+    data = docx_package(
+        body,
+        media={"wektor.emf": b"\x01\x00\x00\x00" + b"\x00" * 200, "ikona.png": png(30, 30), "uszkodzony.png": b"\x89PNG\r\n\x1a\n" + b"\x00" * 64},
+        targets={"rId4": "https://example.org/zdalny.png", "rId5": "media/brak.png"},
+    )
+
+    document = extract(data, "docx")
+
+    assert document.text == "Wniosek"
+    assert document.warnings == []
+    runner.assert_not_called()
+
+
+def test_docx_picture_larger_than_its_limit_is_skipped_with_warning(monkeypatch: pytest.MonkeyPatch) -> None:
+    small, large = png(200, 100), png(200, 3000)
+    seen = ocr_by_content(monkeypatch, {small: "Pieczęć wpływu do urzędu\n"})
+    monkeypatch.setattr(docx_reader, "MAX_PICTURE_BYTES", len(large) - 1)
+    data = docx_package(picture("rId1") + picture("rId2") + paragraph("Wniosek"), media={"duzy.png": large, "maly.png": small})
+
+    document = extract(data, "docx")
+
+    assert document.text == "Pieczęć wpływu do urzędu\nWniosek"
+    assert seen == [small]
+    assert document.warnings == [docx_reader._NOT_READ]
+
+
+@pytest.mark.parametrize("compression", [ZIP_BZIP2, ZIP_LZMA], ids=["bzip2", "lzma"])
+@pytest.mark.parametrize("ext", ["docx", "xlsx", "ods"])
+def test_zip_entry_with_compression_office_never_writes_is_rejected(ext: str, compression: int) -> None:
+    # Dla tych metod zipfile rozpakowuje cały blok wejścia naraz, więc limit odczytu nie chroni pamięci.
+    sources = {"docx": docx(paragraph("Wniosek")), "xlsx": xlsx(XLSX_CELL), "ods": ods(ods_row("Wniosek"))}
+    buffer = BytesIO()
+    with ZipFile(BytesIO(sources[ext])) as source, ZipFile(buffer, "w", compression) as target:
+        for name in source.namelist():
+            target.writestr(name, source.read(name))
+    assert extract(sources[ext], ext).text == "Wniosek"
+
+    with pytest.raises(ExtractionError, match=UNREADABLE):
+        extract(buffer.getvalue(), ext)
+
+
+def test_docx_unpacked_bytes_limit_covers_document_and_notes(monkeypatch: pytest.MonkeyPatch) -> None:
+    footnotes = f'<w:footnotes xmlns:w="{WORD_NS}">{paragraph("Przypis")}</w:footnotes>'
+    data = docx_package(paragraph("Wniosek"), parts={"word/footnotes.xml": footnotes})
+    with ZipFile(BytesIO(data)) as archive:
+        unpacked = archive.getinfo("word/document.xml").file_size + archive.getinfo("word/footnotes.xml").file_size
+
+    monkeypatch.setattr(docx_reader, "MAX_UNPACKED_BYTES", unpacked)
+    assert extract(data, "docx").text == "Wniosek\nPrzypis"
+
+    # Każda część osobno mieści się w limicie, razem już nie.
+    monkeypatch.setattr(docx_reader, "MAX_UNPACKED_BYTES", unpacked - 1)
+    with pytest.raises(ExtractionError, match=UNREADABLE):
+        extract(data, "docx")
+
+
+@pytest.mark.parametrize(
+    "declaration",
+    ['<?xml version="1.0" encoding="shift_jis"?>', '<?xml version="1.0" encoding="brak-takiego"?>'],
+    ids=["multi-byte-encoding", "unknown-encoding"],
+)
+@pytest.mark.parametrize("entry", ["word/document.xml", "word/footnotes.xml", "word/_rels/document.xml.rels"])
+def test_docx_unsupported_xml_encoding_is_unreadable(entry: str, declaration: str) -> None:
+    # Parser XML zgłasza takie kodowanie jako ValueError albo LookupError; wcześniej kończyło się to kodem 500.
+    footnotes = f'<w:footnotes xmlns:w="{WORD_NS}">{paragraph("Przypis")}</w:footnotes>'
+    data = docx_package(paragraph("Wniosek") + picture("rId1"), media={"skan.png": png(300, 300)}, parts={"word/footnotes.xml": footnotes})
+
+    with pytest.raises(ExtractionError, match=UNREADABLE):
+        extract(rewrite_binary_entry(data, entry, lambda xml: declaration.encode() + xml), "docx")
+
+
+def rewrite_binary_entry(data: bytes, entry: str, change: Callable[[bytes], bytes]) -> bytes:
+    buffer = BytesIO()
+    with ZipFile(BytesIO(data)) as source, ZipFile(buffer, "w") as target:
+        for name in source.namelist():
+            target.writestr(name, change(source.read(name)) if name == entry else source.read(name))
+    return buffer.getvalue()
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        # Zagnieżdżenie głębsze niż limit rekurencji Pythona: 400, nie 500.
+        paragraph("Wniosek") + "<w:tbl><w:tr><w:tc>" * 400 + paragraph("Tak") + "</w:tc></w:tr></w:tbl>" * 400,
+        paragraph("Wniosek") + "<w:p>" + "<w:r>" * 5000 + "<w:t>Tak</w:t>" + "</w:r>" * 5000 + "</w:p>",
+        paragraph("Wniosek") + "<w:p>" + "<w:r><w:t>a</w:t></w:r>" * 300_000 + "</w:p>",
+    ],
+    ids=["deep-tables", "deep-inline", "too-many-elements-in-block"],
+)
+def test_docx_xml_that_would_exhaust_memory_or_stack_is_unreadable(body: str) -> None:
+    buffer = BytesIO()
+    with ZipFile(buffer, "w", ZIP_DEFLATED) as archive:
+        archive.writestr("word/document.xml", document_xml(body))
+
+    with pytest.raises(ExtractionError, match=UNREADABLE):
+        extract(buffer.getvalue(), "docx")
+
+
+def test_docx_truncated_after_readable_text_is_unreadable() -> None:
+    # Odczyt strumieniowy oddaje akapity przed końcem pliku; częściowy tekst byłby błędem.
+    buffer = BytesIO()
+    with ZipFile(buffer, "w") as archive:
+        archive.writestr("word/document.xml", document_xml(paragraph("Wniosek")).replace("</w:body></w:document>", "<w:p>"))
+
+    with pytest.raises(ExtractionError, match=UNREADABLE):
+        extract(buffer.getvalue(), "docx")
+
+
+def test_docx_memory_does_not_grow_with_number_of_paragraphs() -> None:
+    data = docx("<w:p><w:r><w:rPr><w:b/></w:rPr></w:r></w:p>" * 60_000 + paragraph("Tak"))
+    tracemalloc.start()
+    try:
+        text = extract(data, "docx").text
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert text == "Tak"
+    # Sam XML ma 2,6 MB. Całe drzewo w pamięci zajmowało ponad 30 MB.
+    assert peak < 8 * 1024 * 1024
+
+
+@pytest.mark.parametrize("root", ["w:body", "w:settings"])
+def test_docx_main_part_must_be_a_document(root: str) -> None:
+    buffer = BytesIO()
+    with ZipFile(buffer, "w") as archive:
+        archive.writestr("word/document.xml", f'<{root} xmlns:w="{WORD_NS}">{paragraph("Wniosek")}</{root}>')
+
+    with pytest.raises(ExtractionError, match=UNREADABLE):
+        extract(buffer.getvalue(), "docx")
+
+
+def _coi_file(folder: int, pattern: str) -> bytes:
+    files = sorted(path for directory in MATERIALS.glob(f"{folder}. *") for path in directory.glob(pattern))
+    if not files:
+        pytest.skip(f"brak pliku {pattern} z folderu {folder} w {MATERIALS}")
+    return files[0].read_bytes()
+
+
+def _words(text: str) -> list[str]:
+    return sorted(word.casefold() for word in "".join(char if char.isalpha() else " " for char in text).split() if len(word) > 3)
+
+
+@pytest.mark.parametrize("folder", [2, 3, 8])
+def test_coi_docx_with_text_boxes_has_words_of_pdf_once(folder: int, ocr_runner: Mock) -> None:
+    # Foldery 2 i 8 to strony złożone z pól tekstowych, folder 3 ma jedno pole z adresem urzędu.
+    # Przed K2-FINAL każde słowo z pola wychodziło dwa razy (folder 8: 31 tys. znaków zamiast 16 tys.).
+    from_docx = extract(_coi_file(folder, "*.docx"), "docx")
+    from_pdf = extract(_coi_file(folder, "*.pdf"), "pdf")
+
+    assert _words(from_docx.text) == _words(from_pdf.text)
+    assert from_docx.ocr_used is False
+    ocr_runner.assert_not_called()
+
+
+def test_coi_docx_made_of_text_boxes_comes_in_reading_order() -> None:
+    lines = extract(_coi_file(8, "*.docx"), "docx").text.splitlines()
+
+    assert lines[0] == "DEKLARACJA O WYSOKOŚCI MIESIĘCZNEJ OPŁATY"
+    assert lines.index("A. ORGAN, DO KTÓREGO SKŁADANA JEST DEKLARACJA") < lines.index("B.1 DANE IDENTYFIKACYJNE")
+    assert "4. wspólnota mieszkaniowa 5. spółdzielnia mieszkaniowa 6. inny podmiot posiadający nieruchomość" in lines
+
+
+@pytest.mark.parametrize("folder", [1, 4, 5])
+def test_coi_docx_has_all_words_of_pdf_with_notes_and_footers(folder: int, ocr_runner: Mock) -> None:
+    files = sorted(
+        path
+        for directory in MATERIALS.glob(f"{folder}. *")
+        for path in directory.glob("*.docx")
+        if "wizualizacja" not in path.name.casefold()
+    )
+    if not files:
+        pytest.skip(f"brak pliku .docx z folderu {folder} w {MATERIALS}")
+
+    assert _words(extract(files[0].read_bytes(), "docx").text) == _words(extract(_coi_file(folder, "*.[pP][dD][fF]"), "pdf").text)
+
+
+@needs_ocr_engine
+def test_real_ocr_reads_screenshots_embedded_in_coi_docx() -> None:
+    files = sorted(path for directory in MATERIALS.glob("5. *") for path in directory.glob("*wizualizacja*.docx"))
+    if not files:
+        pytest.skip(f"brak pliku z wizualizacją z folderu 5 w {MATERIALS}")
+    data = files[0].read_bytes()
+    with ZipFile(BytesIO(data)) as archive:
+        assert sum(name.startswith("word/media/") for name in archive.namelist()) == 16
+
+    document = extract(data, "docx")
+
+    # Podpisy pól są tylko na zrzutach ekranu, nie w tekście dokumentu.
+    assert document.ocr_used is True
+    folded = document.text.casefold()
+    assert "wizualizacja" in folded
+    assert "kod pocztowy" in folded
+
+
+JPEG_SCAN = jpeg(1654, 2339)
+OTHER_SCAN = jpeg(1654, 2340)
+
+
+def test_pdf_page_without_text_is_read_from_its_scan(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = ocr_by_content(monkeypatch, {JPEG_SCAN: "Wniosek o wydanie zaświadczenia\nImię i nazwisko\n\x0c"})
+    data = scanned_pdf(("", [PdfImage(JPEG_SCAN, 1654, 2339)]))
+
+    document = extract(data, validate_upload("skan.pdf", data, max_bytes=len(data)))
+
+    assert document.text == "Wniosek o wydanie zaświadczenia\nImię i nazwisko"
+    assert document.ocr_used is True
+    assert document.warnings == []
+    # Obraz JPEG trafia do Tesseracta bajt w bajt, bez dekodowania po drodze.
+    assert seen == [JPEG_SCAN]
+
+
+def test_pdf_keeps_text_layer_and_reads_only_pages_without_useful_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = ocr_by_content(monkeypatch, {JPEG_SCAN: "Uzasadnienie wniosku\n", OTHER_SCAN: "Strona 4\nPodpis wnioskodawcy\n"})
+    with_text = "Wniosek o wydanie decyzji administracyjnej"
+    data = scanned_pdf(
+        (with_text, [PdfImage(png(600, 400), 600, 400)]),
+        ("2", [PdfImage(JPEG_SCAN, 1654, 2339)]),
+        ("", []),
+        ("Strona 4", [PdfImage(OTHER_SCAN, 1654, 2340)]),
+    )
+
+    document = extract(data, "pdf")
+
+    # Strona 1 ma warstwę tekstową, więc jej obraz nie idzie do OCR. Numer strony 2 jest tylko
+    # w warstwie tekstowej i zostaje; „Strona 4” jest też na skanie, więc nie stoi dwa razy.
+    assert document.text == f"{with_text}\f2\nUzasadnienie wniosku\f\fStrona 4\nPodpis wnioskodawcy"
+    assert seen == [JPEG_SCAN, OTHER_SCAN]
+    assert document.ocr_used is True
+    assert document.warnings == ["Strony PDF bez warstwy tekstowej: 3."]
+
+
+def test_pdf_reads_page_images_from_top_to_bottom_whatever_the_drawing_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    top, middle, bottom = jpeg(1654, 700), jpeg(1654, 701), jpeg(1654, 702)
+    seen = ocr_by_content(monkeypatch, {top: "Nagłówek wniosku\n", middle: "Treść wniosku\n", bottom: "Podpis wniosku\n"})
+    data = scanned_pdf(
+        (
+            "",
+            [
+                PdfImage(bottom, 1654, 702, place=(595, 0, 0, 250, 0, 30)),
+                PdfImage(top, 1654, 700, place=(595, 0, 0, 250, 0, 560)),
+                PdfImage(middle, 1654, 701, place=(595, 0, 0, 250, 0, 295)),
+                # Obraz w zasobach strony, którego strona nie rysuje (wspólne zasoby wielu stron).
+                PdfImage(OTHER_SCAN, 1654, 2340, drawn=False),
+            ],
+        )
+    )
+
+    assert extract(data, "pdf").text == "Nagłówek wniosku\nTreść wniosku\nPodpis wniosku"
+    assert sorted(seen) == sorted([top, middle, bottom])
+
+
+def test_pdf_finds_scan_drawn_through_form_object(monkeypatch: pytest.MonkeyPatch) -> None:
+    ocr_by_content(monkeypatch, {JPEG_SCAN: "Wniosek ze skanera\n"})
+
+    assert extract(scanned_pdf(("", [PdfImage(JPEG_SCAN, 1654, 2339)]), through_form=True), "pdf").text == "Wniosek ze skanera"
+
+
+def test_pdf_form_drawing_itself_gives_its_scan_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Recenzja K2-FINAL, D2: formularz, który rysuje sam siebie, dawał ten sam skan przy każdym poziomie.
+    seen = ocr_by_content(monkeypatch, {JPEG_SCAN: "Wniosek ze skanera\n"})
+
+    document = extract(scanned_pdf(("", [PdfImage(JPEG_SCAN, 1654, 2339)]), through_form=True, form_redraws=3), "pdf")
+
+    assert document.text == "Wniosek ze skanera"
+    assert seen == [JPEG_SCAN]
+
+
+def test_pdf_form_drawn_many_times_is_parsed_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    parsed: list[object] = []
+
+    class CountingContentStream(pdf_reader.ContentStream):
+        def __init__(self, stream: object, pdf: object, *args: object) -> None:
+            parsed.append(stream)
+            super().__init__(stream, pdf, *args)
+
+    monkeypatch.setattr(pdf_reader, "ContentStream", CountingContentStream)
+
+    assert extract(scanned_pdf(("Strona 1", []), through_form=True, form_uses=50), "pdf").text == "Strona 1"
+    assert len(parsed) == 1
+
+
+def test_pdf_drawing_operations_have_a_budget_per_document(monkeypatch: pytest.MonkeyPatch) -> None:
+    ocr_by_content(monkeypatch, {JPEG_SCAN: "Wniosek ze skanera\n"})
+    # 120 operacji przed skanem; Do, które rysuje skan, to 123. operacja strony (po q i cm).
+    data = scanned_pdf(("", [PdfImage(JPEG_SCAN, 1654, 2339)]), before=b"q Q " * 60)
+
+    monkeypatch.setattr(pdf_reader, "MAX_DRAWING_OPERATIONS", 123)
+    assert extract(data, "pdf").text == "Wniosek ze skanera"
+
+    monkeypatch.setattr(pdf_reader, "MAX_DRAWING_OPERATIONS", 122)
+    with pytest.raises(ExtractionError, match=UNREADABLE):
+        extract(data, "pdf")
+
+
+def raster_page(samples: bytes, width: int, height: int, **options: object) -> bytes:
+    options.setdefault("filter", "/FlateDecode")
+    return scanned_pdf(("", [PdfImage(zlib.compress(samples), width, height, **options)]))
+
+
+@pytest.mark.parametrize(
+    ("options", "samples", "expected_header", "expected_rows", "expected_palette"),
+    [
+        ({}, bytes(range(200)) * 100, (200, 100, 8, 0), b"".join(b"\x00" + bytes(range(200)) for _ in range(100)), b""),
+        (
+            {"colorspace": "/DeviceRGB"},
+            b"\x10\x20\x30" * 20_000,
+            (200, 100, 8, 2),
+            (b"\x00" + b"\x10\x20\x30" * 200) * 100,
+            b"",
+        ),
+        # Maska 1-bitowa z wierszem dopełnianym do bajtu; /Decode [1 0] odwraca czerń i biel.
+        (
+            {"colorspace": None, "bits": 1, "extra": "/ImageMask true /Decode [1 0]"},
+            b"\xf0" * 26 * 150,
+            (203, 150, 1, 0),
+            (b"\x00" + b"\x0f" * 26) * 150,
+            b"",
+        ),
+        (
+            {"colorspace": "[/Indexed /DeviceRGB 1 <000000 FFFFFF>]", "bits": 1},
+            b"\xaa" * 25 * 150,
+            (200, 150, 1, 3),
+            (b"\x00" + b"\xaa" * 25) * 150,
+            b"\x00\x00\x00\xff\xff\xff",
+        ),
+        (
+            {"colorspace": "[/Indexed /DeviceGray 3 <00 55 AA FF>]", "bits": 2},
+            b"\x1b" * 50 * 150,
+            (200, 150, 2, 3),
+            (b"\x00" + b"\x1b" * 50) * 150,
+            b"\x00\x00\x00\x55\x55\x55\xaa\xaa\xaa\xff\xff\xff",
+        ),
+    ],
+    ids=["gray", "rgb", "inverted-mask", "rgb-palette", "gray-palette"],
+)
+def test_pdf_raster_scan_goes_to_ocr_as_png_with_same_pixels(
+    monkeypatch: pytest.MonkeyPatch,
+    options: dict,
+    samples: bytes,
+    expected_header: tuple,
+    expected_rows: bytes,
+    expected_palette: bytes,
+) -> None:
+    seen: list[bytes] = []
+
+    def tesseract(command: list[str], **arguments: bytes) -> subprocess.CompletedProcess:
+        seen.append(arguments["input"])
+        return subprocess.CompletedProcess(command, 0, b"Wniosek z rastra\n")
+
+    monkeypatch.setattr(subprocess, "run", tesseract)
+    width, height = expected_header[:2]
+
+    document = extract(raster_page(samples, width, height, **options), "pdf")
+
+    assert document.text == "Wniosek z rastra"
+    assert len(seen) == 1
+    assert png_pixels(seen[0]) == (expected_header, expected_rows, expected_palette)
+    assert images.size(seen[0]) == (width, height)
+
+
+def test_pdf_fax_scan_goes_to_ocr_as_tiff(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[bytes] = []
+
+    def tesseract(command: list[str], **arguments: bytes) -> subprocess.CompletedProcess:
+        seen.append(arguments["input"])
+        return subprocess.CompletedProcess(command, 0, b"Wniosek z faksu\n")
+
+    monkeypatch.setattr(subprocess, "run", tesseract)
+    fax = b"\x00\x10\x01" * 40
+    picture_ = PdfImage(fax, 1728, 2339, filter="/CCITTFaxDecode", bits=1, extra="/DecodeParms << /K -1 /Columns 1728 /Rows 2339 >>")
+
+    assert extract(scanned_pdf(("", [picture_])), "pdf").text == "Wniosek z faksu"
+    assert seen[0].startswith(b"II*\x00") and seen[0].endswith(fax)
+    assert images.size(seen[0]) == (1728, 2339)
+
+
+@pytest.mark.parametrize(
+    "picture_",
+    [
+        PdfImage(b"\x00" * 64, 1654, 2339, filter="/JBIG2Decode", bits=1),
+        PdfImage(b"\x00" * 64, 1654, 2339, filter="/JPXDecode"),
+        PdfImage(zlib.compress(b"\x00" * 800 * 400), 200, 400, filter="/FlateDecode", colorspace="/DeviceCMYK"),
+        PdfImage(zlib.compress(b"\x00" * 100), 200, 400, filter="/FlateDecode"),
+        PdfImage(JPEG_SCAN, 20_000, 20_000),
+    ],
+    ids=["jbig2", "jpeg-2000", "cmyk-raster", "raster-shorter-than-declared", "over-pixel-limit"],
+)
+def test_pdf_scan_that_cannot_be_decoded_is_reported_not_guessed(monkeypatch: pytest.MonkeyPatch, picture_: PdfImage) -> None:
+    runner = Mock(side_effect=AssertionError("tego obrazu nie umiemy podać Tesseractowi"))
+    monkeypatch.setattr(subprocess, "run", runner)
+    data = scanned_pdf(("Wniosek o wydanie decyzji administracyjnej", []), ("", [picture_]))
+
+    document = extract(data, "pdf")
+
+    assert document.text == "Wniosek o wydanie decyzji administracyjnej\f"
+    assert document.ocr_used is False
+    assert document.warnings == [
+        "Strony PDF bez warstwy tekstowej: 2.",
+        "Strony PDF ze skanem w nieobsługiwanym kodowaniu: 2.",
+    ]
+    runner.assert_not_called()
+
+    # Sam taki skan to dokument bez treści: kontrolowany błąd, nie pusty wynik.
+    with pytest.raises(ExtractionError, match=UNREADABLE):
+        extract(scanned_pdf(("", [picture_])), "pdf")
+
+
+def test_pdf_small_pictures_are_not_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    runner = Mock(side_effect=AssertionError("ikona nie idzie do OCR"))
+    monkeypatch.setattr(subprocess, "run", runner)
+    data = scanned_pdf(("Wniosek o wydanie decyzji administracyjnej", []), ("", [PdfImage(jpeg(30, 30), 30, 30)]))
+
+    document = extract(data, "pdf")
+
+    assert document.warnings == ["Strony PDF bez warstwy tekstowej: 2."]
+    runner.assert_not_called()
+
+
+def test_pdf_ocr_budget_limits_pictures_per_page_and_per_document(monkeypatch: pytest.MonkeyPatch) -> None:
+    scans = [jpeg(1654, 1000 + number) for number in range(6)]
+    seen = ocr_by_content(monkeypatch, {scan: f"Strona skanu numer {number}\n" for number, scan in enumerate(scans)})
+
+    def page(*numbers: int) -> tuple[str, list[PdfImage]]:
+        return "", [PdfImage(scans[number], 1654, 1000 + number, place=(595, 0, 0, 100, 0, 700 - 100 * number)) for number in numbers]
+
+    monkeypatch.setattr(pdf_reader, "MAX_PAGE_PICTURES", 2)
+    monkeypatch.setattr(pdf_reader, "MAX_PICTURES", 3)
+    document = extract(scanned_pdf(page(0, 1, 2), page(3, 4), page(5)), "pdf")
+
+    # Z pierwszej strony dwa najwyższe obrazy, z drugiej jeden: dokument ma limit trzech.
+    assert document.text == "Strona skanu numer 0\nStrona skanu numer 1\fStrona skanu numer 3\f"
+    assert sorted(seen) == sorted([scans[0], scans[1], scans[3]])
+    assert document.warnings == ["Strony PDF bez warstwy tekstowej: 3."]
+
+    monkeypatch.setattr(pdf_reader, "MAX_PICTURES", 40)
+    monkeypatch.setattr(pdf_reader, "MAX_DOCUMENT_PIXELS", 1654 * 1000 + 1654 * 1001)
+    assert extract(scanned_pdf(page(0, 1), page(3)), "pdf").text == "Strona skanu numer 0\nStrona skanu numer 1\f"
+
+
+def test_pdf_with_more_pages_than_limit_is_rejected(monkeypatch: pytest.MonkeyPatch, ocr_runner: Mock) -> None:
+    data = pdf("Wniosek", "Uzasadnienie", "Załączniki")
+    monkeypatch.setattr(pdf_reader, "MAX_PAGES", 3)
+    assert extract(data, "pdf").text == "Wniosek\fUzasadnienie\fZałączniki"
+
+    monkeypatch.setattr(pdf_reader, "MAX_PAGES", 2)
+    with pytest.raises(ExtractionError, match=UNREADABLE):
+        extract(data, "pdf")
+
+
+def test_pdf_with_more_text_than_limit_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    data = pdf("Wniosek", "Załączniki")
+    monkeypatch.setattr(pdf_reader, "MAX_TEXT_CHARS", len("Wniosek") + len("Załączniki"))
+    assert extract(data, "pdf").text == "Wniosek\fZałączniki"
+
+    monkeypatch.setattr(pdf_reader, "MAX_TEXT_CHARS", len("Wniosek") + len("Załączniki") - 1)
+    with pytest.raises(ExtractionError, match=UNREADABLE):
+        extract(data, "pdf")
+
+
+def test_pdf_with_broken_drawing_stream_keeps_text_of_other_pages(monkeypatch: pytest.MonkeyPatch) -> None:
+    runner = Mock(side_effect=AssertionError("strona z zepsutym rysowaniem nie ma obrazów do OCR"))
+    monkeypatch.setattr(subprocess, "run", runner)
+    data = scanned_pdf(("Wniosek o wydanie decyzji administracyjnej", []), ("", [PdfImage(JPEG_SCAN, 1654, 2339)]))
+    broken = data.replace(b"q 595 0 0 842 0 0 cm /Im", b"q 595 0 0 (z) 0 0 cm /Im")
+    assert len(broken) == len(data) and broken != data
+
+    document = extract(broken, "pdf")
+
+    assert document.text == "Wniosek o wydanie decyzji administracyjnej\f"
+    assert document.warnings == ["Strony PDF bez warstwy tekstowej: 2."]
+
+
+def _pdf_with_scan(scan: bytes) -> bytes:
+    width, height = images.size(scan)
+    colorspace = "/DeviceGray" if scan[scan.index(b"\xff\xc0") + 9] == 1 else "/DeviceRGB"
+    return scanned_pdf(("", [PdfImage(scan, width, height, colorspace=colorspace)]), ("1", []))
+
+
+@needs_ocr_engine
+def test_real_ocr_reads_coi_scan_wrapped_in_pdf_through_child_process() -> None:
+    scan = _coi_file(5, "*.JPG")
+    data = _pdf_with_scan(scan)
+
+    document = extract_in_child_process(data, validate_upload("skan.pdf", data, 10 * 1024 * 1024))
+
+    assert document.ocr_used is True
+    first, second = document.text.split("\f")
+    assert "wniosek" in first.casefold()
+    assert "nadpłat" in first.casefold()
+    assert second == "1"
+    assert first == ocr.image_text(scan, "pol")
