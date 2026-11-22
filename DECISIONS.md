@@ -184,6 +184,25 @@ LLM_CONTEXT_TOKENS (Marcin, prośba Mikołaja do K3):
   Koszt na CPU zmierzony dla `qwen3.5:4b` w kontenerze `ollama`: 3,7 → 4,2 GB (`ollama ps`), kontener 4,28 → 4,84 GB.
   Modele w chmurze mają więcej (Qwen3.5-9B: 262144); wtedy `LLM_CONTEXT_TOKENS` można podnieść w `.env`.
 
+M1.7 (Marcin): `LLM_PROVIDER` według D9 i DELEGACJA rozdz. 3 z gałęzi lidera `lead/mentor-2111`. Bez nowej zależności.
+
+- **Dostawca.** `ollama` (domyślnie) albo `edenai`, wielkość liter bez znaczenia. Inna wartość zatrzymuje start API.
+- **Host przy `edenai`.** Tylko `https://api.edenai.run` i `https://api.eu.edenai.run` (adres z README K3.1-2), port 443,
+  bez użytkownika w adresie. Inny adres zatrzymuje start (D9 pkt 2).
+- **Klucz przy `edenai`.** Wymagany. `ollama` z `env.example` też się nie liczy. Komunikat błędu nie podaje klucza.
+- **Modele przy `edenai`** (D9 pkt 7 i 8): tylko trasy otwartego Qwen3.5-9B z publicznego katalogu Eden AI:
+  `ovhcloud/Qwen3.5-9B`, `ionos/Qwen/Qwen3.5-9B`, `flexai/Qwen3.5-9B`, `flexai/Qwen3.5-9B@eu`,
+  `greenference/qwen3.5-9b`, `tensorx/qwen/qwen3.5-9b`, `deepinfra/Qwen/Qwen3.5-9B`, `together_ai/Qwen/Qwen3.5-9B`.
+  Ostatnie dwie mają w katalogu datę wycofania; są na liście, bo model jest otwarty, ale wybór trasy należy do lidera.
+  Inny model wymaga wpisu tutaj i w `EDENAI_OPEN_MODELS` (`config.py`). Test pilnuje, że oba miejsca się zgadzają.
+- **Adres domyślny.** Pusty `LLM_BASE_URL` daje adres dostawcy: przy `edenai` `https://api.edenai.run/v3`, przy `ollama`
+  `LLM_OLLAMA_URL` albo `http://localhost:11434/v1`. Compose podaje `LLM_OLLAMA_URL: http://ollama:11434/v1` osobno,
+  zamiast domyślnej w `LLM_BASE_URL`. Dzięki temu adres Ollamy nie trafia do dostawcy `edenai` (DELEGACJA, M1.7).
+- **Adres Eden AI przy `ollama`** zatrzymuje start (recenzja M1.7). Inaczej `LLM_PROVIDER=ollama` z adresem Eden AI
+  omijałby listę modeli otwartych. Komunikaty o dostawcy i modelu nie powtarzają wartości: klucz wklejony w złą
+  zmienną trafiłby do logu (D9 pkt 3).
+- **Sieć.** `api` zostaje w zwykłej sieci compose z wyjściem do internetu. Test pilnuje, że jego sieć nie jest `internal`.
+
 K2.4 (Mikołaj): XLSX i ODS bez nowej zależności: `zipfile` i `ElementTree` z biblioteki standardowej,
 jak DOCX w K2.1. `openpyxl` i `odfpy` z DELEGACJA niepotrzebne, więc `requirements.txt` bez zmian.
 
@@ -207,6 +226,29 @@ jak DOCX w K2.1. `openpyxl` i `odfpy` z DELEGACJA niepotrzebne, więc `requireme
   Najgorsze przypadki tuż pod limitem 8 MB, z ZIP-ów 9–25 KB: do 2,45 s CPU, szczyt procesu
   72 MB (39 MB po samym imporcie). Przed limitami recenzja zmierzyła 416–867 MB dla jednego
   długiego wiersza, głębokiego zagnieżdżenia i komórki z milionem elementów.
+
+K3.1-3 – E1 na Eden AI i naprawy analizy
+
+- Pomiar człowieka 22.11, 01:10–01:30. `ovhcloud/Qwen3.5-9B` ignorowała wyłączenie myślenia przy
+  `reasoning_effort` ustawionym na `none` lub `disable` oraz przy `chat_template_kwargs.enable_thinking=false`.
+  Odpowiedzi z limitem 8192 kończyły się `length`, bez treści lub z uciętym JSON-em. Na
+  `flexai/Qwen3.5-9B@eu` z `reasoning_effort=off` i `enable_thinking=false` model nie zwracał toku
+  rozumowania. Przepustowość wyniosła ok. 130–160 tok/s, a próby 3,5–65 s. Trasę zatwierdza lider (D9 pkt 8).
+- E1 na flexai z kontekstem 65536, limitem odpowiedzi 8192 i trzema próbami: F4, F6, F7, F8 przeszły
+  z lint 0 i oparciem 90–100%. F2, F3, F5, F9 dały 503. F9 przy limicie 16384 zakończył generację
+  z 8549 tokenami i `stop`, po czym walidacja zgłosiła 29 błędów. Przy temperaturze 0 próby 2 i 3
+  powtórzyły wynik z użyciem 5130/1387 tokenów.
+- Walidacja surowych odpowiedzi F2–F9 potwierdziła W1, powtórzone alternatywy (25 błędów wobec 24 w
+  pierwotnym histogramie), W2, CHECKBOX bez opcji (11 błędów, 15 pól po uwzględnieniu zamaskowanych),
+  W3, sprzeczny wybór identyfikatora (1), W4, RADIO bez opcji (2 w F5 oraz 3 ujawnione po N1–N3 w F9)
+  i W5, brakujące źródło w F4 lub opcja w F6. Po ostatniej szansie walidacja kontraktu dała 8/8.
+- Kontrakt D4 zostaje. Przed walidacją każdej próby usuwamy duplikaty alternatyw, wyłączamy wybór
+  identyfikatora przy mniej niż dwóch i uzupełniamy pustą opcję CHECKBOX. Tylko w ostatniej szansie
+  zamieniamy puste RADIO/SELECT na CHECKBOX z `Tak`, aktualizujemy odwołania i usuwamy niepoprawne
+  warunki. Każda naprawa jest oznaczona w logu. Temperatura ponowienia wynosi co najmniej 0,3, gdy jest włączona.
+- Przy `edenai` domyślne są `https://api.eu.edenai.run/v3`, `flexai/Qwen3.5-9B@eu`, kontekst 65536,
+  limit odpowiedzi 16384, `reasoning_effort=off` i `chat_template_kwargs.enable_thinking=false`.
+  Kontekst 65536 zostawia miejsce dla F8 i 16384 tokenów odpowiedzi. Obowiązuje walidacja dostawcy M1.7.
 
 ## Event: whole project
 

@@ -5,6 +5,7 @@ import importlib.util
 import io
 import json
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 
 import httpx
@@ -234,6 +235,46 @@ def test_benchmark_reports_numbers_and_keeps_raw_answers_apart(tmp_path: Path) -
     saved = sorted(raw_dir.glob("*.json"))
     assert len(saved) == 2
     assert json.loads(saved[0].read_text(encoding="utf-8"))["content"] == analysis
+
+
+def test_eden_uses_the_application_environment_without_probing_ollama(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    @dataclass(frozen=True)
+    class EdenSettings(bench.Settings):
+        llm_provider: str = "edenai"
+
+    monkeypatch.setattr(bench, "Settings", EdenSettings)
+    monkeypatch.setattr(bench, "MATERIALS", tmp_path / "materialy")
+    monkeypatch.setenv("LLM_PROVIDER", "edenai")
+    monkeypatch.setenv("LLM_BASE_URL", "https://api.eu.edenai.run/v3")
+    monkeypatch.setenv("LLM_MODEL", "ovhcloud/Qwen3.5-9B")
+    monkeypatch.setenv("LLM_API_KEY", "synthetic-eden-key")
+    monkeypatch.setenv("LLM_MAX_TOKENS", "8100")
+    monkeypatch.setenv("LLM_TIMEOUT_S", "12.5")
+    monkeypatch.setenv("LLM_REASONING_EFFORT", "off")
+    monkeypatch.setenv("LLM_FIXTURE", "")
+    form = tmp_path / "wniosek.txt"
+    form.write_text("Przykładowy wniosek", encoding="utf-8")
+    requests: list[httpx.Request] = []
+
+    def reply(request: httpx.Request) -> httpx.Response:
+        assert (request.method, str(request.url)) == ("POST", "https://api.eu.edenai.run/v3/chat/completions")
+        requests.append(request)
+        return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps(REFERENCE)}}]})
+
+    assert bench.main(["--input", str(form)], transport=httpx.MockTransport(reply)) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["ollama_version"] is None
+    assert report["models"]["ovhcloud/Qwen3.5-9B"]["inputs"][form.name]["summary"]["valid"] == 1
+    assert len(requests) == 2
+    for request, expected_limit in zip(requests, (16, 8100), strict=True):
+        assert request.headers["Authorization"] == "Bearer synthetic-eden-key"
+        assert request.extensions["timeout"]["read"] == 12.5
+        body = json.loads(request.content)
+        assert body["model"] == "ovhcloud/Qwen3.5-9B"
+        assert body["max_tokens"] == expected_limit
+        assert "reasoning_effort" not in body
 
 
 def test_invalid_answer_and_leftover_thinking_are_counted(tmp_path: Path) -> None:
