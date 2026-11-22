@@ -16,6 +16,7 @@ from app.errors import AppError
 from app.extract import extract
 from app.files import MSG_NO_FILE, read_single_file, validate_upload
 from app.generator import build_form
+from app.llm import provider
 
 log = logging.getLogger(__name__)
 
@@ -98,6 +99,11 @@ def process_file(data: bytes, ext: str, settings: Settings) -> dict[str, Any]:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/info")
+def info(settings: Annotated[Settings, Depends(get_settings)]) -> dict[str, str]:
+    return {"llm": provider(settings), "model": settings.llm_model}
 
 
 @app.post("/api/forms", openapi_extra=UPLOAD_BODY, dependencies=[Depends(require_token)])

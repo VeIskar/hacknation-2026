@@ -7,7 +7,9 @@ import html
 import json
 import logging
 import re
+from dataclasses import dataclass, replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Annotated, Any
 
 import httpx
@@ -16,10 +18,8 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from app import analysis
+from app import analysis, llm
 from app.analysis import (
-    ANSWER_TOKENS,
-    CONTEXT_TOKENS,
     CORRECTION_INTRO,
     CORRECTION_OUTRO,
     EMPTY_DOCUMENT_DETAIL,
@@ -40,7 +40,12 @@ from app.models import ApplicantData, ExtractedDocument, FormAnalysis
 
 FIELDS = Path(__file__).parent / "fixtures" / "fields.json"
 VALID = FIELDS.read_text(encoding="utf-8")
-SETTINGS = Settings(llm_base_url="http://model.test/v1", llm_timeout_s=5)
+CONTEXT_TOKENS = 16384
+ANSWER_TOKENS = 4096
+SETTINGS = Settings(
+    llm_base_url="http://model.test/v1", llm_timeout_s=5,
+    llm_context_tokens=CONTEXT_TOKENS, llm_max_tokens=ANSWER_TOKENS,
+)
 RADIO = "Wybierz, co mamy zrobić z nadpłatą"
 # Zmyślony wniosek w stylu folderu 5. Strona 2 zaczyna się po znaku \f.
 DOC_TEXT = (
@@ -64,6 +69,13 @@ def _answer_with_self_reference(padding: int = 0) -> str:
     radio = next(field for field in fields if field["label"] == RADIO)
     radio["show_if"] = {"field": RADIO, "equals": radio["options"][0]}
     radio["description"] = "x" * padding
+    return json.dumps(data, ensure_ascii=False)
+
+
+def _answer_with_missing_condition_source() -> str:
+    data = json.loads(VALID)
+    field = data["subject_pages"][0]["sections"][0]["fields"][0]
+    field["show_if"] = {"field": "Nieistniejące pole testowe", "equals": "A"}
     return json.dumps(data, ensure_ascii=False)
 
 
@@ -118,6 +130,27 @@ def test_valid_answer_is_returned_as_form_analysis_after_one_request() -> None:
     assert len(model.requests) == 1
 
 
+def test_repairs_repeated_options_missing_checkbox_options_and_empty_identifier_choice(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    data = json.loads(VALID)
+    data["applicant"].update(entity_ids=[], entity_ids_one_of=True)
+    data["subject_pages"] = [{"title": "Przedmiot testowy", "sections": [{"title": "Zgody", "fields": [
+        {"label": "Cel", "type": "RADIO", "options": ["A", "B"]},
+        {"label": "Zgoda testowa", "type": "CHECKBOX", "show_if": {"field": "Cel", "equals": "A", "any_of": ["A"]}},
+    ]}]}]
+    model = FakeModel(json.dumps(data), VALID)
+
+    result = _run(model)
+
+    assert len(model.requests) == 1
+    assert result.applicant.entity_ids_one_of is False
+    checkbox = result.subject_pages[0].sections[0].fields[1]
+    assert checkbox.options == ["Tak"]
+    assert checkbox.show_if and checkbox.show_if.any_of == []
+    assert sum(msg.startswith("Analiza: naprawa – ") for msg in caplog.messages) == 3
+
+
 def test_request_carries_rules_schema_and_prepared_text() -> None:
     model = FakeModel(VALID)
     _run(model)
@@ -132,6 +165,18 @@ def test_request_carries_rules_schema_and_prepared_text() -> None:
     assert "--- Strona 2 ---\nKwotę nadpłaty proszę:" in user["content"]
     assert "z tytułu … w kwocie … zł" in user["content"]
     assert "...." not in user["content"] and "____" not in user["content"]
+
+
+def test_request_explains_p14_show_if() -> None:
+    model = FakeModel(VALID)
+    _run(model)
+    prompt = model.requests[0]["messages"][0]["content"]
+    assert (
+        "- show_if.field to dokładna etykieta wcześniejszego pola wyboru, jednoznaczna na wszystkich stronach przedmiotu.\n"
+        "- Podaj jedną opcję w equals, a kolejne w any_of. Wystarczy wybranie jednej z nich.\n"
+        "- show_if_all wymaga wszystkich warunków razem z show_if. Warunki mogą dotyczyć pola lub całej sekcji.\n"
+    ) in prompt
+    assert "na tej samej stronie" not in prompt
 
 
 def test_ocr_text_is_marked_as_possibly_misspelled() -> None:
@@ -168,6 +213,15 @@ def test_prompt_schema_keeps_every_description_and_the_applicant_contract() -> N
     assert [value for value in _values(schema, "title") if isinstance(value, str)] == []
 
 
+def test_prompt_schema_explains_option_lists_and_single_confirmations() -> None:
+    definitions = _prompt_schema()["$defs"]
+    alternatives = definitions["ShowIf"]["properties"]["any_of"]["description"]
+    choices = definitions["SubjectField"]["properties"]["options"]["description"]
+    assert "Pusta lista, gdy warunek to jedna opcja. Nigdy nie powtarzaj w any_of wartości equals." in alternatives
+    assert "Każda opcja wyboru to element options jednego pola, nigdy osobne pole." in choices
+    assert "Pojedyncza zgoda lub oświadczenie to CHECKBOX z jedną opcją „Tak”." in choices
+
+
 def test_invalid_answer_is_retried_with_the_validator_message() -> None:
     wrong = _answer_with_self_reference()
     model = FakeModel(wrong, VALID)
@@ -190,8 +244,23 @@ def test_truncated_answer_is_retried_with_a_note_about_length() -> None:
     assert correction.startswith(f"{TRUNCATED_NOTE}\n{CORRECTION_INTRO}\n- cały JSON: Invalid JSON")
 
 
+def test_retry_uses_a_temperature_floor_only_when_temperature_is_enabled() -> None:
+    observed = []
+    for temperature in (0, 0.2, 0.7, None):
+        settings = replace(SETTINGS, llm_temperature=temperature)
+        model = FakeModel("{}", VALID)
+        assert analyze(DOC, settings=settings, transport=model.transport) == FormAnalysis.model_validate_json(VALID)
+        assert settings.llm_temperature == temperature
+        observed.append([body.get("temperature", "pominięta") for body in model.requests])
+
+    assert observed == [[0, 0.3], [0.2, 0.3], [0.7, 0.7], ["pominięta", "pominięta"]]
+
+
 def test_two_invalid_answers_end_with_controlled_503_without_a_third_try() -> None:
-    model = FakeModel(_answer_with_self_reference(), _answer_with_self_reference(), VALID)
+    data = json.loads(VALID)
+    del data["title"]
+    invalid = json.dumps(data)
+    model = FakeModel(invalid, invalid, VALID)
     with pytest.raises(LLMUnavailable) as caught:
         _run(model)
     assert (caught.value.status_code, caught.value.detail) == (503, UNAVAILABLE_DETAIL)
@@ -203,6 +272,103 @@ def test_model_failure_is_503_and_is_not_retried() -> None:
     with pytest.raises(LLMUnavailable) as caught:
         _run(model)
     assert caught.value.detail == UNAVAILABLE_DETAIL
+    assert len(model.requests) == 1
+
+
+def _model_clock(monkeypatch: pytest.MonkeyPatch, *ticks: float) -> None:
+    clock = iter(ticks)
+    monkeypatch.setattr(llm, "time", SimpleNamespace(perf_counter=lambda: next(clock)))
+
+
+def test_last_chance_repairs_unresolved_condition_only_after_the_last_attempt(caplog: pytest.LogCaptureFixture) -> None:
+    model = FakeModel(*([_answer_with_missing_condition_source()] * 3))
+    settings = replace(SETTINGS, llm_max_attempts=3)
+
+    result = analyze(DOC, settings=settings, transport=model.transport)
+
+    assert result == FormAnalysis.model_validate_json(VALID)
+    assert len(model.requests) == 3
+    assert sum(msg.startswith("Analiza: naprawa – S2 ") for msg in caplog.messages) == 1
+    assert "Analiza: użyto napraw ostatniej szansy (liczba notatek: 1)" in caplog.messages
+
+
+def test_d11_refuses_a_retry_and_tries_last_chance(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    _model_clock(monkeypatch, 0, 90)
+    model = FakeModel(_answer_with_missing_condition_source())
+
+    assert _run(model) == FormAnalysis.model_validate_json(VALID)
+    assert len(model.requests) == 1
+    assert "pominięto ponowienie: budżet D11" in caplog.text
+    assert "Analiza: użyto napraw ostatniej szansy (liczba notatek: 1)" in caplog.messages
+
+
+def test_last_chance_cannot_parse_invalid_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    broken = '{"title": '
+    validate = analysis._validate
+    last_attempts: list[str] = []
+
+    def track(content: str, *, last_chance: bool = False) -> FormAnalysis:
+        if last_chance:
+            last_attempts.append(content)
+            return validate(content, last_chance=True)
+        return validate(content)
+
+    monkeypatch.setattr(analysis, "_validate", track)
+    model = FakeModel(_answer_with_missing_condition_source(), broken)
+    with pytest.raises(LLMUnavailable) as caught:
+        _run(model)
+    assert caught.value.status_code == 503
+    assert len(model.requests) == 2 and last_attempts == [broken]
+
+
+def test_retry_is_skipped_when_the_projected_time_exceeds_d11(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+) -> None:
+    _model_clock(monkeypatch, 0, 90, 90, 100)
+    model = FakeModel("{}", VALID)
+    with pytest.raises(LLMUnavailable) as caught:
+        _run(model)
+    assert caught.value.status_code == 503
+    assert len(model.requests) == 1
+    assert any(
+        record.levelno == logging.WARNING
+        and "pominięto ponowienie: budżet D11" in record.getMessage()
+        and "próby 90.0 s, ostatnia 90.0 s, prognoza 189.0 s, budżet 170.0 s" in record.getMessage()
+        for record in caplog.records
+    )
+
+
+def test_retry_is_sent_when_the_projected_time_equals_the_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    _model_clock(monkeypatch, 0, 50, 50, 80)
+    model = FakeModel("{}", VALID)
+    settings = replace(SETTINGS, llm_analysis_budget_s=105.0)
+    assert analyze(DOC, settings=settings, transport=model.transport) == FormAnalysis.model_validate_json(VALID)
+    assert len(model.requests) == 2
+
+
+@pytest.mark.parametrize(("elapsed_second", "expected_requests"), [(40, 3), (50, 2)])
+def test_third_attempt_uses_the_sum_of_previous_attempts(
+    monkeypatch: pytest.MonkeyPatch, elapsed_second: int, expected_requests: int,
+) -> None:
+    end_second = 70 + elapsed_second
+    _model_clock(monkeypatch, 0, 70, 70, end_second, end_second, end_second + 10)
+    model = FakeModel("{}", "{}", VALID)
+    settings = replace(SETTINGS, llm_max_attempts=3)
+    if expected_requests == 3:
+        assert analyze(DOC, settings=settings, transport=model.transport) == FormAnalysis.model_validate_json(VALID)
+    else:
+        with pytest.raises(LLMUnavailable):
+            analyze(DOC, settings=settings, transport=model.transport)
+    assert len(model.requests) == expected_requests
+
+
+def test_max_attempts_one_sends_no_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    _model_clock(monkeypatch, 0, 1)
+    model = FakeModel("{}", VALID)
+    settings = replace(SETTINGS, llm_max_attempts=1)
+    with pytest.raises(LLMUnavailable) as caught:
+        analyze(DOC, settings=settings, transport=model.transport)
+    assert caught.value.status_code == 503
     assert len(model.requests) == 1
 
 
@@ -244,6 +410,30 @@ def test_context_budget_decides_before_any_request(
     assert "analizy fragmentami" in caplog.text
 
 
+def test_f8_size_fits_the_larger_budget_including_retry() -> None:
+    doc = ExtractedDocument(source_format="docx", text=_form_text(31_000))
+    model = FakeModel(_answer_with_self_reference(), VALID)
+    with pytest.raises(LLMUnavailable) as caught:
+        analyze(doc, settings=SETTINGS, transport=model.transport)
+    assert caught.value.status_code == 503
+    assert model.requests == []
+
+    large = replace(SETTINGS, llm_context_tokens=65536, llm_max_tokens=8192)
+    assert analyze(doc, settings=large, transport=model.transport) == FormAnalysis.model_validate_json(VALID)
+    first, second = model.requests
+    assert first["max_tokens"] == second["max_tokens"] == 8192
+    assert second["messages"][2]["role"] == "assistant"
+
+
+def test_response_limit_is_reserved_in_the_context_before_any_request() -> None:
+    doc = ExtractedDocument(source_format="docx", text=_form_text(13_000))
+    settings = replace(SETTINGS, llm_max_tokens=8192)
+    model = FakeModel(VALID)
+    with pytest.raises(LLMUnavailable):
+        analyze(doc, settings=settings, transport=model.transport)
+    assert model.requests == []
+
+
 def test_prompt_cut_by_a_server_with_smaller_context_is_503(caplog: pytest.LogCaptureFixture) -> None:
     """Recenzja K3: tekst rozmiaru folderu 9 na serwerze z domyślnym kontekstem Ollamy (4096)."""
     model = FakeModel(VALID, VALID, context_tokens=4096)
@@ -253,6 +443,37 @@ def test_prompt_cut_by_a_server_with_smaller_context_is_503(caplog: pytest.LogCa
     assert caught.value.detail == UNAVAILABLE_DETAIL
     assert len(model.requests) == 1
     assert "serwer policzył 4096 tokenów promptu" in caplog.text
+    assert "OLLAMA_CONTEXT_LENGTH" in caplog.text
+
+
+def test_prompt_cut_by_eden_has_no_ollama_hint(caplog: pytest.LogCaptureFixture) -> None:
+    @dataclass(frozen=True)
+    class EdenSettings(Settings):
+        llm_provider: str = "edenai"
+
+    settings = EdenSettings(
+        llm_base_url="https://api.eu.edenai.run/v3", llm_model="ovhcloud/Qwen3.5-9B", llm_api_key="synthetic-test-key",
+    )
+    model = FakeModel(VALID, context_tokens=4096)
+    doc = ExtractedDocument(source_format="docx", text=_form_text(13_000))
+    with pytest.raises(LLMUnavailable):
+        analyze(doc, settings=settings, transport=model.transport)
+    assert "Zapytanie zostało przycięte" in caplog.text
+    assert "OLLAMA_CONTEXT_LENGTH" not in caplog.text
+
+
+def test_reasoning_logs_only_its_length(caplog: pytest.LogCaptureFixture) -> None:
+    reasoning = "Model rozważa treść formularza."
+
+    def reply(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"choices": [{"message": {"content": VALID, "reasoning_content": reasoning}}]})
+
+    assert analyze(DOC, settings=SETTINGS, transport=httpx.MockTransport(reply)) == FormAnalysis.model_validate_json(VALID)
+    assert any(
+        record.levelno == logging.WARNING and f"tok rozumowania ({len(reasoning)} znaków)" in record.getMessage()
+        for record in caplog.records
+    )
+    assert reasoning not in caplog.text
 
 
 def test_answer_without_token_usage_is_accepted() -> None:

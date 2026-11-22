@@ -166,6 +166,25 @@ LLM_CONTEXT_TOKENS (Marcin, prośba Mikołaja do K3):
   Koszt na CPU zmierzony dla `qwen3.5:4b` w kontenerze `ollama`: 3,7 → 4,2 GB (`ollama ps`), kontener 4,28 → 4,84 GB.
   Modele w chmurze mają więcej (Qwen3.5-9B: 262144); wtedy `LLM_CONTEXT_TOKENS` można podnieść w `.env`.
 
+M1.7 (Marcin): `LLM_PROVIDER` według D9 i DELEGACJA rozdz. 3 z gałęzi lidera `lead/mentor-2111`. Bez nowej zależności.
+
+- **Dostawca.** `ollama` (domyślnie) albo `edenai`, wielkość liter bez znaczenia. Inna wartość zatrzymuje start API.
+- **Host przy `edenai`.** Tylko `https://api.edenai.run` i `https://api.eu.edenai.run` (adres z README K3.1-2), port 443,
+  bez użytkownika w adresie. Inny adres zatrzymuje start (D9 pkt 2).
+- **Klucz przy `edenai`.** Wymagany. `ollama` z `env.example` też się nie liczy. Komunikat błędu nie podaje klucza.
+- **Modele przy `edenai`** (D9 pkt 7 i 8): tylko trasy otwartego Qwen3.5-9B z publicznego katalogu Eden AI:
+  `ovhcloud/Qwen3.5-9B`, `ionos/Qwen/Qwen3.5-9B`, `flexai/Qwen3.5-9B`, `flexai/Qwen3.5-9B@eu`,
+  `greenference/qwen3.5-9b`, `tensorx/qwen/qwen3.5-9b`, `deepinfra/Qwen/Qwen3.5-9B`, `together_ai/Qwen/Qwen3.5-9B`.
+  Ostatnie dwie mają w katalogu datę wycofania; są na liście, bo model jest otwarty, ale wybór trasy należy do lidera.
+  Inny model wymaga wpisu tutaj i w `EDENAI_OPEN_MODELS` (`config.py`). Test pilnuje, że oba miejsca się zgadzają.
+- **Adres domyślny.** Pusty `LLM_BASE_URL` daje adres dostawcy: przy `edenai` `https://api.edenai.run/v3`, przy `ollama`
+  `LLM_OLLAMA_URL` albo `http://localhost:11434/v1`. Compose podaje `LLM_OLLAMA_URL: http://ollama:11434/v1` osobno,
+  zamiast domyślnej w `LLM_BASE_URL`. Dzięki temu adres Ollamy nie trafia do dostawcy `edenai` (DELEGACJA, M1.7).
+- **Adres Eden AI przy `ollama`** zatrzymuje start (recenzja M1.7). Inaczej `LLM_PROVIDER=ollama` z adresem Eden AI
+  omijałby listę modeli otwartych. Komunikaty o dostawcy i modelu nie powtarzają wartości: klucz wklejony w złą
+  zmienną trafiłby do logu (D9 pkt 3).
+- **Sieć.** `api` zostaje w zwykłej sieci compose z wyjściem do internetu. Test pilnuje, że jego sieć nie jest `internal`.
+
 K2.4 (Mikołaj): XLSX i ODS bez nowej zależności: `zipfile` i `ElementTree` z biblioteki standardowej,
 jak DOCX w K2.1. `openpyxl` i `odfpy` z DELEGACJA niepotrzebne, więc `requirements.txt` bez zmian.
 
@@ -190,6 +209,28 @@ jak DOCX w K2.1. `openpyxl` i `odfpy` z DELEGACJA niepotrzebne, więc `requireme
   72 MB (39 MB po samym imporcie). Przed limitami recenzja zmierzyła 416–867 MB dla jednego
   długiego wiersza, głębokiego zagnieżdżenia i komórki z milionem elementów.
 
+K3.1-3 – E1 na Eden AI i naprawy analizy
+
+- Pomiar człowieka 22.11, 01:10–01:30. `ovhcloud/Qwen3.5-9B` ignorowała wyłączenie myślenia przy
+  `reasoning_effort` ustawionym na `none` lub `disable` oraz przy `chat_template_kwargs.enable_thinking=false`.
+  Odpowiedzi z limitem 8192 kończyły się `length`, bez treści lub z uciętym JSON-em. Na
+  `flexai/Qwen3.5-9B@eu` z `reasoning_effort=off` i `enable_thinking=false` model nie zwracał toku
+  rozumowania. Przepustowość wyniosła ok. 130–160 tok/s, a próby 3,5–65 s. Trasę zatwierdza lider (D9 pkt 8).
+- E1 na flexai z kontekstem 65536, limitem odpowiedzi 8192 i trzema próbami: F4, F6, F7, F8 przeszły
+  z lint 0 i oparciem 90–100%. F2, F3, F5, F9 dały 503. F9 przy limicie 16384 zakończył generację
+  z 8549 tokenami i `stop`, po czym walidacja zgłosiła 29 błędów. Przy temperaturze 0 próby 2 i 3
+  powtórzyły wynik z użyciem 5130/1387 tokenów.
+- Walidacja surowych odpowiedzi F2–F9 potwierdziła W1, powtórzone alternatywy (25 błędów wobec 24 w
+  pierwotnym histogramie), W2, CHECKBOX bez opcji (11 błędów, 15 pól po uwzględnieniu zamaskowanych),
+  W3, sprzeczny wybór identyfikatora (1), W4, RADIO bez opcji (2 w F5 oraz 3 ujawnione po N1–N3 w F9)
+  i W5, brakujące źródło w F4 lub opcja w F6. Po ostatniej szansie walidacja kontraktu dała 8/8.
+- Kontrakt D4 zostaje. Przed walidacją każdej próby usuwamy duplikaty alternatyw, wyłączamy wybór
+  identyfikatora przy mniej niż dwóch i uzupełniamy pustą opcję CHECKBOX. Tylko w ostatniej szansie
+  zamieniamy puste RADIO/SELECT na CHECKBOX z `Tak`, aktualizujemy odwołania i usuwamy niepoprawne
+  warunki. Każda naprawa jest oznaczona w logu. Temperatura ponowienia wynosi co najmniej 0,3, gdy jest włączona.
+- Przy `edenai` domyślne są `https://api.eu.edenai.run/v3`, `flexai/Qwen3.5-9B@eu`, kontekst 65536,
+  limit odpowiedzi 16384, `reasoning_effort=off` i `chat_template_kwargs.enable_thinking=false`.
+  Kontekst 65536 zostawia miejsce dla F8 i 16384 tokenów odpowiedzi. Obowiązuje walidacja dostawcy M1.7.
 K2-FINAL (Mikołaj, decyzja lidera 2026-11-21: jedno zadanie zamiast K2.5–K2.7):
 
 | What         | Why                                                                              | Licence      |
@@ -303,3 +344,39 @@ Tesseracta (`libleptonica6` z pakietu `tesseract-ocr`, M1.3); wołamy ją przez 
 ## Event: whole project
 
 - **D7 – odpowiedzialność.** Lider rozstrzyga kontrakty, zakres i integrację. `SPEC.md` określa kontrakty, `DECISIONS.md` zapisuje decyzje, `DELEGACJA.md` wyznacza wykonawców, a `PROGRESS*.md` rejestruje postęp i wyniki bramek.
+- **D8 – sensowna cyfryzacja formularzy.** Mentor COI potwierdził 2026-11-21 trzy zasady. Repozytorium już je stosuje, więc D8 nie zmienia kontraktu ani generatora.
+  1. Sekcje wnioskodawcy wynikają z papieru. PESEL, adresy, NIP/REGON/KRS, pełnomocnik, adres do korespondencji i kontakt pojawiają się tylko wtedy, gdy papier o nie pyta. Robią to kontrakt P1.2a (`FormAnalysis.applicant`) i generator P1.2b (tabela w SZABLONY rozdz. 1).
+  2. Zostaje każda informacja potrzebna do załatwienia sprawy: dane innych osób, daty, załączniki, instrukcje, wybory i ich warunki (opis `subject_pages` w `models.py`, P1.2a).
+  3. Prosty język i warunki. Etykiety w 2. osobie, bez „Na podstawie art. …”. Dane dopisywane przy opcji to pole z SHOW tej opcji (`label` i `show_if` w `models.py`, SZABLONY rozdz. 6).
+  Pozostałe reguły SZABLONY rozdz. 6, np. lista „Usuwamy z papieru”, to nadal decyzje zespołu bez potwierdzenia mentora.
+- **D9 – Eden AI: wyjątek od lokalnego modelu.** COI dopuściło 2026-11-21, po konsultacji lidera, Eden AI udostępnione zespołowi na potrzeby zadania „Cyfryzacja formularzy”. To jedyny wyjątek od zakazu zewnętrznych API (Treść pkt 5). Innych zewnętrznych API nie używamy, także chmury Ollamy (`OLLAMA_NO_CLOUD=1` zostaje). Wcześniej tego dnia mentor dopuszczał Eden AI tylko w eksperymentach; ta decyzja to zastępuje.
+  1. Ollama zostaje jako alternatywa. Lokalny `qwen3.5:4b` w compose jest wartością domyślną repozytorium i działa bez klucza. Eden AI włącza człowiek ustawieniem `LLM_PROVIDER=edenai`. Adapter to zadanie K3.1, konfiguracja to M1.7 (`DELEGACJA.md` rozdz. 3 i 5).
+  2. Model woła nadal tylko `backend/app/llm.py`. Przy `LLM_PROVIDER=edenai` dozwolony jest tylko host Eden AI: inny adres zatrzymuje start API.
+  3. Klucz Eden AI leży poza repozytorium i poza dostępem agentów. Człowiek podaje go tylko na czas uruchomienia (demo, pomiar, eval), np. `docker compose --env-file` z plikiem spoza katalogów roboczych. Klucz nie trafia do `env.example`, logów, raportów, zrzutów ekranu ani promptów.
+  4. Agenci nie czytają klucza i nie wysyłają zapytań do Eden AI. Testy i e2e też nie: używają atrapy transportu albo `LLM_FIXTURE`. Pomiary na żywo robi człowiek.
+  5. Do Eden AI idzie treść wczytanego pliku. Wysyłamy puste formularze z materiałów COI; folder 1 zostaje poza promptami (D5). README i dokumentacja architektury mówią o tym wprost.
+  6. Nowa zależność nie jest planowana: klient `httpx` już jest. Gdyby była potrzebna, dostaje linię z licencją w tym pliku.
+  7. Tylko modele otwarte. Mentorzy COI (odpowiedź z Discorda, 2026-11-21) dopuszczają model w chmurze i komunikację przez API tylko wtedy, gdy model jest otwarty, a jego wagi pozwalają wdrożyć go samodzielnie na własnej infrastrukturze. Modeli zamkniętych, dostępnych wyłącznie przez API, nie wolno używać. Eden AI udostępnia też modele zamknięte, więc przy `edenai` `LLM_MODEL` to wyłącznie model otwarty zapisany w tym pliku.
+  8. Model docelowy K3.1 to **Qwen3.5-9B** (decyzja lidera, 2026-11-21). Licencja Apache-2.0, wagi publiczne na Hugging Face (`Qwen/Qwen3.5-9B`). Ten sam model jest w Ollamie jako `qwen3.5:9b` (6,6 GB w Q4_K_M), więc da się go wdrożyć samodzielnie.
+     Dostępność: publiczny katalog Eden AI (`GET https://api.edenai.run/v3/models`, odczyt bez klucza, 2026-11-21) ma go pod ośmioma identyfikatorami. Wszystkie deklarują kontekst 262 144 tokeny i `supports_response_schema: true`. Kandydaci z regionu UE, z obrazem na wejściu i bez daty wycofania: `ovhcloud/Qwen3.5-9B` i `ionos/Qwen/Qwen3.5-9B`. Pozostałe: `flexai/Qwen3.5-9B` (także `@eu`), `greenference/qwen3.5-9b` (tylko tekst), `tensorx/qwen/qwen3.5-9b` (fp8). `deepinfra/Qwen/Qwen3.5-9B` i `together_ai/Qwen/Qwen3.5-9B` mają w katalogu datę wycofania 2026-10-21, więc nie wybieramy ich bez sprawdzenia.
+     Niepotwierdzone bez zapytania na żywo: czy wybrana trasa przyjmuje `reasoning_effort` (katalog deklaruje go tylko dla `together_ai`), jak wyłączyć myślenie (karta modelu: domyślnie włączone) i jaki jest czas odpowiedzi. Trasę wybiera lider po pomiarze człowieka z kluczem.
+  Stan: kod woła dziś tylko Ollamę. Do Eden AI nie poszło jeszcze żadne zapytanie do modelu, więc czas i jakość są niezmierzone.
+- **D10 – jeden dokument, jeden JSON; pola, warianty, zależności.** Decyzja lidera po konsultacji z COI (2026-11-21), podtrzymana tego samego dnia wieczorem razem z D11.
+  1. Jeden plik wejściowy daje dokładnie jeden JSON COI. Dotyczy to także formularza 9 (trzy wnioski w jednym dokumencie): powstaje jeden formularz, nie trzy. `POST /api/forms` już tak działa (200 to jeden JSON), a E1 oddaje jeden JSON na formularz.
+  2. Wiele pól, warianty i zależności mają być odwzorowane poprawnie. Wariant z papieru (np. rodzaj wniosku w formularzu 9) to pole wyboru, a dane potrzebne tylko w jednym wariancie mają warunek SHOW tej opcji. Żadne pole z papieru nie ginie (D8 pkt 2).
+  3. Brak nieuzasadnionych pól: każde pole, opcja, sekcja i oświadczenie ma podstawę w dokumencie. Dotyczy analizy (zasada podstawy w treści w prompcie K3) i szablonu (D8 pkt 1).
+  Stan kontraktu po P1.4 (na `main`): warunki SHOW działają na polach i sekcjach przedmiotu, przyjmują alternatywy i koniunkcje oraz źródła z wcześniejszych stron, a cykle są wykrywane. Formularz 9 jest jednym formularzem. Link `flow` w formacie COI nie ma warunku, więc stron alternatywnych nie zapisujemy.
+- **D11 – cel wydajnościowy.** Cały proces, od przyjęcia pliku do JSON-a (kontrola, odczyt z OCR, analiza z ponowieniami, generator, linter), ma trwać około 180 s, także podczas live demo. Granica orientacyjna to 200 s. Decyzja lidera po konsultacji z COI (2026-11-21). Zastępuje „< 60 s na formularz na CPU” (DELEGACJA rozdz. 4), „JSON w < 2 min” (M1.5) i miarę M7 „< 60 s na plik” (`docs/ZESTAW_TESTOWY.md`).
+  Stan pomiarów: lokalny Qwen na samym CPU nie mieści się w celu. K1: 238–344 s na jedną próbę z DOCX. K3 (gałąź `mikolaj/k3`, przed scaleniem): 1121 s w dwóch próbach. Eden AI jest niezmierzone.
+  Skutek: suma limitów czasu ma się mieścić w budżecie. Dziś `LLM_TIMEOUT_S=120` i dwie próby K3 to do 240 s samej analizy. Budżet rozdzielają K3.1 i M1.4 po pomiarze. `LLM_TIMEOUT_S=600` (prośba z K1) nie może być wartością domyślną.
+- **D12 – środowisko obrony.** Mentorzy COI (odpowiedź z Discorda, 2026-11-21): obrona działa na architekturze x86, bez dedykowanego GPU. Ilość RAM-u i stabilność internetu są niepotwierdzone.
+  1. Obrazy i model lokalny muszą działać na x86-64 i na samym CPU. `docker-compose.yml` nie rezerwuje GPU, a K1 mierzono na x86 (Core Ultra 7 255U) bez GPU.
+  2. Lokalny model na samym CPU nie spełnia D11 (K1), więc ścieżką na live demo jest Eden AI (D9). Wymaga ona internetu, którego stabilność jest niepotwierdzona.
+  3. Ollama zostaje alternatywą bez internetu. Przełącza ją człowiek zmienną `LLM_PROVIDER`. `qwen3.5:9b` lokalnie jest niezmierzony, a jego plik ma 6,6 GB wobec 3,3 GB dla 4B. Przy niepotwierdzonym RAM-ie nie zakładamy, że się zmieści.
+  4. Obrazy i model lokalny pobieramy przed obroną, nie w jej trakcie.
+  Otwarte: ilość RAM-u i stabilność internetu.
+- **D13 – walidatory potwierdzone.** Mentor COI (2026-11-21): puste tablice `validation` w przykładach nie zabraniają walidatorów. Należy używać odpowiednich dostępnych reguł, jeśli wynikają z analizy formularza. To zamyka pytanie 1 z `docs/BRIEF_ZESPOL.md` rozdz. 7 i potwierdza SZABLONY rozdz. 5, P1 (`ADD_VALIDATORS = True`) i P1.3a. Dostępne reguły to dziewięć nazw z Reguł technicznych (lista w `lint.py`). Walidator dodajemy tylko wtedy, gdy wynika z pola: z rodzaju danych albo z obowiązkowości. Kod bez zmian.
+- **D14 – słowniki z pliku COI.** Mentor COI (2026-11-21): identyfikatory słowników i konkretne wartości bierzemy z przekazanego pliku słowników COI. Nie kopiujemy bez podstawy różniących się wartości z formularzy przykładowych i nie wymyślamy nowych.
+  Plik „Hacknation - Słowniki” z `materialy/` wymienia: Województwo, Powiat, Gmina, Miejscowość, Kraje i Numery kierunkowe. Słownik wolno podpiąć do listy rozwijanej, radia i checkboxa, a słowniki adresowe i Kraje tylko do listy rozwijanej. Plik podaje nazwy, bez list wartości i bez identyfikatorów technicznych.
+  Stan kodu: generator używa `Kraje` (jest w pliku) oraz `TERYT_4G_DOWODOWY` z `multiLevelTree` dla adresu w Polsce (`generator/template.py`). `TERYT_4G_DOWODOWY` podają Standardy COI (rozdz. „Adres”: „Zaimportowany słownik: TERYT_4G_DOWODOWY”) i oba wzorce. Plik słowników go nie wymienia, a osobno wymienia Województwo, Powiat, Gminę i Miejscowość. `TERYT_DOWODOWY` jest tylko we wzorcach, a wzorce 1 i 5 używają obu nazw różnie. Wartość domyślna `["Polska"]` w `Kraje` pochodzi z obu wzorców. Linter nie sprawdza nazwy słownika. Kontrakt `FormAnalysis` nie pozwala modelowi wskazać słownika w polach przedmiotu.
+  Otwarte: słownik adresu zamieszkania, czyli `TERYT_4G_DOWODOWY` ze Standardów i wzorców albo Województwo, Powiat, Gmina, Miejscowość z pliku słowników. Dwa dokumenty COI mówią tu co innego, więc to pytanie do mentora. Do odpowiedzi generator zostaje bez zmian.

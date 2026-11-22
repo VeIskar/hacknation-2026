@@ -1,4 +1,4 @@
-"""K1: pomiar lokalnego modelu na formularzu z folderu 5 (DELEGACJA.md, rozdz. 3 i 4).
+"""K1: pomiar modelu na formularzu z folderu 5 (DELEGACJA.md, rozdz. 3 i 4).
 
 Mierzy czas, tokeny, poprawność JSON, FormAnalysis.model_validate i zgodność pól przedmiotu
 z backend/tests/fixtures/fields.json (nasz opis wniosku z folderu 5).
@@ -22,6 +22,7 @@ import statistics
 import sys
 import unicodedata
 import zipfile
+from dataclasses import replace
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -37,13 +38,11 @@ from pydantic import ValidationError
 
 from app.config import Settings
 from app.errors import LLMUnavailable
-from app.llm import ChatResult, chat_json, image_part
+from app.llm import ChatResult, answer_token_limit, chat_json, image_part, provider
 from app.models import FormAnalysis
 
 MATERIALS = REPO / "materialy"
 REFERENCE = REPO / "backend" / "tests" / "fixtures" / "fields.json"
-DEFAULT_BASE_URL = "http://localhost:11434/v1"
-DEFAULT_MODEL = "qwen3.5:4b"
 IMAGE_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png"}
 # Etykiety uznajemy za to samo pole od tego podobieństwa. Dobrane ręcznie na parach
 # w rodzaju „Numer rachunku” / „Numer rachunku bankowego”, nie z danych kontrolnych.
@@ -238,12 +237,12 @@ def _summary(runs: list[dict[str, Any]]) -> dict[str, Any]:
 
 def run_benchmark(
     inputs: list[Path],
-    models: list[str],
+    models: list[str] | None,
     *,
     runs: int,
-    base_url: str,
-    timeout_s: float,
-    max_tokens: int,
+    base_url: str | None = None,
+    timeout_s: float | None = None,
+    max_tokens: int | None = None,
     raw_dir: Path | None = None,
     transport: httpx.BaseTransport | None = None,
 ) -> dict[str, Any]:
@@ -252,16 +251,25 @@ def run_benchmark(
     if raw_dir is not None:
         check_output_dir(raw_dir)
         raw_dir.mkdir(parents=True, exist_ok=True)
+    settings = Settings.from_env()
+    llm_provider = provider(settings)
+    if timeout_s is None:
+        timeout_s = settings.llm_timeout_s
+        if llm_provider == "ollama" and not os.environ.get("LLM_TIMEOUT_S", "").strip():
+            timeout_s = 900.0  # Dotychczasowy domyślny czas pomiaru lokalnego na CPU.
+    settings = replace(settings, llm_base_url=base_url or settings.llm_base_url, llm_timeout_s=timeout_s)
+    if max_tokens is None:
+        max_tokens = answer_token_limit(settings)
     reference = json.loads(REFERENCE.read_text(encoding="utf-8"))
     report: dict[str, Any] = {
         "started": datetime.now(UTC).isoformat(timespec="seconds"),
-        "base_url": base_url,
-        "ollama_version": ollama_version(base_url, transport),
+        "base_url": settings.llm_base_url,
+        "ollama_version": ollama_version(settings.llm_base_url, transport) if llm_provider == "ollama" else None,
         "max_tokens": max_tokens,
         "models": {},
     }
-    for model in models:
-        settings = Settings(llm_base_url=base_url, llm_model=model, llm_timeout_s=timeout_s)
+    for model in models or [settings.llm_model]:
+        model_settings = replace(settings, llm_model=model)
         entry: dict[str, Any] = {"inputs": {}}
         report["models"][model] = entry
         try:
@@ -270,7 +278,7 @@ def run_benchmark(
                 WARMUP_SCHEMA,
                 schema_name="Warmup",
                 max_tokens=16,
-                settings=settings,
+                settings=model_settings,
                 transport=transport,
             )
         except LLMUnavailable as exc:
@@ -283,7 +291,8 @@ def run_benchmark(
             for run in range(1, runs + 1):
                 try:
                     answer: ChatResult = chat_json(
-                        messages, FormAnalysis.model_json_schema(), max_tokens=max_tokens, settings=settings, transport=transport
+                        messages, FormAnalysis.model_json_schema(), max_tokens=max_tokens,
+                        settings=model_settings, transport=transport,
                     )
                 except LLMUnavailable as exc:
                     results.append({"run": run, "error": repr(exc.__cause__)})
@@ -313,23 +322,22 @@ def run_benchmark(
 def main(argv: list[str] | None = None, transport: httpx.BaseTransport | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--input", type=Path, action="append", help="plik formularza; domyślnie DOCX z folderu 5")
-    parser.add_argument("--model", action="append", help=f"model w Ollamie; domyślnie {DEFAULT_MODEL}")
+    parser.add_argument("--model", action="append", help="model; domyślnie LLM_MODEL lub qwen3.5:4b")
     parser.add_argument("--runs", type=int, default=1)
-    parser.add_argument("--base-url", default=None, help=f"domyślnie LLM_BASE_URL albo {DEFAULT_BASE_URL}")
-    parser.add_argument("--timeout", type=float, default=900.0, help="sekundy na jedno zapytanie (CPU bywa wolne)")
-    parser.add_argument("--max-tokens", type=int, default=4096)
+    parser.add_argument("--base-url", help="domyślnie LLM_BASE_URL lub http://localhost:11434/v1")
+    parser.add_argument("--timeout", type=float, help="sekundy na zapytanie; domyślnie LLM_TIMEOUT_S (Ollama bez env: 900)")
+    parser.add_argument("--max-tokens", type=int, help="domyślnie LLM_MAX_TOKENS lub limit dostawcy")
     parser.add_argument("--raw-dir", type=Path, help="zapis surowych odpowiedzi: tylko materialy/ albo poza repo")
     parser.add_argument("--report", type=Path, help="raport JSON z liczbami: tylko materialy/ albo poza repo")
     args = parser.parse_args(argv)
 
-    base_url = args.base_url or os.environ.get("LLM_BASE_URL") or DEFAULT_BASE_URL
     if args.report is not None:
         check_output_dir(args.report.parent)
     report = run_benchmark(
         args.input or [default_input()],
-        args.model or [DEFAULT_MODEL],
+        args.model,
         runs=args.runs,
-        base_url=base_url,
+        base_url=args.base_url,
         timeout_s=args.timeout,
         max_tokens=args.max_tokens,
         raw_dir=args.raw_dir,
@@ -342,7 +350,7 @@ def main(argv: list[str] | None = None, transport: httpx.BaseTransport | None = 
     print(text)
     unavailable = [m for m, e in report["models"].items() if "error" in e]
     if unavailable:
-        print(f"Brak pomiaru dla: {', '.join(unavailable)} (serwer {base_url} nie odpowiada).", file=sys.stderr)
+        print(f"Brak pomiaru dla: {', '.join(unavailable)} (serwer {report['base_url']} nie odpowiada).", file=sys.stderr)
         return 1
     return 0
 

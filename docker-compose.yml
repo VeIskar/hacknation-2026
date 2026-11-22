@@ -3,7 +3,8 @@
 # Every variable in env.example is listed under api.environment as ${NAME:-}: an unset one
 # arrives empty and keeps its default from backend/app/config.py. The explicit form works in
 # both Docker Compose and podman-compose (backend/tests/test_config.py checks the list).
-# LLM_BASE_URL defaults to the `ollama` service. Download the model once: scripts/pull_model.sh
+# LLM_PROVIDER=ollama (default) talks to the `ollama` service via LLM_OLLAMA_URL; edenai to Eden AI.
+# Download the local model once: scripts/pull_model.sh
 # Stała nazwa projektu: wolumen z modelem jest ten sam w każdym katalogu (klon, worktree).
 name: hacknation-2026
 services:
@@ -24,11 +25,24 @@ services:
       JWT_ENABLED: ${JWT_ENABLED:-}
       JWT_SECRET: ${JWT_SECRET:-}
       JWT_ALGORITHM: ${JWT_ALGORITHM:-}
-      LLM_BASE_URL: ${LLM_BASE_URL:-http://ollama:11434/v1}
+      # D9 (M1.7): `ollama` (domyślnie) albo `edenai`. Eden AI wymaga wyjścia do internetu.
+      LLM_PROVIDER: ${LLM_PROVIDER:-}
+      # Pusty adres daje adres dostawcy: Ollama z compose poniżej albo Eden AI.
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      # Adres Ollamy osobno, żeby przy `edenai` nie trafił do LLM_BASE_URL.
+      LLM_OLLAMA_URL: http://ollama:11434/v1
       LLM_MODEL: ${LLM_MODEL:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_TIMEOUT_S: ${LLM_TIMEOUT_S:-}
+      LLM_CONNECT_TIMEOUT_S: ${LLM_CONNECT_TIMEOUT_S:-}
+      LLM_ANALYSIS_BUDGET_S: ${LLM_ANALYSIS_BUDGET_S:-}
+      LLM_MAX_ATTEMPTS: ${LLM_MAX_ATTEMPTS:-}
       LLM_CONTEXT_TOKENS: ${LLM_CONTEXT_TOKENS:-}
+      LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-}
+      LLM_TEMPERATURE: ${LLM_TEMPERATURE:-}
+      LLM_REASONING_EFFORT: ${LLM_REASONING_EFFORT:-}
+      LLM_STRICT_SCHEMA: ${LLM_STRICT_SCHEMA:-}
+      LLM_EXTRA_BODY: ${LLM_EXTRA_BODY:-}
       LLM_FIXTURE: ${LLM_FIXTURE:-}
       OCR_LANG: ${OCR_LANG:-}
       ADD_VALIDATORS: ${ADD_VALIDATORS:-}
@@ -63,7 +77,7 @@ services:
       OLLAMA_CONTEXT_LENGTH: ${LLM_CONTEXT_TOKENS:-32768}
       # Model zostaje w pamięci, więc demo nie czeka na ponowne ładowanie.
       OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-24h}
-      # Bez modeli i usług w chmurze Ollamy (Treść pkt 5: zakaz zewnętrznych API; prośba Mikołaja).
+      # Serwis Ollamy działa lokalnie, bez modeli i usług w chmurze Ollamy.
       OLLAMA_NO_CLOUD: "1"
     read_only: true
     tmpfs:

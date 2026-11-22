@@ -10,7 +10,9 @@ Pkt 8 numeruje rozszerzenia inaczej niż pkt 3.3 (V: walidacje czy wizualizacja?
 Oddajemy też (pkt 3.2, 4, 5): dokumentację architektury, README (obraz, uruchomienie, konfiguracja,
 REST API), Docker bez roota z jawnymi wersjami obrazów, JSON-y formularzy do oceny, prezentację PDF
 do 10 slajdów, film do 3 minut. Zakazane (pkt 5): zewnętrzne API i SaaS, modele dostępne tylko
-przez API, licencje copyleft, trwały zapis plików.
+przez API, licencje copyleft, trwały zapis plików. COI dopuszcza model w chmurze przez API, jeśli
+jest otwarty i da się go wdrożyć samodzielnie; modele zamknięte są zakazane. Używamy tylko Eden AI
+udostępnionego zespołowi na to zadanie (D9).
 
 ## User and problem
 
@@ -33,11 +35,16 @@ papierowego wniosku na eUsługę to kilka dni analizy i konfiguracji.
 
 1. API `POST /api/forms`: jeden plik w 8 formatach daje JSON COI. Kontrola: MIME zgodny
    z rozszerzeniem, nazwa do 250 znaków bez `; : > < / \ | ' * % $`, rozmiar z `MAX_FILE_SIZE_MB`.
-   JSON spełnia schemat COI i Reguły techniczne (min. 2 strony, ostatnia FINISH, pola tylko
-   w sekcjach, `flow` łączy strony). Pkt 3.2; kroki 2, 3, 8. Właściciel: do uzupełnienia.
+   Wyjątki z materiałów COI: `.doc`, który w środku jest DOCX, jest czytany jak DOCX (pliki
+   `.DOC` z folderów 5 i 7), a `.jpe` jak `.jpg` (plik `.JPE` z folderu 7). JSON spełnia schemat COI i Reguły techniczne (min. 2 strony, ostatnia FINISH, pola tylko
+   w sekcjach, `flow` łączy strony). Jeden plik daje jeden JSON, także formularz 9 z trzema
+   wnioskami w jednym dokumencie (D10). Cel czasu: około 180 s na cały proces, granica
+   orientacyjna 200 s (D11). Pkt 3.2; kroki 2, 3, 8. Właściciel: do uzupełnienia.
 2. Treść JSON-a według SZABLONY_SEKCJI.md: strona „Dane” z sekcji standardowych, strony tematyczne
-   od AI, „Kontakt i zgody”, „Strona końcowa”. Dane inicjalne, słowniki, warunki SHOW, walidatory
-   z rozdz. 5. Pkt 3.2, rozszerzenia I i III; kroki 4, 5. Właściciel: do uzupełnienia.
+   od AI, „Kontakt i zgody”, „Strona końcowa”. Dane inicjalne, słowniki z pliku słowników COI
+   (D14), warunki SHOW, walidatory z rozdz. 5 (potwierdzone przez mentora, D13). Warianty i zależności z papieru to pola wyboru z warunkami SHOW. Każde pole ma
+   podstawę w dokumencie, bez pól nieuzasadnionych (D10).
+   Pkt 3.2, rozszerzenia I i III; kroki 4, 5. Właściciel: do uzupełnienia.
 3. Ekran „Wczytaj formularz”: wybór pliku, postęp, komunikat błędu, „Pokaż JSON”, „Pobierz JSON”.
    Rozszerzenie IV; kroki 1–3, 7, 8. Właściciel: do uzupełnienia.
 4. „Podgląd eUsługi” z JSON-a: strony, sekcje i pola, działające warunki SHOW, walidatory
@@ -55,7 +62,8 @@ nieliniowy).
 ## Out (said out loud, so nobody builds it)
 
 Edycja formularza w UI (kreator) · konta, logowanie, historia analiz, zapis plików · wysyłka
-wypełnionego formularza i integracja z systemem docelowym · wersja w Javie · zewnętrzne API modeli.
+wypełnionego formularza i integracja z systemem docelowym · wersja w Javie · zewnętrzne API modeli
+inne niż Eden AI i modele zamknięte (D9).
 
 ## API contract
 
@@ -106,26 +114,39 @@ Pole z kroku 6 demo:
 
 ## Real and mocked
 
-Prawdziwe: kontrola pliku, odczyt 8 formatów (skany przez OCR), otwarty model uruchomiony lokalnie
-w docker compose, budowa JSON-a, podgląd, walidatory, tabela zgodności.
+Prawdziwe: kontrola pliku, odczyt 8 formatów (skany przez OCR), analiza przez model (otwarty model
+lokalnie w docker compose, a po K3.1 także Eden AI, D9), budowa JSON-a, podgląd, walidatory,
+tabela zgodności.
 Atrapy: wartości danych inicjalnych (`MLPZ.*`) i słowników (`Kraje`, `TERYT_4G_DOWODOWY`) w podglądzie
-pochodzą z `frontend/src/data/demo.ts`. PESEL, NIP i REGON mają tam poprawne sumy kontrolne.
-Testy nie wołają modelu. Przy ustawionym `LLM_FIXTURE` moduł `backend/app/llm.py` zwraca
+pochodzą z `frontend/src/data/demo.ts`. Słownik adresu w Polsce jest nierozstrzygnięty (D14). PESEL, NIP i REGON mają tam poprawne sumy kontrolne.
+Testy nie wołają modelu ani Eden AI. Przy ustawionym `LLM_FIXTURE` moduł `backend/app/llm.py` zwraca
 `backend/tests/fixtures/fields.json`, a `playwright.config.ts` ustawia tę zmienną dla API.
-Ten fixture opisuje wniosek, który można złożyć w imieniu innej osoby (`WNIOSKODAWCY` = OBA).
+Ten fixture opisuje wniosek, który można złożyć w imieniu innej osoby (`applicants` = BOTH,
+`applicant.proxy` = true; od P1.2b opcję „Innej osoby” daje `proxy`).
 Materiały COI (zip z Discorda) leżą w `materialy/`, poza gitem. Foldery 1 i 5 to wzorce,
 foldery 2–4 i 6–9 to formularze do oceny. Folder 1 to zbiór kontrolny: nie trafia do promptów,
 opisów schematu modelu ani fixture’ów.
 
 ## Model
 
-Qwen3.5-4B (`qwen3.5:4b` w Ollamie, Q4_K_M, ok. 3,4 GB, Apache-2.0), uruchomiony lokalnie:
-serwis `ollama` w docker compose z jawną wersją obrazu, model w wolumenie. API woła go tylko
-z `backend/app/llm.py` przez interfejs zgodny z OpenAI: `LLM_BASE_URL=http://ollama:11434/v1`,
-`LLM_MODEL=qwen3.5:4b`. Tryb myślenia wyłączony (`think: false`), odpowiedź jako JSON wymuszony
-schematem `FormAnalysis`. Model czyta też obrazy, więc skany JPG/PNG mogą trafić do niego
-bezpośrednio, z OCR jako zapasem. Bielik-4.5B-v3 to alternatywa: zmiana tylko `LLM_MODEL`.
-Modele dostępne wyłącznie przez API nie są używane w produkcie (Treść pkt 5).
+Model woła tylko `backend/app/llm.py`. Dostawcę wybiera `LLM_PROVIDER` (po M1.7 i K3.1).
+
+Lokalnie (`ollama`, wartość domyślna): Qwen3.5-4B (`qwen3.5:4b`, Q4_K_M, ok. 3,4 GB, Apache-2.0),
+serwis `ollama` w docker compose z jawną wersją obrazu, model w wolumenie. Interfejs zgodny
+z OpenAI: `LLM_BASE_URL=http://ollama:11434/v1`, `LLM_MODEL=qwen3.5:4b`. Tryb myślenia wyłączony
+(`reasoning_effort: "none"`; na `/v1` Ollama ignoruje `think`, pomiar K1), odpowiedź jako JSON
+wymuszony schematem `FormAnalysis`. Skany JPG/PNG czyta OCR. Obraz w modelu to tylko zapas:
+w K1 był wolniejszy i gorszy niż tekst. Bielik-4.5B-v3 to alternatywa: zmiana tylko `LLM_MODEL`.
+
+Eden AI (`edenai`): wyjątek dopuszczony przez COI (D9), jedyne zewnętrzne API w produkcie.
+Włącza go człowiek. Klucz leży poza repozytorium i poza dostępem agentów. Model docelowy to
+Qwen3.5-9B (Apache-2.0, wagi otwarte, w katalogu Eden AI m.in. `ovhcloud/Qwen3.5-9B`). Przez
+Eden AI idą tylko modele otwarte, nigdy zamknięte. Trasę i limity czasu ustali pomiar z K3.1.
+Do tego czasu kod woła tylko Ollamę.
+
+Cel czasu to około 180 s na cały proces podczas live demo, granica orientacyjna 200 s (D11).
+Lokalny Qwen na samym CPU go nie spełnia (K1: 238–344 s na jedną próbę). Obrona działa na x86
+bez dedykowanego GPU; RAM i stabilność internetu są niepotwierdzone (D12).
 
 ## Acceptance test
 
