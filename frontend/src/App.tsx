@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ApiError, UNKNOWN_ERROR, analyzeForm, fetchInfo, isAbort } from './api.ts'
 import type { ApiInfo } from './api.ts'
 import { AppBar } from './components/AppBar.tsx'
@@ -16,6 +16,7 @@ import { UPLOAD_FORM_ID, UploadPanel } from './screens/UploadPanel.tsx'
 import type { UploadError } from './screens/UploadPanel.tsx'
 import { WaitingPanel } from './screens/WaitingPanel.tsx'
 import { sourceKind } from './source.ts'
+import type { SourceMatch, SourceMatches } from './sourceMatches.ts'
 import type { CoiForm } from './types.ts'
 import { fileProblem } from './upload.ts'
 
@@ -76,6 +77,13 @@ function App() {
   const [jsonMode, setJsonMode] = useState<JsonMode>('element')
   const [jsonOpen, setJsonOpen] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [sourceMatches, setSourceMatches] = useState<SourceMatches | 'failed' | null>(null)
+  const [paperPageChoice, setPaperPage] = useState<number | null>(null)
+  const [paperOpen, setPaperOpen] = useState(false)
+  const [paperFocus, setPaperFocus] = useState<{ id: string } | null>(null)
+  const [previewFocus, setPreviewFocus] = useState<SourceMatch | null>(null)
+  const [previewPage, setPreviewPage] = useState(0)
+  const [previewHidden, setPreviewHidden] = useState<ReadonlySet<string> | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const headingRef = useRef<HTMLHeadingElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -129,6 +137,13 @@ function App() {
   function chooseFile(next: File | null) {
     setFile(next)
     setPageCount(null)
+    setSourceMatches(null)
+    setPaperPage(null)
+    setPaperOpen(false)
+    setPaperFocus(null)
+    setPreviewFocus(null)
+    setPreviewPage(0)
+    setPreviewHidden(null)
     setError(null)
     setNotice(null)
   }
@@ -211,22 +226,61 @@ function App() {
 
   // Klik w element wraca z całego pliku do JSON-u tego elementu. Fokus i zmiana strony tylko
   // przestawiają wybór: Shift+Tab z kodu nie może po cichu wyłączyć „Pokaż JSON”.
+  const matches = sourceMatches === 'failed' ? null : sourceMatches
+  const selectionSource = selectedId ? matches?.byId.get(selectedId) : undefined
+  const paperPage = paperPageChoice ?? selectionSource?.page ?? 1
+
   function selectElement(id: string | null, how: SelectHow) {
     setSelectedId(id)
-    if (how === 'klik') setJsonMode('element')
+    const source = id ? matches?.byId.get(id) : undefined
+    if (source) setPaperPage(source.page)
+    if (how === 'klik' || how === 'zrodlo') setJsonMode('element')
+    if (how === 'zrodlo' && source) {
+      setPaperOpen(true)
+      setPaperFocus({ id: source.id })
+    } else {
+      setPaperFocus(null)
+    }
+  }
+
+  function selectPaper(source: SourceMatch) {
+    selectElement(source.id, 'klik')
+    setPreviewPage(source.tabIndex)
+    setPreviewFocus({ ...source })
   }
 
   // Szuka w kopii podglądu, bo tam każdy element ma `id`. Kopia zachowuje kolejność, więc te same
   // numery wskazują ten element w pliku z API.
   function selection(form: CoiForm): JsonSelection | null {
     for (const [tabIndex, tab] of form.tabs.entries()) {
-      const cellIndex = tab.questions.findIndex((cell) => cell.field.id === selectedId)
-      if (cellIndex >= 0) return { tabIndex, cellIndex }
+      for (const [cellIndex, { field }] of tab.questions.entries()) {
+        if (field.id === selectedId) return { tabIndex, cellIndex }
+        const childIndex = field.repeatingSectionGrid.findIndex((cell) => cell.field.id === selectedId)
+        if (childIndex >= 0) return { tabIndex, cellIndex, childIndex }
+      }
     }
     return null
   }
 
   const paper = file !== null && sourceKind(file) !== 'other'
+  const pdf = file !== null && sourceKind(file) === 'pdf'
+  const paperLinks = useMemo(() => {
+    if (!matches || !previewHidden) return []
+    return [...matches.byId.values()].filter(({ id, page, parentId }) =>
+      page === paperPage && !previewHidden.has(id) && (!parentId || !previewHidden.has(parentId)),
+    )
+  }, [matches, paperPage, previewHidden])
+  const sourceNotice = !pdf
+    ? 'Dopasowanie do papieru jest dostępne dla plików PDF z tekstem.'
+    : sourceMatches === 'failed'
+      ? 'Nie udało się odczytać tekstu z tego pliku PDF.'
+      : !matches
+        ? 'Szukam pól i sekcji w oryginale.'
+        : !matches.hasText
+          ? 'Ten PDF nie zawiera warstwy tekstowej. Dopasowanie do papieru jest niedostępne.'
+          : !matches.byId.size
+            ? 'Nie znaleziono jednoznacznych dopasowań w oryginale.'
+            : null
   const layout = { upload: 'wczytaj', waiting: 'analiza', result: 'wynik' }[phase.name]
   const subtitle = phase.name === 'upload' || !file ? null : `${file.name}, ${formatBytes(file.size)}`
 
@@ -250,6 +304,12 @@ function App() {
                   Plik: {file?.name}. Czas analizy: {formatElapsed(phase.elapsedMs)}.
                 </p>
                 <p className="liczby">{statsSentences(formStats(phase.view)).join(' ')}</p>
+                <div className="zrodla-status" role="status">
+                  {(!pdf || sourceMatches) && (
+                    <p>Pola ze źródłem na papierze: {matches?.fieldCount ?? 0} z {formStats(phase.view).fields}</p>
+                  )}
+                  {sourceNotice && <p>{sourceNotice}</p>}
+                </div>
                 {phase.problems.length === 0 ? (
                   <p className="kontrola" data-wynik="ok">
                     <CheckIcon />
@@ -318,7 +378,30 @@ function App() {
         {/* Papier stoi w DOM po polu pliku, a przed przyciskiem: na telefonie w tej kolejności go widać.
             Ten sam element przez wszystkie etapy, więc PDF rysuje się raz. */}
         {paper && file && (
-          <SourcePage key={fileKey(file)} file={file} stage={phase.name === 'upload' ? 'wczytaj' : 'dalej'} pageCount={pageCount} onPageCount={setPageCount} />
+          <SourcePage
+            key={fileKey(file)}
+            file={file}
+            stage={phase.name === 'upload' ? 'wczytaj' : 'dalej'}
+            pageCount={pageCount}
+            onPageCount={setPageCount}
+            pageNumber={paperPage}
+            onPageNumber={(page) => {
+              setPaperPage(page)
+              setPaperFocus(null)
+            }}
+            open={paperOpen}
+            onToggleOpen={() => {
+              setPaperOpen(!paperOpen)
+              setPaperFocus(null)
+            }}
+            form={phase.name === 'result' ? phase.view : null}
+            onIndex={setSourceMatches}
+            links={paperLinks}
+            selectedId={selectedId}
+            currentTab={previewPage}
+            focusLink={paperFocus}
+            onSelectLink={selectPaper}
+          />
         )}
 
         {phase.name === 'upload' && file && (
@@ -336,7 +419,16 @@ function App() {
 
         {phase.name === 'result' && (
           <div className="panel">
-            <ResultPanel form={phase.view} selectedId={selectedId} onSelect={selectElement} />
+            <ResultPanel
+              form={phase.view}
+              selectedId={selectedId}
+              onSelect={selectElement}
+              sources={matches?.byId}
+              focusSource={previewFocus}
+              page={previewPage}
+              onPage={setPreviewPage}
+              onHidden={setPreviewHidden}
+            />
           </div>
         )}
         {phase.name === 'result' && (

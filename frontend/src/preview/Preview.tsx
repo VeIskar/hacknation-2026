@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import type { FormEvent, MouseEvent } from 'react'
+import type { FocusEvent, FormEvent, MouseEvent } from 'react'
 import { AlertIcon } from '../components/icons.tsx'
+import type { SourceMatch } from '../sourceMatches.ts'
 import type { CoiField, CoiForm, CoiTab } from '../types.ts'
 import { fieldsOf, initialAnswers, isEmptyAnswer, isSection, takesAnswer } from './answers.ts'
 import type { Answer, Answers } from './answers.ts'
@@ -27,29 +28,57 @@ function firstShown(tab: CoiTab, hidden: ReadonlySet<string>): string | null {
 }
 
 /** Skąd wybór: klik, fokus z klawiatury albo nowa strona. */
-export type SelectHow = 'klik' | 'fokus' | 'strona'
+export type SelectHow = 'klik' | 'fokus' | 'strona' | 'zrodlo'
 
 interface Props {
   /** Formularz po `normalizeForm`: wszystkie klucze są na miejscu. */
   form: CoiForm
-  /** `id` elementu najwyższego poziomu (sekcji), którego JSON pokazuje panel obok. */
+  /** `id` pola lub sekcji, której JSON pokazuje panel obok. */
   selectedId?: string | null
   onSelect?: (id: string | null, how: SelectHow) => void
+  sources?: ReadonlyMap<string, SourceMatch>
+  focusSource?: SourceMatch | null
+  page: number
+  onPage: (page: number) => void
+  onHidden: (hidden: ReadonlySet<string>) => void
+}
+
+function sourceTargetId(id: string) {
+  return `podglad-${id}`
+}
+
+function SourceMarker({ source, selected, onSelect }: { source: SourceMatch; selected: boolean; onSelect: () => void }) {
+  return (
+    <button
+      type="button"
+      className="zrodlo-znacznik"
+      data-preview-link={source.id}
+      aria-label={`Pokaż źródło ${source.number}, strona ${source.page}.`}
+      aria-description={source.title}
+      aria-pressed={selected}
+      onClick={(event) => {
+        event.stopPropagation()
+        onSelect()
+      }}
+    >
+      {source.number}
+    </button>
+  )
 }
 
 /**
  * eUsługa tak, jak zobaczy ją mieszkaniec. Strefa trzyma się DESIGN.md "Forms" i nie bierze
  * stylu warsztatu. Odpowiedzi żyją tutaj, więc przejście między stronami ich nie gubi.
  */
-export function Preview({ form, selectedId = null, onSelect }: Props) {
+export function Preview({ form, selectedId = null, onSelect, sources, focusSource, page, onPage, onHidden }: Props) {
   const [answers, setAnswers] = useState<Answers>(() => initialAnswers(form))
   // null do pierwszego przeliczenia: pole z warunkiem SHOW nie może mignąć, zanim warunek się policzy.
   const [hidden, setHidden] = useState<ReadonlySet<string> | null>(null)
-  const [page, setPage] = useState(0)
-  const [errors, setErrors] = useState<FieldError[]>([])
+  const [errors, setErrors] = useState<{ page: number; list: FieldError[] } | null>(null)
   const headingRef = useRef<HTMLHeadingElement>(null)
   const summaryRef = useRef<HTMLDivElement>(null)
   const focusNext = useRef<'heading' | 'summary' | null>(null)
+  const focusedSource = useRef<SourceMatch | null>(null)
 
   useEffect(() => {
     let stale = false
@@ -69,12 +98,30 @@ export function Preview({ form, selectedId = null, onSelect }: Props) {
     if (target === 'summary') summaryRef.current?.focus()
   })
 
+  useEffect(() => {
+    if (hidden) onHidden(hidden)
+  }, [hidden, onHidden])
+
+  useEffect(() => {
+    if (!hidden || !focusSource || focusedSource.current === focusSource) return
+    const { id, parentId, tabIndex } = focusSource
+    if (page !== tabIndex) return
+    focusedSource.current = focusSource
+    if (hidden.has(id) || (parentId && hidden.has(parentId))) {
+      return
+    }
+    const field = findField(form.tabs[page], id)
+    const control = field && document.getElementById(fieldFocusId(field, answers[id]))
+    const target = control && !control.matches(':disabled') ? control : document.getElementById(sourceTargetId(id))
+    target?.focus()
+  }, [answers, focusSource, form, hidden, page])
+
   if (!hidden) return null
 
   const tab = form.tabs[page]
   const last = page === form.tabs.length - 1
   const finish = tab.type === 'FINISH'
-  const shownErrors = errors.filter((error) => !hidden.has(error.fieldId))
+  const shownErrors = errors?.page === page ? errors.list.filter((error) => !hidden.has(error.fieldId)) : []
   const errorOf = (field: CoiField) => shownErrors.find((error) => error.fieldId === field.id)?.message
 
   function answer(field: CoiField, value: Answer) {
@@ -82,8 +129,8 @@ export function Preview({ form, selectedId = null, onSelect }: Props) {
   }
 
   function goTo(next: number) {
-    setErrors([])
-    setPage(next)
+    setErrors(null)
+    onPage(next)
     focusNext.current = 'heading'
     onSelect?.(firstShown(form.tabs[next], hidden ?? new Set()), 'strona')
   }
@@ -96,7 +143,7 @@ export function Preview({ form, selectedId = null, onSelect }: Props) {
     const found = pageErrors(tab, answers, hiddenNow)
     setHidden(hiddenNow)
     if (found.length > 0) {
-      setErrors(found)
+      setErrors({ page, list: found })
       focusNext.current = 'summary'
     } else if (!last) {
       goTo(page + 1)
@@ -107,6 +154,40 @@ export function Preview({ form, selectedId = null, onSelect }: Props) {
     event.preventDefault()
     const field = findField(tab, error.fieldId)
     if (field) document.getElementById(fieldFocusId(field, answers[field.id]))?.focus()
+  }
+
+  function selectionProps(field: CoiField) {
+    return {
+      id: sourceTargetId(field.id),
+      tabIndex: -1,
+      'data-wybrany': selectedId === field.id ? true : undefined,
+      onClick: (event: MouseEvent) => {
+        event.stopPropagation()
+        onSelect?.(field.id, 'klik')
+      },
+      onFocus: (event: FocusEvent) => {
+        event.stopPropagation()
+        onSelect?.(field.id, 'fokus')
+      },
+    }
+  }
+
+  function marker(field: CoiField) {
+    const source = sources?.get(field.id)
+    return source && <SourceMarker source={source} selected={selectedId === field.id} onSelect={() => onSelect?.(field.id, 'zrodlo')} />
+  }
+
+  function renderField(field: CoiField, loose = false) {
+    const source = marker(field)
+    const className = loose ? 'eu-section eu-luzne' : 'eu-element'
+    return (
+      <div key={field.id} className={className} {...selectionProps(field)} role={takesAnswer(field) ? undefined : 'group'} aria-label={takesAnswer(field) ? undefined : field.title || undefined}>
+        <div className={source ? 'zrodlo-wiersz' : undefined}>
+          {source}
+          <Field field={field} answer={answers[field.id]} error={errorOf(field)} onChange={(value) => answer(field, value)} />
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -154,23 +235,15 @@ export function Preview({ form, selectedId = null, onSelect }: Props) {
 
       {tab.questions.map(({ field: section }) => {
         if (hidden.has(section.id)) return null
-        // Klik albo fokus w elemencie wybiera go do panelu JSON. Bez dodatkowego przystanku Tab.
-        const select = {
-          'data-wybrany': selectedId === section.id ? true : undefined,
-          onClick: () => onSelect?.(section.id, 'klik'),
-          onFocus: () => onSelect?.(section.id, 'fokus'),
-        }
-        if (!isSection(section)) {
-          return (
-            <div key={section.id} className="eu-section eu-luzne" {...select}>
-              <Field field={section} answer={answers[section.id]} error={errorOf(section)} onChange={(value) => answer(section, value)} />
-            </div>
-          )
-        }
+        if (!isSection(section)) return renderField(section, true)
         const headingId = `eu-sekcja-${section.id}`
+        const source = marker(section)
         return (
-          <section key={section.id} className="eu-section" aria-labelledby={headingId} {...select}>
-            <h4 id={headingId}>{section.title}</h4>
+          <section key={section.id} className="eu-section" aria-labelledby={headingId} {...selectionProps(section)}>
+            <div className={source ? 'zrodlo-wiersz' : undefined}>
+              {source}
+              <h4 id={headingId}>{section.title}</h4>
+            </div>
             {section.type === 'REPEATING_SECTION' && (
               <p className="eu-note">W eUsłudze tę sekcję można dodać kilka razy. Podgląd pokazuje jedną.</p>
             )}
@@ -179,11 +252,7 @@ export function Preview({ form, selectedId = null, onSelect }: Props) {
                 <RichText html={section.description} />
               </div>
             )}
-            {section.repeatingSectionGrid.map(({ field }) =>
-              hidden.has(field.id) ? null : (
-                <Field key={field.id} field={field} answer={answers[field.id]} error={errorOf(field)} onChange={(value) => answer(field, value)} />
-              ),
-            )}
+            {section.repeatingSectionGrid.map(({ field }) => hidden.has(field.id) ? null : renderField(field))}
           </section>
         )
       })}
