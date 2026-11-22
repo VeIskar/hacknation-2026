@@ -381,6 +381,13 @@ K3.1-2 (wpis uzupełniony 22.11 na podstawie diffu 2a139f9)
 - `GET /api/info` zwraca wyłącznie `llm` i `model`. Działa bez tokenu również przy `JWT_ENABLED=true`.
 - Benchmark woła sondę wersji wyłącznie dla Ollamy.
 
+JWT-START – walidacja JWT przy starcie API
+
+- Przy JWT_ENABLED=true `lifespan` sprawdza sekret i algorytm tymi samymi regułami co token
+  (HS256/384/512, długość z RFC 7518). Zły wpis zatrzymuje start, zanim /health da 200.
+- Wcześniej start przechodził, a żądanie z Bearerem kończyło się 500. Przy JWT_ENABLED=false nic się nie zmienia.
+- Komunikat o algorytmie nie powtarza wartości, bo w zmiennej mógł wylądować sekret.
+
 ## Event: whole project
 
 - **D7 – odpowiedzialność.** Lider rozstrzyga kontrakty, zakres i integrację. `SPEC.md` określa kontrakty, `DECISIONS.md` zapisuje decyzje, `DELEGACJA.md` wyznacza wykonawców, a `PROGRESS*.md` rejestruje postęp i wyniki bramek.
