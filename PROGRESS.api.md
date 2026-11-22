@@ -25,6 +25,19 @@ Gate: `bash scripts/gate.sh api -rs` → bez zmian kodu w tym kroku (tylko dokum
 
 ## Plan
 
+Krok COI 3.3.I (gałąź `mikolaj/coi-33i`).
+
+- `backend/app/quality.py` i `backend/app/generator/form.py`: zawęzić automatyczne użycie `Kraje` do pojedynczego pola bez własnej listy.
+- `backend/tests/test_quality.py` i `backend/tests/test_generator.py`: sprawdzić pola z dokumentu, zapis słowników i źródeł oraz brak przypisań do cudzych danych.
+- Wygenerować F5 i F9 z PDF i fixture’ów analizy, porównać JSON-y i uruchomić bramkę API oraz niezależną recenzję.
+
+Krok COI 3.3.II (Codex, worktree `codex/dictionary-proposals`).
+
+- `scripts/propose_dictionaries.py` odczyta raport E1 i JSON-y COI oraz sprawdzi opcje w pliku źródłowym.
+- Raport propozycji poda pole, wartości, źródło i powód weryfikacji przez urzędnika.
+- `backend/tests/test_dictionary_proposals.py` sprawdzi źródło, katalog, niejednoznaczność i identyczność JSON-a COI.
+- Dowód odbioru: raport z PDF F9 z użyciem istniejącej atrapy analizy, bramka API i niezależna recenzja.
+
 Krok P0.1: poprawki po recenzji P0 (decyzje lidera D1-D6 w `DECISIONS.md`).
 
 - `backend/app/errors.py`: argumenty tylko nazwane, kontrola typu i kodu; bez 422.
@@ -236,6 +249,10 @@ Krok K2-FINAL, poprawki po recenzji (`REVIEW.md`: 2, 3, 4, 5b, D1–D4), każda 
 
 ## Log
 
+- COI 3.3.I: poprawiono regułę P4 dla list zamkniętych i etykiet wieloznacznych. F5 i F9 z PDF i fixture’ów są bajtowo zgodne z bazą, lint 0. Bramka API 1368 passed, 7 skipped, niezależna recenzja SHIP. Werdykt PARTIAL, pozostają wybór TERYT z D14, interpretacja readOnly dla MLPZ i próba importu COI. Następny krok to commit człowieka i PR.
+
+- COI 3.3.II: done osobny raport propozycji E1, PDF F9 → 20 wartości ze str. 3, `cmp` zgodny dla JSON-a COI i raportu E1, 16 nowych testów, bramka API `1363 passed, 1 warning`, niezależna recenzja SHIP / next akceptacja i commit człowieka / blocker brak.
+
 (one line per step: done / next / blocker)
 
 - P0 `9fe7f2e`: done modele, wyjątki, fixture; recenzja lidera: CHANGES REQUIRED (5 ustaleń).
@@ -284,4 +301,5 @@ Krok K2-FINAL, poprawki po recenzji (`REVIEW.md`: 2, 3, 4, 5b, D1–D4), każda 
 - K2-FINAL (`mikolaj/k2-final` od `1c3ebd2`, bez commita): done binarny DOC (`olefile` 0.47 + własny odczyt Clx, historii i pól tekstowych), pasy dla wysokich skanów (folder 9: 1654 × 37424), odczyt w osobnym procesie z limitem czasu, pamięci i CPU, OCR obrazów osadzonych w PDF i DOCX, pola tekstowe DOCX bez dubli, przypisy i stopki DOCX; 71/71 plików COI odczytanych w obrazie API (Python 3.14.10, Tesseract 5.5.0), `POST /api/forms` z `LLM_FIXTURE` w kontenerze: 200 dla 8 formatów, 400 dla uszkodzonego PDF i dla PDF 2,3 MB po 64 s; `bash scripts/gate.sh api -rs` z Tesseractem na PATH → 1012 passed, 0 pominiętych, `GATE: PASS (api)`; w obrazie API testy odczytu 365 passed; mutacje 105/105 wykrytych na końcowym kodzie (jedna wcześniejsza wskazała warunek bez znaczenia, usunięty z `ocr.py`); niezależna recenzja całego diffu (`reviewer`): FIX, zamknięte 5a, otwarte 2, 3, 4, 5b i drobne D1–D4 (`REVIEW.md`) / next poprawki z recenzji z testami RED/GREEN, potem bramka, obraz Docker i commit człowieka; `olefile` w `requirements.txt` (Request) / blocker: werdykt K2 PARTIAL do czasu poprawek z recenzji; bez `olefile` w obrazie DOC daje 500; bez Tesseracta na PATH 5 testów z prawdziwym OCR jest pomijanych.
 - K2-FINAL po recenzjach (bez commita): done 2, 3, 4, 5b, D1–D4 z `REVIEW.md` (każde odtworzone, potem test widziany na czerwono): ogon stderr 300 B i ciche biblioteki w procesie odczytu, 2 odczyty naraz z czekaniem do 60 s, brak danych języka i Leptoniki → 500 z powodem, scalanie pasów po ramkach z najbliższą kopią, OCR jednego obrazu 30 s, jedna gałąź blokowego `mc:AlternateContent`, `clean_text` w DOCX, strażnik cykli i 200 tys. operacji w PDF, budżet pikseli DOCX; druga recenzja `reviewer`: FIX (pieczęcie i krzywe skany w scalaniu) → naprawione → SHIP; `bash scripts/gate.sh api -rs` z Tesseractem → 1213 passed, 0 pominiętych, `GATE: PASS (api)`; obraz Docker (Python 3.14.10, Tesseract 5.5.0) 566 passed, `POST /api/forms` z `LLM_FIXTURE` 200 dla 19 plików z folderów 1, 5, 8, 9, macierz 71/71; mutacje 138/138 (136 w pełnym przebiegu, 2 domknięte testami); model scalania 12 000 przypadków bez błędu / next commit człowieka i PR / blocker: `olefile==0.47` w `requirements.txt` (Marcin) warunkiem scalenia; bez Tesseracta na PATH 7 testów z prawdziwym OCR jest pomijanych.
 - Dokumentacja architektury COI: done opis stanu `1c6544c`, diagramy, źródła i ograniczenia / next front i web bez roota / blocker brak.
+- JWT-START: done `auth.check_config` w `lifespan`, komunikat algorytmu bez wartości; 11 nowych testów (6 czerwonych przed zmianą); uvicorn: krótki sekret i RS256 → exit 3 bez /health, poprawne HS256 → 200/401 i token przechodzi; `gate.sh api -rs` → PASS / next review i PR / blocker brak.
 - E1-SEM: done strażnik bez utraty danych wnioskodawcy, pola z SHOW nie są duplikatami, N4, notatki o tytule i opcjach; 57 nowych testów (17 czerwonych na `main`, 37 wariantów SHOW jako osłona); Eden AI na kodzie końcowym: 7/8 (F6 503: pętla modelu do 16384 tokenów, 106 s, bez ponowienia przez D11), POST F9 200 / next decyzja o `LLM_MAX_TOKENS` i prompcie wariantów / blocker: F2 „Yeah/No” i zgody F9 bez warunku to błędy modelu.

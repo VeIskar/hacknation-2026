@@ -32,16 +32,22 @@ class AuthError(AppError):
 
 
 def _signing_params(settings: Settings) -> tuple[str, str]:
-    """Sekret i algorytm. Zła konfiguracja to błąd serwera (500), nie klienta."""
+    """Sekret i algorytm. Przy starcie zła konfiguracja zatrzymuje API (check_config); później to 500, nie błąd klienta."""
     secret, algorithm = settings.jwt_secret, settings.jwt_algorithm
     if not secret:
         raise RuntimeError("JWT_SECRET jest pusty")
     if algorithm not in MIN_SECRET_BYTES:
-        allowed = sorted(MIN_SECRET_BYTES)
-        raise RuntimeError(f"JWT_ALGORITHM ma być jednym z {allowed}, jest {algorithm!r}")
+        # Bez wartości: sekret wklejony w złą zmienną trafiłby do logu (jak w config.py, D9 pkt 3).
+        raise RuntimeError(f"JWT_ALGORITHM ma być jednym z {sorted(MIN_SECRET_BYTES)}")
     if len(secret.encode()) < MIN_SECRET_BYTES[algorithm]:
         raise RuntimeError(f"JWT_SECRET dla {algorithm} ma mieć co najmniej {MIN_SECRET_BYTES[algorithm]} bajtów")
     return secret, algorithm
+
+
+def check_config(settings: Settings) -> None:
+    """Przy starcie API: przy JWT_ENABLED=true zła konfiguracja zatrzymuje start, zamiast dawać 500 przy żądaniu."""
+    if settings.jwt_enabled:
+        _signing_params(settings)
 
 
 def _bearer_token(header: str | None) -> str:

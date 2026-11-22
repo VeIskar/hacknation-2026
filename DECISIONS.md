@@ -33,7 +33,34 @@ Claude Code version used: (write `claude --version` here on the day)
 
 ## Event: web
 
-(frontend dependencies and choices go here)
+F1 (web):
+
+| What                                   | Why                                                                                  | Licence    |
+| -------------------------------------- | ------------------------------------------------------------------------------------ | ---------- |
+| pdfjs-dist 6.5.438                     | pierwsza strona wczytanego PDF-a w przeglądarce; plik nie jest wysyłany drugi raz     | Apache-2.0 |
+| @napi-rs/canvas (opcjonalna, z pdfjs-dist) | potrzebna pdfjs tylko w Node; w przeglądarce nieużywana i nie trafia do paczki   | MIT        |
+| Atkinson Hyperlegible Next 2.001 (plik kroju) | krój warsztatu, projektowany dla osób słabowidzących; `google/fonts`, `ofl/atkinsonhyperlegiblenext` | OFL-1.1 (D15) |
+| Brygada 1918 3.006 (plik kroju)        | tylko tytuły (h1, nazwa wniosku); `google/fonts`, `ofl/brygada1918`                  | OFL-1.1 (D15) |
+
+- Kroje leżą bez zmian w `frontend/src/fonts/`, każdy z własnym `OFL.txt`. Bez CDN i bez subsetowania (D15).
+- Kierunek warsztatu „Zakreślacz” (wybór lidera, 2026-11-22): żółty `#FFD60A` tylko jako wypełnienie
+  zakreślenia pod ciemnym tekstem. Nigdy jako obrys fokusu, przycisk ani pasy. Obrys fokusu jest ciemny.
+- Podgląd pierwszej strony: PDF przez pdfjs-dist, JPG i PNG natywnie, inne formaty dostają jedno zdanie.
+
+F2 (web):
+
+| What          | Why                                                                                   | Licence |
+| ------------- | ------------------------------------------------------------------------------------- | ------- |
+| jsonata 2.2.2 | warunki SHOW z JSON-a COI liczone w podglądzie tym samym językiem zapytań, bez własnego parsera | MIT     |
+
+F2.5 (web):
+
+- Kierunek „Jasny urząd” (decyzja lidera, 2026-11-22, DESIGN.md) zastępuje „Zakreślacz”. Żółtego nie ma
+  w interfejsie, dopóki nie pokazujemy źródeł na papierze (F4).
+- Jeden krój: Atkinson Hyperlegible Next, także w podglądzie eUsługi. Brygada 1918 nie jest używana;
+  plik zostaje w `frontend/src/fonts/brygada/` do decyzji o usunięciu i nie trafia do paczki.
+- Dane `MLPZ.*` w podglądzie mają podpowiedź „Przykładowe dane z rejestru”: podgląd nie łączy się z rejestrem.
+- `look.mjs` sprawdza folder 9 na JSON-ie zbudowanym przez generator z `analysis_form9.json`, bez modelu.
 
 ## Event: api
 
@@ -354,6 +381,13 @@ K3.1-2 (wpis uzupełniony 22.11 na podstawie diffu 2a139f9)
 - `GET /api/info` zwraca wyłącznie `llm` i `model`. Działa bez tokenu również przy `JWT_ENABLED=true`.
 - Benchmark woła sondę wersji wyłącznie dla Ollamy.
 
+JWT-START – walidacja JWT przy starcie API
+
+- Przy JWT_ENABLED=true `lifespan` sprawdza sekret i algorytm tymi samymi regułami co token
+  (HS256/384/512, długość z RFC 7518). Zły wpis zatrzymuje start, zanim /health da 200.
+- Wcześniej start przechodził, a żądanie z Bearerem kończyło się 500. Przy JWT_ENABLED=false nic się nie zmienia.
+- Komunikat o algorytmie nie powtarza wartości, bo w zmiennej mógł wylądować sekret.
+
 E1-SEM – zgodność ze źródłem po żywym E1 (22.11)
 
 - Strażnik usuwa duplikat danych wnioskodawcy tylko wtedy, gdy szablon go pokaże po decyzjach. Inaczej
@@ -404,3 +438,4 @@ E1-SEM – zgodność ze źródłem po żywym E1 (22.11)
   Plik „Hacknation - Słowniki” z `materialy/` wymienia: Województwo, Powiat, Gmina, Miejscowość, Kraje i Numery kierunkowe. Słownik wolno podpiąć do listy rozwijanej, radia i checkboxa, a słowniki adresowe i Kraje tylko do listy rozwijanej. Plik podaje nazwy, bez list wartości i bez identyfikatorów technicznych.
   Stan kodu: generator używa `Kraje` (jest w pliku) oraz `TERYT_4G_DOWODOWY` z `multiLevelTree` dla adresu w Polsce (`generator/template.py`). `TERYT_4G_DOWODOWY` podają Standardy COI (rozdz. „Adres”: „Zaimportowany słownik: TERYT_4G_DOWODOWY”) i oba wzorce. Plik słowników go nie wymienia, a osobno wymienia Województwo, Powiat, Gminę i Miejscowość. `TERYT_DOWODOWY` jest tylko we wzorcach, a wzorce 1 i 5 używają obu nazw różnie. Wartość domyślna `["Polska"]` w `Kraje` pochodzi z obu wzorców. Linter nie sprawdza nazwy słownika. Kontrakt `FormAnalysis` nie pozwala modelowi wskazać słownika w polach przedmiotu.
   Otwarte: słownik adresu zamieszkania, czyli `TERYT_4G_DOWODOWY` ze Standardów i wzorców albo Województwo, Powiat, Gmina, Miejscowość z pliku słowników. Dwa dokumenty COI mówią tu co innego, więc to pytanie do mentora. Do odpowiedzi generator zostaje bez zmian.
+- **D15 – kroje na licencji OFL-1.1.** Decyzja lidera (2026-11-21) przed pracą nad frontem, razem z sekcją „Two zones” w `DESIGN.md`. Dopuszczamy kroje na licencji SIL OFL-1.1 tylko jako niezmienione pliki krojów w repozytorium, bez CDN i bez subsetowania (to już modyfikacja). OFL nie wymaga publikacji kodu aplikacji: jej warunki dotyczą samego kroju, nie programu, który go używa. Treść pkt 5 zakazuje licencji, które tego wymagają, więc OFL jej nie narusza. To nie jest czwarty wyjątek MPL-2.0 z sekcji szablonu: D15 obejmuje wyłącznie pliki krojów, nie pakiety. Każdy dodany krój dostaje linię pod „Event: web” (nazwa, wersja, źródło, OFL-1.1), a obok plików leży tekst licencji z informacją o prawach autorskich.

@@ -2,10 +2,9 @@
 
 import re
 import unicodedata
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 
-from app import lint
 from app.models import (
     CHOICE_TYPES,
     ExtractedDocument,
@@ -24,7 +23,12 @@ COI_DICTIONARIES = frozenset({
 _POLISH_LETTERS = str.maketrans("ąćęłńóśźż", "acelnoszz")
 _WORD = re.compile(r"[^\W\d_]+")
 _COUNTRY_LABEL = re.compile(r"^(kraj|panstwo)\b|\bobywatelstw")
-_NON_COUNTRY_OPTIONS = frozenset({"tak", "nie", "inny", "inne"})
+_SINGLE_COUNTRY_LABEL = re.compile(
+    r"^(?:(?:kraj|panstwo)(?:\s*/\s*(?:kraj|panstwo))?|(?:posiadane\s+)?obywatelstwo)\b"
+)
+_COMPOUND_COUNTRY_LABEL = re.compile(
+    r"[,;/]|\b(?:i|oraz)\b|\b(?:lub|albo)\b(?!\s*(?:zamieszkania|zameldowania|pobytu)\b)"
+)
 _CORRECTION_PREFIX = "Korekta. "
 # Etykieta duplikatu -> decyzja, po której szablon pokazuje te dane (None: szablon pokazuje je zawsze).
 _APPLICANT_LABELS: dict[str, tuple[str, str | None] | None] = {
@@ -83,14 +87,12 @@ def is_country_label(label: str) -> bool:
     return _COUNTRY_LABEL.search(normalize_text(label).strip()) is not None
 
 
-def should_use_country_dictionary(label: str, kind: str, options: Sequence[str], *, is_show_source: bool) -> bool:
-    if is_show_source or not is_country_label(label):
+def should_use_country_dictionary(label: str, kind: str) -> bool:
+    if kind != "TEXT_FIELD":
         return False
-    if kind == "TEXT_FIELD":
-        return True
-    return kind in ("SELECT", "RADIO") and len(options) >= 5 and not any(
-        normalize_text(option).strip() in _NON_COUNTRY_OPTIONS for option in options
-    )
+    label = normalize_text(label).strip()
+    match = _SINGLE_COUNTRY_LABEL.match(label)
+    return match is not None and _COMPOUND_COUNTRY_LABEL.search(label, match.end()) is None
 
 
 def show_source_labels(items: Iterable[SubjectField | SubjectSection]) -> set[str]:
@@ -292,29 +294,12 @@ def validator_issues(form: dict) -> list[str]:
     return issues
 
 
-def _coi_show_source_ids(form: dict, fields: Iterable[dict]) -> set[int]:
-    index = lint._index(form.get("tabs"))
-    sources = set()
-    for field in fields:
-        for state in _objects(field.get("states")):
-            query = state.get("query")
-            if state.get("type") != "SHOW" or not isinstance(query, str):
-                continue
-            for answer in lint._parse_query(query) or ():
-                section = index.get(answer.page, {}).get(answer.section)
-                if section is not None and (source := section[1].get(answer.field)) is not None:
-                    sources.add(id(source))
-    return sources
-
-
 def dictionary_issues(form: dict) -> list[str]:
     """Sprawdza słowniki COI i stosuje tę samą regułę kraju co generator."""
     if not isinstance(form, dict):
         return []
-    fields = list(_fields(form))
-    show_sources = _coi_show_source_ids(form, fields)
     issues = []
-    for field in fields:
+    for field in _fields(form):
         dictionary = field.get("dictionaryName")
         name = field.get("techName") or field.get("title")
         if "dictionaryName" in field and (not isinstance(dictionary, str) or dictionary not in COI_DICTIONARIES):
@@ -322,9 +307,6 @@ def dictionary_issues(form: dict) -> list[str]:
         title = field.get("title")
         if not isinstance(title, str) or dictionary == COUNTRY_DICTIONARY:
             continue
-        options = [
-            option["name"] for option in _objects(field.get("options")) if isinstance(option.get("name"), str)
-        ]
-        if should_use_country_dictionary(title, field.get("type", ""), options, is_show_source=id(field) in show_sources):
+        if should_use_country_dictionary(title, field.get("type", "")):
             issues.append(f"Pole {name!r} powinno używać słownika {COUNTRY_DICTIONARY}.")
     return issues
