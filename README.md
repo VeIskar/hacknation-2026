@@ -10,10 +10,13 @@ validate_upload → extract → analyze → quality.ground → build_form → li
 kontrola pliku    tekst/OCR   model AI   strażnik         generator    linter
 ```
 
-Plik żyje tylko w pamięci (Treść pkt 5: bez trwałego zapisu). Model zwraca opis formularza
+API przetwarza plik tylko w pamięci (Treść pkt 5: bez trwałego zapisu). Zastrzeżenie dotyczące bufora nginx opisuje [Znane ograniczenia](docs/ARCHITEKTURA.md#znane-ograniczenia).
+Model zwraca opis formularza
 (`FormAnalysis`). Strażnik (`quality.ground`) porównuje go z tekstem dokumentu: poprawia dane
 wnioskodawcy i usuwa powtórzone pola. Przy `LLM_FIXTURE` jest pominięty. Generator buduje JSON COI,
 a linter sprawdza schemat i Reguły techniczne.
+
+[Dokumentacja architektury](docs/ARCHITEKTURA.md)
 
 ## Wymagania
 
@@ -73,7 +76,7 @@ sam model w pomiarze K1 potrzebował 238–344 s na formularz. Tryb lokalny prze
 uruchomić na własnej infrastrukturze. Zalecana trasa to `flexai/Qwen3.5-9B@eu`. W pomiarze E1
 wyłączenie myślenia zadziałało na tej trasie. `ovhcloud/Qwen3.5-9B` zignorowała je i wyczerpała
 limit 8192 tokenów, zwracając pustą treść lub ucięty JSON. Trasę zatwierdza lider (D9 pkt 8).
-**W trybie Eden AI treść przesłanego pliku trafia do Eden AI jako tekst lub obrazy stron.**
+**W trybie Eden AI do dostawcy trafia tekst odczytany z pliku.** Skany i obsługiwane obrazy odczytuje lokalnie OCR Tesseract. Model otrzymuje tekst.
 
 API nie wystartuje przy `edenai`, jeśli:
 
@@ -276,7 +279,7 @@ uruchamia osoba integrująca. Inny agent (Codex, Cursor, Copilot) czyta `AGENTS.
 
 ## Ograniczenia
 
-(wypełnia `/hn-demo`)
+Stan wdrożenia opisuje sekcja [Znane ograniczenia](docs/ARCHITEKTURA.md#znane-ograniczenia).
 
 ## Licencje zależności
 

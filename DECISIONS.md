@@ -341,6 +341,19 @@ Tesseracta (`libleptonica6` z pakietu `tesseract-ocr`, M1.3); wołamy ją przez 
   `os.cpu_count()`, które nie widzi limitu CPU kontenera. Obraz w DOCX większy niż 100 mln pikseli
   zużywa budżet pikseli dokumentu i odpada w OCR bez ostrzeżenia.
 
+K3.1-1 (wpis uzupełniony 22.11 na podstawie diffu 7d31bac)
+
+- `LLM_CONTEXT_TOKENS` i `LLM_MAX_TOKENS` zasilają budżet kontekstu i ponowień. Prompt opisuje warunki `show_if` po P1.4.
+- `LLM_TEMPERATURE` i `LLM_REASONING_EFFORT` obsługują `off`. `LLM_STRICT_SCHEMA` i `LLM_EXTRA_BODY` sterują parametrami żądania.
+- `LLM_CONNECT_TIMEOUT_S` ustawia osobny limit połączenia. Log błędu HTTP maskuje klucz w wycinku odpowiedzi. Log toku rozumowania podaje liczbę znaków.
+
+K3.1-2 (wpis uzupełniony 22.11 na podstawie diffu 2a139f9)
+
+- `LLM_ANALYSIS_BUDGET_S` domyślnie wynosi 170 s. Ponowienie jest pomijane, gdy prognozowany czas przekroczy budżet D11.
+- `LLM_MAX_ATTEMPTS` domyślnie wynosi 2 i przyjmuje liczby całkowite od 1 do 3.
+- `GET /api/info` zwraca wyłącznie `llm` i `model`. Działa bez tokenu również przy `JWT_ENABLED=true`.
+- Benchmark woła sondę wersji wyłącznie dla Ollamy.
+
 ## Event: whole project
 
 - **D7 – odpowiedzialność.** Lider rozstrzyga kontrakty, zakres i integrację. `SPEC.md` określa kontrakty, `DECISIONS.md` zapisuje decyzje, `DELEGACJA.md` wyznacza wykonawców, a `PROGRESS*.md` rejestruje postęp i wyniki bramek.
