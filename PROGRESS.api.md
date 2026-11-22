@@ -25,6 +25,13 @@ Gate: `bash scripts/gate.sh api -rs` → bez zmian kodu w tym kroku (tylko dokum
 
 ## Plan
 
+Krok COI 3.3.II (Codex, worktree `codex/dictionary-proposals`).
+
+- `scripts/propose_dictionaries.py` odczyta raport E1 i JSON-y COI oraz sprawdzi opcje w pliku źródłowym.
+- Raport propozycji poda pole, wartości, źródło i powód weryfikacji przez urzędnika.
+- `backend/tests/test_dictionary_proposals.py` sprawdzi źródło, katalog, niejednoznaczność i identyczność JSON-a COI.
+- Dowód odbioru: raport z PDF F9 z użyciem istniejącej atrapy analizy, bramka API i niezależna recenzja.
+
 Krok P0.1: poprawki po recenzji P0 (decyzje lidera D1-D6 w `DECISIONS.md`).
 
 - `backend/app/errors.py`: argumenty tylko nazwane, kontrola typu i kodu; bez 422.
@@ -235,6 +242,8 @@ Krok K2-FINAL, poprawki po recenzji (`REVIEW.md`: 2, 3, 4, 5b, D1–D4), każda 
 - Mikołaj → lider (K2-FINAL, `DELEGACJA.md` rozdz. 3 i 6): K2 czyta DOC przez `olefile`, a XLSX, ODS i DOCX bez `openpyxl`, `odfpy` i `python-docx`. Renderer PDF (`pypdfium2`) to otwarta decyzja z `DECISIONS.md`: bez niego nie czytamy JBIG2, JPEG 2000 ani tekstu zamienionego na krzywe.
 
 ## Log
+
+- COI 3.3.II: done osobny raport propozycji E1, PDF F9 → 20 wartości ze str. 3, `cmp` zgodny dla JSON-a COI i raportu E1, 16 nowych testów, bramka API `1363 passed, 1 warning`, niezależna recenzja SHIP / next akceptacja i commit człowieka / blocker brak.
 
 (one line per step: done / next / blocker)
 
