@@ -258,8 +258,166 @@ K3.1-3 – E1 na Eden AI i naprawy analizy
 - Przy `edenai` domyślne są `https://api.eu.edenai.run/v3`, `flexai/Qwen3.5-9B@eu`, kontekst 65536,
   limit odpowiedzi 16384, `reasoning_effort=off` i `chat_template_kwargs.enable_thinking=false`.
   Kontekst 65536 zostawia miejsce dla F8 i 16384 tokenów odpowiedzi. Obowiązuje walidacja dostawcy M1.7.
+K2-FINAL (Mikołaj, decyzja lidera 2026-11-21: jedno zadanie zamiast K2.5–K2.7):
+
+| What         | Why                                                                              | Licence      |
+| ------------ | -------------------------------------------------------------------------------- | ------------ |
+| olefile 0.47 | kontener OLE2 binarnego DOC (7 z 9 plików `.doc` COI); czysty Python, bez zależności | BSD-2-Clause |
+
+Bez innych nowych zależności. Leptonica (BSD-2-Clause) jest już w obrazie API jako biblioteka
+Tesseracta (`libleptonica6` z pakietu `tesseract-ocr`, M1.3); wołamy ją przez `ctypes`.
+
+- **Piaskownica.** `extract` czyta plik w osobnym procesie (`python -m app.extract.worker`), nie w
+  wątku żądania. Limit czasu 60 s, limit przestrzeni adresowej 1,5 GiB i limit CPU 60 s na proces,
+  dziedziczone przez Tesseracta. Po limicie czasu albo sygnale ginie cała grupa procesów. Wątku
+  Pythona nie da się przerwać, więc sam limit czasu w wątku zostawiałby odczyt w tle (recenzja
+  K2.3). Proces odczytu dostaje tylko `PATH`, `LD_LIBRARY_PATH`, `TESSDATA_PREFIX`, `LANG`, `LC_ALL`
+  i `PYTHONDONTWRITEBYTECODE`: bez `JWT_SECRET` i `LLM_API_KEY`. Wymaga Linuksa (obraz API).
+  Najwyżej 2 odczyty naraz (semafor w `sandbox.read`), kolejne żądania czekają do 60 s, potem 500
+  „Coś poszło nie tak. Spróbuj ponownie.” z ostrzeżeniem w logu: każdy odczyt to proces do 1,5 GiB
+  i do 4 procesów Tesseracta z tym samym limitem, a API dzieli maszynę z modelem.
+  Ze stderr procesu API trzyma tylko ostatnie 300 bajtów, a proces odczytu wyłącza logowanie
+  bibliotek: PDF 26 kB z zapętlonym formularzem dawał 54 MB ostrzeżeń pypdf w pamięci API
+  (recenzja K2-FINAL, nr 2). Jedno wywołanie Tesseracta ma limit 30 s, połowę limitu odczytu.
+- **Kody.** Zły plik, limit czasu, limit pamięci i sygnał to 400 „Nie udało się odczytać treści
+  pliku.”. Brak Tesseracta, brak danych języka z `OCR_LANG`, brak Leptoniki przy obrazie wyższym
+  niż 32767 pikseli, brak `olefile` i proces, który nie oddał wyniku, to 500 z powodem w logu.
+  Tesseract zgłasza brak języka na stderr („Failed loading language”), także z kodem 0, gdy
+  wczytał inny z podanych języków; inne błędy Tesseracta to wina pliku, czyli 400. Nieprzewidziany wyjątek czytnika to 400 i ostrzeżenie w logu z typem błędu i miejscem
+  w kodzie, bez komunikatu wyjątku, bo ten mógłby cytować dokument (D3).
+- **DOC.** Word 97–2003: tablica kawałków (Clx), długości historii z FIB, pola tekstowe. Tekst
+  główny, potem przypisy, nagłówki i stopki (raz). Kody pól odpadają, zostaje ich wynik. Word 6/95
+  i pliki zaszyfrowane dają 400. Formatowania akapitów nie czytamy: wiersz tabeli kończy podwójny
+  znak komórki, więc pusta komórka w środku wiersza łamie go wcześniej (tekst zostaje cały), a tekst
+  ukryty i skreślony w trybie zmian też wchodzi. Żaden z 7 plików DOC z COI nie ma tabeli.
+- **Pola tekstowe (DOC i DOCX).** Foldery 2 i 8 to formularze przerobione z PDF: każdy fragment
+  wiersza jest osobnym polem, a kolejność pól w pliku nie jest kolejnością czytania (folder 8 w DOC:
+  od dołu strony). Pola jednego akapitu układamy po położeniu: z góry na dół, a pola o górnej
+  krawędzi w obrębie 90 twipów tworzą wiersz od lewej. DOCX zapisuje pole dwa razy (`mc:Choice`
+  i `mc:Fallback`); przed K2-FINAL czytnik oddawał oba, stąd 31 tys. znaków dla folderu 8. Teraz
+  15 784 znaki, tyle samo z DOC i z DOCX.
+- **DOCX.** XML czytany strumieniowo, blok po bloku. Dochodzą przypisy, nagłówki i stopki oraz
+  przestrzeń nazw Strict. Obrazy z `word/media`, do których odwołuje się treść (PNG i JPG, co
+  najmniej 32 piksele boku i 20 tys. pikseli, najwyżej 20 sztuk i 20 MB każdy), idą do OCR. Tekst
+  staje w miejscu obrazu. Odpadają wiersze, które dokument już zawiera (porównanie po literach
+  i cyfrach), pojedyncze znaki i wynik krótszy niż 8 znaków (logo). Ten sam obraz czytamy raz.
+  Obrazy mają wspólny budżet 400 mln pikseli jak w PDF; obraz ponad budżet pomijamy z ostrzeżeniem.
+  `mc:AlternateContent` między akapitami i w komórce tabeli daje jedną gałąź, jak w akapicie.
+  Znaki sterujące (C1, `&#13;`) zamieniamy jak w PDF i arkuszach.
+- **PDF.** Najwyżej 100 stron i 1 mln znaków. Strona z mniej niż 20 literami i cyframi w warstwie
+  tekstowej idzie do OCR: obrazy narysowane na stronie (operator `Do`, także przez Form XObject),
+  od góry do dołu, najwyżej 10 na stronę, 40 i 400 mln pikseli na dokument. JPEG trafia do
+  Tesseracta bez zmian, faks CCITT z nagłówkiem TIFF, raster (szarość, RGB, paleta, maska) jako PNG.
+  Szukanie obrazów pomija formularz, który rysuje siebie albo przodka, parsuje każdy formularz raz
+  i przegląda najwyżej 200 tys. operacji rysowania na dokument: PDF 24 kB z formularzem rysującym
+  się 10 tys. razy zajmował cały limit 60 s (recenzja K2-FINAL, D2), teraz ułamek sekundy.
+  Formularze zagnieżdżone bez cyklu zatrzymuje ten sam budżet, a `extract_text` z pypdf 7.1.1 ma
+  własny limit 5000 wywołań formularzy (sonda: 4 poziomy po 30 wywołań, 1,6 s). Raster w Flate
+  pypdf 7.1.1 dekoduje najwyżej do 75 MB, czyli ok. 25 mln pikseli RGB albo 75 mln w szarości.
+  Większy raster daje ostrzeżenie o nieobsługiwanym kodowaniu, jak obraz ponad limit pikseli.
+  Skanery zapisują skany jako JPEG albo faks, które idą do OCR bez dekodowania.
+- **PDF bez renderera.** Wyjmowanie obrazów przez `pypdf` obsługuje zwykłe skany, ale nie stronę
+  z tekstem zamienionym na krzywe, skan JBIG2 (dekoder `jbig2dec` jest na AGPL), JPEG 2000, obraz
+  wbudowany w strumień strony ani obrót strony (`/Rotate`). Taka strona zostaje pusta z ostrzeżeniem,
+  a dokument bez żadnego tekstu daje 400. Pełną obsługę dałby renderer `pypdfium2` (Apache-2.0 albo
+  BSD-3-Clause, PDFium na BSD-3-Clause, w kole binarnym biblioteki na licencjach FreeType, libjpeg
+  i podobnych). To nowa zależność binarna, więc decyzja lidera; nie instalowaliśmy jej i nie
+  sprawdzaliśmy. PyMuPDF, Poppler i Ghostscript zostają zabronione.
+- **Wysoki skan.** Tesseract odrzuca obraz o boku ponad 32767 pikseli (folder 9: 1654 × 37424).
+  Obraz wyższy niż dwie kartki A4 swojej szerokości tniemy na pasy po dwie kartki z zakładką
+  2 × 103 piksele (pół cala przy tej szerokości). Pasy czytają do 4 procesów Tesseracta naraz, każdy
+  na jednym wątku. Wiersz niższy niż zakładka jest cały w co najmniej jednym pasie. Ramki
+  z Tesseracta pasują do siebie, gdy wysokości różnią się najwyżej dwukrotnie, środki w pionie
+  leżą nie dalej niż ćwierć niższej ramki, a w poziomie mają wspólną ponad połowę węższej. Każdy
+  wiersz łączymy tylko z najbliższą pasującą kopią z drugiego pasa; z grupy bierzemy kopię dalszą
+  od krawędzi swojego pasa. Wiersz widziany w jednym pasie zostaje, chyba że jego ramka dochodzi
+  do krawędzi pasa (bliżej niż 1/20 zakładki): to strzęp uciętego wiersza. Wyjątek: w gęstym,
+  krzywo zeskanowanym tekście taki wiersz może trafić do grupy sąsiada i zniknąć z nią (model
+  recenzenta z wierszami gubionymi przez Tesseracta w 5% przypadków: ok. 3 na 1000). Poprzednie scalanie
+  (granica w wolnym odstępie, bez niego środek wiersza) przy stykających się wierszach i ramkach
+  przesuniętych o 1 piksel gubiło albo dublowało wiersz (recenzja K2-FINAL, nr 4; 16 ze 150
+  przypadków testu). Pierwsza wersja poprawki łączyła kopie po samym pokryciu w pionie, więc
+  pieczęć, linia tabeli albo krzywy skan spinały kilka wierszy w jedną grupę i ginął wiersz
+  (druga recenzja, nr 1). Granica metody: ramka tego samego wiersza przesunięta między pasami
+  o mniej niż ćwierć jego wysokości i mniej niż pół odstępu między wierszami. Pasy to wycinki tego
+  samego obrazu, więc przesunięcie to 0–2 piksele. Model losowy (12 000 przypadków, wiersze
+  14–120 pikseli, 30% krzywych skanów z ramką do trzech odstępów): 0 błędów. Prawdziwy OCR:
+  cztery kartki skanu z folderu 9 w dwóch pasach z krawędziami zakładki w wierszach dają te same
+  słowa wierszy z zakładki co odczyt całości. Limit to 100 mln pikseli na obraz, sprawdzany
+  z nagłówka pliku przed dekodowaniem.
+- **Pomiar OCR.** Folder 8 (6 kartek): pasy 7,7 s i 99,6% słów z PDF, cały obraz 15,9 s i 99,3%.
+  Folder 9 (16 kartek): 6–8 s i 94,8% słów; odczyt kartka po kartce daje 94,6%, więc braki to
+  błędy OCR drobnego druku, a nie granice pasów.
+- **Pomiar w obrazie API** (Python 3.14.10, Tesseract 5.5.0, bez roota, system plików tylko do
+  odczytu, 71 plików COI, 71 odczytanych, kod po obu recenzjach): DOC 0,56–1,09 s, DOCX
+  0,54–3,38 s, XLSX 0,63–1,24 s, ODS 0,55–1,24 s, PDF 0,71–1,18 s, JPG 1,15–7,02 s, PNG
+  1,20–7,75 s. Start procesu odczytu to ok. 0,5 s z każdego czasu. Najmniejszy limit pamięci, przy którym plik się czyta: PNG z folderu 9
+  512 MB, skany JPG 192 MB, formaty tekstowe 128 MB.
+- **Wrogi PDF z recenzji K2.3** (2,3 MB, 40 stron po 60 MB spacji, ponad 120 s): w kontenerze 400
+  po 65 s, `/health` odpowiada, po żądaniu nie zostaje żaden proces. PDF 24 kB ze 100 stronami
+  i formularzem rysującym siebie 10 tys. razy: 400 po 10 s (wcześniej 60 s), pamięć API 46 MB przed
+  i po żądaniu.
+- **ZIP.** DOCX, XLSX i ODS przyjmują tylko wpisy bez kompresji i deflate. Dla bzip2 i lzma `zipfile`
+  rozpakowuje cały blok naraz, więc limit odczytu nie chroniłby pamięci. DOCX ma wspólny limit 64 MB
+  rozpakowanych bajtów (XML, relacje, obrazy), 16 MB na jedną część XML, 100 poziomów zagnieżdżenia
+  i 500 tys. elementów w bloku. Nieznane albo wielobajtowe kodowanie XML daje 400 (wcześniej 500).
+- **Poza zakresem.** `ExtractedDocument.images` zostaje puste: model dostaje tekst. PDF z AES dalej
+  daje 400 (zależność `cryptography`, decyzja z wpisu pypdf). OCR obrazów osadzonych nie ma
+  terminu dla całego dokumentu: PDF z 40 skanami albo DOCX z 20 skanami na wolnej maszynie może
+  przekroczyć 60 s i dostać 400, choć ma warstwę tekstową. Liczba procesów Tesseracta zależy od
+  `os.cpu_count()`, które nie widzi limitu CPU kontenera. Obraz w DOCX większy niż 100 mln pikseli
+  zużywa budżet pikseli dokumentu i odpada w OCR bez ostrzeżenia.
+
+K3.1-1 (wpis uzupełniony 22.11 na podstawie diffu 7d31bac)
+
+- `LLM_CONTEXT_TOKENS` i `LLM_MAX_TOKENS` zasilają budżet kontekstu i ponowień. Prompt opisuje warunki `show_if` po P1.4.
+- `LLM_TEMPERATURE` i `LLM_REASONING_EFFORT` obsługują `off`. `LLM_STRICT_SCHEMA` i `LLM_EXTRA_BODY` sterują parametrami żądania.
+- `LLM_CONNECT_TIMEOUT_S` ustawia osobny limit połączenia. Log błędu HTTP maskuje klucz w wycinku odpowiedzi. Log toku rozumowania podaje liczbę znaków.
+
+K3.1-2 (wpis uzupełniony 22.11 na podstawie diffu 2a139f9)
+
+- `LLM_ANALYSIS_BUDGET_S` domyślnie wynosi 170 s. Ponowienie jest pomijane, gdy prognozowany czas przekroczy budżet D11.
+- `LLM_MAX_ATTEMPTS` domyślnie wynosi 2 i przyjmuje liczby całkowite od 1 do 3.
+- `GET /api/info` zwraca wyłącznie `llm` i `model`. Działa bez tokenu również przy `JWT_ENABLED=true`.
+- Benchmark woła sondę wersji wyłącznie dla Ollamy.
 
 ## Event: whole project
 
 - **D7 – odpowiedzialność.** Lider rozstrzyga kontrakty, zakres i integrację. `SPEC.md` określa kontrakty, `DECISIONS.md` zapisuje decyzje, `DELEGACJA.md` wyznacza wykonawców, a `PROGRESS*.md` rejestruje postęp i wyniki bramek.
+- **D8 – sensowna cyfryzacja formularzy.** Mentor COI potwierdził 2026-11-21 trzy zasady. Repozytorium już je stosuje, więc D8 nie zmienia kontraktu ani generatora.
+  1. Sekcje wnioskodawcy wynikają z papieru. PESEL, adresy, NIP/REGON/KRS, pełnomocnik, adres do korespondencji i kontakt pojawiają się tylko wtedy, gdy papier o nie pyta. Robią to kontrakt P1.2a (`FormAnalysis.applicant`) i generator P1.2b (tabela w SZABLONY rozdz. 1).
+  2. Zostaje każda informacja potrzebna do załatwienia sprawy: dane innych osób, daty, załączniki, instrukcje, wybory i ich warunki (opis `subject_pages` w `models.py`, P1.2a).
+  3. Prosty język i warunki. Etykiety w 2. osobie, bez „Na podstawie art. …”. Dane dopisywane przy opcji to pole z SHOW tej opcji (`label` i `show_if` w `models.py`, SZABLONY rozdz. 6).
+  Pozostałe reguły SZABLONY rozdz. 6, np. lista „Usuwamy z papieru”, to nadal decyzje zespołu bez potwierdzenia mentora.
+- **D9 – Eden AI: wyjątek od lokalnego modelu.** COI dopuściło 2026-11-21, po konsultacji lidera, Eden AI udostępnione zespołowi na potrzeby zadania „Cyfryzacja formularzy”. To jedyny wyjątek od zakazu zewnętrznych API (Treść pkt 5). Innych zewnętrznych API nie używamy, także chmury Ollamy (`OLLAMA_NO_CLOUD=1` zostaje). Wcześniej tego dnia mentor dopuszczał Eden AI tylko w eksperymentach; ta decyzja to zastępuje.
+  1. Ollama zostaje jako alternatywa. Lokalny `qwen3.5:4b` w compose jest wartością domyślną repozytorium i działa bez klucza. Eden AI włącza człowiek ustawieniem `LLM_PROVIDER=edenai`. Adapter to zadanie K3.1, konfiguracja to M1.7 (`DELEGACJA.md` rozdz. 3 i 5).
+  2. Model woła nadal tylko `backend/app/llm.py`. Przy `LLM_PROVIDER=edenai` dozwolony jest tylko host Eden AI: inny adres zatrzymuje start API.
+  3. Klucz Eden AI leży poza repozytorium i poza dostępem agentów. Człowiek podaje go tylko na czas uruchomienia (demo, pomiar, eval), np. `docker compose --env-file` z plikiem spoza katalogów roboczych. Klucz nie trafia do `env.example`, logów, raportów, zrzutów ekranu ani promptów.
+  4. Agenci nie czytają klucza i nie wysyłają zapytań do Eden AI. Testy i e2e też nie: używają atrapy transportu albo `LLM_FIXTURE`. Pomiary na żywo robi człowiek.
+  5. Do Eden AI idzie treść wczytanego pliku. Wysyłamy puste formularze z materiałów COI; folder 1 zostaje poza promptami (D5). README i dokumentacja architektury mówią o tym wprost.
+  6. Nowa zależność nie jest planowana: klient `httpx` już jest. Gdyby była potrzebna, dostaje linię z licencją w tym pliku.
+  7. Tylko modele otwarte. Mentorzy COI (odpowiedź z Discorda, 2026-11-21) dopuszczają model w chmurze i komunikację przez API tylko wtedy, gdy model jest otwarty, a jego wagi pozwalają wdrożyć go samodzielnie na własnej infrastrukturze. Modeli zamkniętych, dostępnych wyłącznie przez API, nie wolno używać. Eden AI udostępnia też modele zamknięte, więc przy `edenai` `LLM_MODEL` to wyłącznie model otwarty zapisany w tym pliku.
+  8. Model docelowy K3.1 to **Qwen3.5-9B** (decyzja lidera, 2026-11-21). Licencja Apache-2.0, wagi publiczne na Hugging Face (`Qwen/Qwen3.5-9B`). Ten sam model jest w Ollamie jako `qwen3.5:9b` (6,6 GB w Q4_K_M), więc da się go wdrożyć samodzielnie.
+     Dostępność: publiczny katalog Eden AI (`GET https://api.edenai.run/v3/models`, odczyt bez klucza, 2026-11-21) ma go pod ośmioma identyfikatorami. Wszystkie deklarują kontekst 262 144 tokeny i `supports_response_schema: true`. Kandydaci z regionu UE, z obrazem na wejściu i bez daty wycofania: `ovhcloud/Qwen3.5-9B` i `ionos/Qwen/Qwen3.5-9B`. Pozostałe: `flexai/Qwen3.5-9B` (także `@eu`), `greenference/qwen3.5-9b` (tylko tekst), `tensorx/qwen/qwen3.5-9b` (fp8). `deepinfra/Qwen/Qwen3.5-9B` i `together_ai/Qwen/Qwen3.5-9B` mają w katalogu datę wycofania 2026-10-21, więc nie wybieramy ich bez sprawdzenia.
+     Niepotwierdzone bez zapytania na żywo: czy wybrana trasa przyjmuje `reasoning_effort` (katalog deklaruje go tylko dla `together_ai`), jak wyłączyć myślenie (karta modelu: domyślnie włączone) i jaki jest czas odpowiedzi. Trasę wybiera lider po pomiarze człowieka z kluczem.
+  Stan: kod woła dziś tylko Ollamę. Do Eden AI nie poszło jeszcze żadne zapytanie do modelu, więc czas i jakość są niezmierzone.
+- **D10 – jeden dokument, jeden JSON; pola, warianty, zależności.** Decyzja lidera po konsultacji z COI (2026-11-21), podtrzymana tego samego dnia wieczorem razem z D11.
+  1. Jeden plik wejściowy daje dokładnie jeden JSON COI. Dotyczy to także formularza 9 (trzy wnioski w jednym dokumencie): powstaje jeden formularz, nie trzy. `POST /api/forms` już tak działa (200 to jeden JSON), a E1 oddaje jeden JSON na formularz.
+  2. Wiele pól, warianty i zależności mają być odwzorowane poprawnie. Wariant z papieru (np. rodzaj wniosku w formularzu 9) to pole wyboru, a dane potrzebne tylko w jednym wariancie mają warunek SHOW tej opcji. Żadne pole z papieru nie ginie (D8 pkt 2).
+  3. Brak nieuzasadnionych pól: każde pole, opcja, sekcja i oświadczenie ma podstawę w dokumencie. Dotyczy analizy (zasada podstawy w treści w prompcie K3) i szablonu (D8 pkt 1).
+  Stan kontraktu po P1.4 (na `main`): warunki SHOW działają na polach i sekcjach przedmiotu, przyjmują alternatywy i koniunkcje oraz źródła z wcześniejszych stron, a cykle są wykrywane. Formularz 9 jest jednym formularzem. Link `flow` w formacie COI nie ma warunku, więc stron alternatywnych nie zapisujemy.
+- **D11 – cel wydajnościowy.** Cały proces, od przyjęcia pliku do JSON-a (kontrola, odczyt z OCR, analiza z ponowieniami, generator, linter), ma trwać około 180 s, także podczas live demo. Granica orientacyjna to 200 s. Decyzja lidera po konsultacji z COI (2026-11-21). Zastępuje „< 60 s na formularz na CPU” (DELEGACJA rozdz. 4), „JSON w < 2 min” (M1.5) i miarę M7 „< 60 s na plik” (`docs/ZESTAW_TESTOWY.md`).
+  Stan pomiarów: lokalny Qwen na samym CPU nie mieści się w celu. K1: 238–344 s na jedną próbę z DOCX. K3 (gałąź `mikolaj/k3`, przed scaleniem): 1121 s w dwóch próbach. Eden AI jest niezmierzone.
+  Skutek: suma limitów czasu ma się mieścić w budżecie. Dziś `LLM_TIMEOUT_S=120` i dwie próby K3 to do 240 s samej analizy. Budżet rozdzielają K3.1 i M1.4 po pomiarze. `LLM_TIMEOUT_S=600` (prośba z K1) nie może być wartością domyślną.
+- **D12 – środowisko obrony.** Mentorzy COI (odpowiedź z Discorda, 2026-11-21): obrona działa na architekturze x86, bez dedykowanego GPU. Ilość RAM-u i stabilność internetu są niepotwierdzone.
+  1. Obrazy i model lokalny muszą działać na x86-64 i na samym CPU. `docker-compose.yml` nie rezerwuje GPU, a K1 mierzono na x86 (Core Ultra 7 255U) bez GPU.
+  2. Lokalny model na samym CPU nie spełnia D11 (K1), więc ścieżką na live demo jest Eden AI (D9). Wymaga ona internetu, którego stabilność jest niepotwierdzona.
+  3. Ollama zostaje alternatywą bez internetu. Przełącza ją człowiek zmienną `LLM_PROVIDER`. `qwen3.5:9b` lokalnie jest niezmierzony, a jego plik ma 6,6 GB wobec 3,3 GB dla 4B. Przy niepotwierdzonym RAM-ie nie zakładamy, że się zmieści.
+  4. Obrazy i model lokalny pobieramy przed obroną, nie w jej trakcie.
+  Otwarte: ilość RAM-u i stabilność internetu.
+- **D13 – walidatory potwierdzone.** Mentor COI (2026-11-21): puste tablice `validation` w przykładach nie zabraniają walidatorów. Należy używać odpowiednich dostępnych reguł, jeśli wynikają z analizy formularza. To zamyka pytanie 1 z `docs/BRIEF_ZESPOL.md` rozdz. 7 i potwierdza SZABLONY rozdz. 5, P1 (`ADD_VALIDATORS = True`) i P1.3a. Dostępne reguły to dziewięć nazw z Reguł technicznych (lista w `lint.py`). Walidator dodajemy tylko wtedy, gdy wynika z pola: z rodzaju danych albo z obowiązkowości. Kod bez zmian.
+- **D14 – słowniki z pliku COI.** Mentor COI (2026-11-21): identyfikatory słowników i konkretne wartości bierzemy z przekazanego pliku słowników COI. Nie kopiujemy bez podstawy różniących się wartości z formularzy przykładowych i nie wymyślamy nowych.
+  Plik „Hacknation - Słowniki” z `materialy/` wymienia: Województwo, Powiat, Gmina, Miejscowość, Kraje i Numery kierunkowe. Słownik wolno podpiąć do listy rozwijanej, radia i checkboxa, a słowniki adresowe i Kraje tylko do listy rozwijanej. Plik podaje nazwy, bez list wartości i bez identyfikatorów technicznych.
+  Stan kodu: generator używa `Kraje` (jest w pliku) oraz `TERYT_4G_DOWODOWY` z `multiLevelTree` dla adresu w Polsce (`generator/template.py`). `TERYT_4G_DOWODOWY` podają Standardy COI (rozdz. „Adres”: „Zaimportowany słownik: TERYT_4G_DOWODOWY”) i oba wzorce. Plik słowników go nie wymienia, a osobno wymienia Województwo, Powiat, Gminę i Miejscowość. `TERYT_DOWODOWY` jest tylko we wzorcach, a wzorce 1 i 5 używają obu nazw różnie. Wartość domyślna `["Polska"]` w `Kraje` pochodzi z obu wzorców. Linter nie sprawdza nazwy słownika. Kontrakt `FormAnalysis` nie pozwala modelowi wskazać słownika w polach przedmiotu.
+  Otwarte: słownik adresu zamieszkania, czyli `TERYT_4G_DOWODOWY` ze Standardów i wzorców albo Województwo, Powiat, Gmina, Miejscowość z pliku słowników. Dwa dokumenty COI mówią tu co innego, więc to pytanie do mentora. Do odpowiedzi generator zostaje bez zmian.
 - **D15 – kroje na licencji OFL-1.1.** Decyzja lidera (2026-11-21) przed pracą nad frontem, razem z sekcją „Two zones” w `DESIGN.md`. Dopuszczamy kroje na licencji SIL OFL-1.1 tylko jako niezmienione pliki krojów w repozytorium, bez CDN i bez subsetowania (to już modyfikacja). OFL nie wymaga publikacji kodu aplikacji: jej warunki dotyczą samego kroju, nie programu, który go używa. Treść pkt 5 zakazuje licencji, które tego wymagają, więc OFL jej nie narusza. To nie jest czwarty wyjątek MPL-2.0 z sekcji szablonu: D15 obejmuje wyłącznie pliki krojów, nie pakiety. Każdy dodany krój dostaje linię pod „Event: web” (nazwa, wersja, źródło, OFL-1.1), a obok plików leży tekst licencji z informacją o prawach autorskich.

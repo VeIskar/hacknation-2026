@@ -7,12 +7,11 @@ Liczby i daty z XLSX zostają w postaci zapisanej w pliku, bez formatu wyświetl
 
 import re
 from collections.abc import Iterator
-from io import BytesIO
 from posixpath import join, normpath
 from urllib.parse import unquote
 from xml.etree import ElementTree
 
-from app.extract.common import ZipParts, clean_text, unreadable
+from app.extract.common import XML_ERRORS, ZipParts, clean_text, completed, unreadable
 
 # Wspólny limit rozpakowanych XML jednego pliku. Największy arkusz w materiałach COI ma 0,7 MB XML,
 # a odczyt kosztuje ok. 0,3 s CPU na każdy 1 MB.
@@ -26,12 +25,6 @@ _MAX_INDEX_XML_BYTES = 1024 * 1024
 # i kilka elementów na komórkę; limity zatrzymują pliki, które tylko udają arkusz.
 _MAX_XML_DEPTH = 100
 _MAX_CELL_ELEMENTS = 10_000
-_XML_ERRORS = (
-    ElementTree.ParseError,
-    # Deklaracja kodowania wielobajtowego (ValueError) albo nieznanego (LookupError).
-    ValueError,
-    LookupError,
-)
 _CELL_SEPARATOR = " | "
 _BOOLEAN = {"1": "PRAWDA", "true": "PRAWDA", "0": "FAŁSZ", "false": "FAŁSZ"}
 
@@ -111,45 +104,13 @@ class _Row:
 def _completed(
     xml: bytes, items: frozenset[str], markers: frozenset[str] = frozenset()
 ) -> Iterator[ElementTree.Element]:
-    """Zamknięte elementy `items` (z całym poddrzewem) i `markers`, które leżą poza `items`.
-
-    Element zamknięty poza `items` znika z drzewa zaraz po przetworzeniu, więc w pamięci są tylko
-    otwarte elementy i jeden element `items` naraz.
-    """
-    open_elements: list[ElementTree.Element] = []
-    open_items = 0
-    item_elements = 0
-    try:
-        for event, element in ElementTree.iterparse(BytesIO(xml), events=("start", "end")):
-            if event == "start":
-                open_elements.append(element)
-                if len(open_elements) > _MAX_XML_DEPTH:
-                    raise unreadable()
-                if open_items:
-                    item_elements += 1
-                    if item_elements > _MAX_CELL_ELEMENTS:
-                        raise unreadable()
-                elif element.tag in items:
-                    item_elements = 0
-                open_items += element.tag in items
-                continue
-            open_elements.pop()
-            open_items -= element.tag in items
-            if open_items:
-                continue
-            if element.tag in items or element.tag in markers:
-                yield element
-            if open_elements:
-                # Wcześniejsze rodzeństwo już usunięto, a późniejsze jeszcze nie powstało.
-                del open_elements[-1][-1]
-    except _XML_ERRORS as exc:
-        raise unreadable() from exc
+    return completed(xml, items, markers, max_depth=_MAX_XML_DEPTH, max_item_elements=_MAX_CELL_ELEMENTS)
 
 
 def _parse(xml: bytes) -> ElementTree.Element:
     try:
         return ElementTree.fromstring(xml)
-    except _XML_ERRORS as exc:
+    except XML_ERRORS as exc:
         raise unreadable() from exc
 
 

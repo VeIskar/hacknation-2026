@@ -2,36 +2,35 @@
 
 ## State
 
-2026-11-22 00:46 · `905b69a step M1.7: LLM_PROVIDER (ollama albo edenai) z hostem, kluczem i modelem otwartym wg D9`
-· zmienione pliki: 0 · gałąź `marcin/m1.7` wypchnięta, PR do `main` jeszcze nie scalony (`main` = `2a139f9`).
+Stan `main` na `1c6544c` (2026-11-22).
 
-Done (Must, obszar Marcina; dowód w `backend/tests`):
-- Przyjęcie pliku, typy, limit 413, błędy 400/503/500 – `test_files.py`, `test_api.py`.
-- Cały łańcuch `POST /api/forms` (odczyt → analiza → strażnik → generator → linter) – `test_api.py` z `LLM_FIXTURE`.
-- JWT opcjonalny, `/health` i `/api/info` otwarte – `test_auth.py`, `test_info.py`.
-- Obrazy `api` i `ollama` bez roota, compose bez zapisu poza /tmp – `test_docker.py`.
-- `LLM_CONTEXT_TOKENS` i `LLM_PROVIDER` (Ollama domyślnie, Eden AI wg D9: host, klucz, model otwarty) – `test_config.py`.
-- Ręcznie: formularz 3 przez Eden AI (`flexai/Qwen3.5-9B`) → poprawny JSON COI.
-
-In progress: M1.7 skończone i zrecenzowane (`REVIEW.md`, 4 CONFIRMED poprawione, 1 LATER). Czeka na PR.
-
-Broken: nothing.
+Done:
+- M1.7 (#25) jest scalone. Ollama jest domyślna, a Eden AI podlega ograniczeniom D9 dla hosta, klucza i modelu.
+- K3.1-3 (#26) jest scalone. Analiza ma naprawy przed walidacją i ostatnią szansę. Eden AI domyślnie korzysta z trasy flexai w UE.
+- PR lidera (#18) jest scalony. D9–D14 są w `DECISIONS.md`.
+- K2-FINAL (#27) jest scalone. Odczyt działa w procesie potomnym, a `backend/requirements.txt` zawiera `olefile==0.47`.
 
 Next:
-1. PR `marcin/m1.7` → `main`; przy konflikcie scalić `origin/main` (zwykle `PROGRESS.api.md`, `DECISIONS.md`).
-2. Człowiek: w `.env` dopisać `LLM_PROVIDER=edenai` (adres Eden AI przy `ollama` zatrzymuje start), klucz podawać w powłoce;
-   zmierzyć czas całego procesu na formularzach 5 i 9 wobec D11 (~180 s) i oddać liczby liderowi.
-3. Request Mikołaja: docstring `test_format_without_reader_yet_is_400` (XLSX ma czytnik) + prawdziwy XLSX → 200.
+1. Dokumentacja architektury COI (ten krok).
+2. Interfejs według `SPEC.md` i testu akceptacyjnego.
+3. Kontener web bez roota zgodnie z otwartym Request M1.3.
 
 Decisions waiting for the human / lead:
-- Scalenie `lead/mentor-2111` (czeka na mentorów); lider potwierdza listę modeli i hostów Eden AI z wpisu M1.7.
+- Lider zatwierdza trasę Eden AI `flexai/Qwen3.5-9B@eu` i listę modeli oraz hostów z wpisu M1.7 (D9 pkt 8).
 - Kod HTTP dla JSON-a odrzuconego przez linter (dziś 500).
-- `LLM_EXTRA_BODY` przy `edenai`: lista dozwolonych kluczy (LATER z recenzji, po pomiarze na żywo).
+- `LLM_EXTRA_BODY` przy `edenai`: lista dozwolonych kluczy (LATER z recenzji M1.7).
 - Usunięcie scalonych gałęzi zdalnych.
 
-Gate: `bash scripts/gate.sh` → `GATE: PASS (api)`
+Gate: `bash scripts/gate.sh api -rs` → bez zmian kodu w tym kroku (tylko dokumentacja).
 
 ## Plan
+
+Krok COI 3.3.II (Codex, worktree `codex/dictionary-proposals`).
+
+- `scripts/propose_dictionaries.py` odczyta raport E1 i JSON-y COI oraz sprawdzi opcje w pliku źródłowym.
+- Raport propozycji poda pole, wartości, źródło i powód weryfikacji przez urzędnika.
+- `backend/tests/test_dictionary_proposals.py` sprawdzi źródło, katalog, niejednoznaczność i identyczność JSON-a COI.
+- Dowód odbioru: raport z PDF F9 z użyciem istniejącej atrapy analizy, bramka API i niezależna recenzja.
 
 Krok P0.1: poprawki po recenzji P0 (decyzje lidera D1-D6 w `DECISIONS.md`).
 
@@ -183,6 +182,27 @@ Krok M1.7 (Marcin, `marcin/m1.7` od `2a139f9`): `LLM_PROVIDER` (D9, DELEGACJA ro
 - `docker-compose.yml`: `LLM_PROVIDER`, `LLM_BASE_URL: ${LLM_BASE_URL:-}`, stałe `LLM_OLLAMA_URL`; `api` bez sieci `internal`.
 - `env.example`, README (oba tryby, treść pliku idzie do Eden AI), DECISIONS (lista modeli i hostów).
 - Testy: `test_config.py`, `test_docker.py`; dowód RED przed zmianą, mutacje, `gate.sh api -rs`.
+Krok K2-FINAL (Mikołaj, `mikolaj/k2-final` od `1c3ebd2`): domknięcie odczytu, jedno zadanie zamiast K2.5–K2.7 (decyzja lidera).
+
+- A `extract/doc.py`: binarny DOC przez `olefile` 0.47 (BSD-2-Clause) i własny odczyt tablicy kawałków Word; tekst główny, przypisy i pola tekstowe.
+- B `extract/ocr.py`, `extract/images.py`: obraz wyższy niż limit Tesseracta dzielony na pasy z zakładką; wiersze z granicy pasów trafiają do wyniku raz.
+- C `extract/sandbox.py`, `extract/worker.py`: odczyt w osobnym procesie z limitem czasu, pamięci i CPU; po limicie ginie cała grupa procesów. Limity stron PDF, ZIP w DOCX i pikseli.
+- D `extract/pdf.py`: warstwa tekstowa jak dotąd; strona bez użytecznego tekstu → OCR obrazów osadzonych, wyjętych przez `pypdf`, bez renderera.
+- E `extract/docx.py`: pola tekstowe bez dubli (Choice i Fallback), obrazy z `word/media` → OCR z limitem liczby i rozmiaru, bez powtórzeń tekstu z `document.xml`.
+- Testy: `test_extract.py` i nowe `test_extract_*.py`; RED/GREEN, mutacje, pliki COI z folderów 1–9.
+- Dowód: `bash scripts/gate.sh api -rs` z 0 pominiętych, obraz Docker na Pythonie 3.14, `POST /api/forms` z `LLM_FIXTURE`, niezależna recenzja, macierz formatów z czasami.
+- Poza obszarem (Requests): `olefile==0.47` w `backend/requirements.txt`.
+
+Krok K2-FINAL, poprawki po recenzji (`REVIEW.md`: 2, 3, 4, 5b, D1–D4), każda z testem widzianym na czerwono:
+
+- 2 `sandbox.py`: stderr procesu odczytu czytany z ograniczonym ogonem, semafor równoległych odczytów; `worker.py` bez logowania bibliotek.
+- 3 `ocr.py`, `worker.py`: brak danych języka Tesseracta i brak Leptoniki przy wysokim skanie → 500 z powodem w logu API.
+- 4 `ocr.py`: scalanie pasów przez dopasowanie ramek wierszy (pion i poziom) z obu pasów; test z prawdziwym OCR cięcia w tekście.
+- 5b `ocr.py`: limit jednego Tesseracta wyraźnie niższy od limitu piaskownicy. D3: komentarz `_STRIP_PIXELS` zgodny z `strip_bands`.
+- D1 `docx.py`: `mc:AlternateContent` na poziomie bloku oddaje jedną gałąź. D4: tekst DOCX przez `clean_text`.
+- D2 `pdf.py`: `_collect` ze strażnikiem cykli, pamięcią przetworzonych formularzy i budżetem operacji.
+- Dowód: bramka z 0 pominiętych, mutacje w `mutate.py`, testy i `POST /api/forms` w obrazie Docker (Python 3.14).
+- Druga recenzja: `_same` (wysokość, środki) i łączenie z najbliższą kopią; budżet pikseli DOCX; limit czekania na odczyt 60 s.
 
 ## Requests
 
@@ -216,8 +236,14 @@ Krok M1.7 (Marcin, `marcin/m1.7` od `2a139f9`): `LLM_PROVIDER` (D9, DELEGACJA ro
 - Mikołaj → Marcin (K2.4, `backend/tests/test_api.py`): docstring `test_format_without_reader_yet_is_400` jest nieaktualny, bo XLSX ma już czytnik. Test dalej przechodzi, bo próbka `XLSX` z `samples.py` nie ma arkusza. Proponuję opis „XLSX bez arkusza → 400” albo prawdziwy XLSX → 200.
 - Mikołaj → lider (`.gitignore`): wzorzec `materialy/` pasuje tylko do katalogu, a w worktree `materialy` to dowiązanie do materiałów COI. „Stage all” w GUI doda je do commita (D5). Proponuję wzorzec `materialy` bez ukośnika.
 - Marcin → lider (`DECISIONS.md` D9 pkt 7, przy scalaniu `lead/mentor-2111`): lista modeli otwartych dla `edenai` jest w wpisie M1.7 (8 tras Qwen3.5-9B z D9 pkt 8, także dwie z datą wycofania) i w `EDENAI_OPEN_MODELS`; hosty `api.edenai.run` i `api.eu.edenai.run`. Potwierdź albo zawęź. Zaktualizuj też stan D9: zapytanie do Eden AI już poszło (Marcin, formularz 3, `flexai/Qwen3.5-9B`, poprawny JSON COI).
+- Mikołaj → Marcin (K2-FINAL, `backend/requirements.txt`): dopisać `olefile==0.47` (BSD-2-Clause, decyzja lidera, wpis w `DECISIONS.md`). Bez tej linii binarny DOC daje 500 z wpisem „brak biblioteki olefile”; pozostałe formaty działają. `Dockerfile` bez zmian: Leptonica jest już w obrazie z pakietem `tesseract-ocr`.
+- Mikołaj → Marcin (K2-FINAL, `README.md`): `extract` czyta plik w osobnym procesie z limitami (60 s, 1,5 GiB, 100 stron PDF, 100 mln pikseli obrazu); po limicie odpowiedź to 400. Najwyżej 2 odczyty naraz; żądanie, które czeka na odczyt ponad 60 s, dostaje 500 „Coś poszło nie tak. Spróbuj ponownie.”. Start procesu dodaje ok. 0,5 s do każdego żądania.
+- Mikołaj → Marcin (K2-FINAL, `main.py`): zmień `def health()` na `async def health()`. Synchroniczna trasa czeka w tej samej puli 40 wątków co `process_file`; przy zalewie ciężkich plików `/health` odpowiada dopiero po zwolnieniu wątku i healthcheck w compose może uznać API za martwe (druga recenzja K2-FINAL, nr 4).
+- Mikołaj → lider (K2-FINAL, `DELEGACJA.md` rozdz. 3 i 6): K2 czyta DOC przez `olefile`, a XLSX, ODS i DOCX bez `openpyxl`, `odfpy` i `python-docx`. Renderer PDF (`pypdfium2`) to otwarta decyzja z `DECISIONS.md`: bez niego nie czytamy JBIG2, JPEG 2000 ani tekstu zamienionego na krzywe.
 
 ## Log
+
+- COI 3.3.II: done osobny raport propozycji E1, PDF F9 → 20 wartości ze str. 3, `cmp` zgodny dla JSON-a COI i raportu E1, 16 nowych testów, bramka API `1363 passed, 1 warning`, niezależna recenzja SHIP / next akceptacja i commit człowieka / blocker brak.
 
 (one line per step: done / next / blocker)
 
@@ -264,3 +290,6 @@ Krok M1.7 (Marcin, `marcin/m1.7` od `2a139f9`): `LLM_PROVIDER` (D9, DELEGACJA ro
 - M1.7: done `LLM_PROVIDER` (`ollama` domyślnie, `edenai`; inna wartość zatrzymuje start), przy `edenai` tylko https na `api.edenai.run`/`api.eu.edenai.run` (bez użytkownika i obcego portu), wymagany klucz (nie `ollama`, nigdy w komunikacie), `LLM_MODEL` z `EDENAI_OPEN_MODELS` (lista w DECISIONS); pusty `LLM_BASE_URL` daje adres dostawcy, compose podaje Ollamę osobno w `LLM_OLLAMA_URL`; `api` bez sieci `internal`; `env.example`, README, DECISIONS; testy czerwone przed zmianą, 10/10 mutacji wykrytych; `bash scripts/gate.sh api -rs` → 917 passed, 0 pominiętych, `GATE: PASS (api)` / next commit człowieka, pomiar czasu Eden AI (człowiek) / blocker brak.
 - M1.7 recenzja (`reviewer`, Codex niezainstalowany): 5 ustaleń; CONFIRMED i poprawione: `ollama` z adresem Eden AI omijał listę modeli (teraz stop startu), wartość `LLM_PROVIDER`/`LLM_MODEL` w komunikacie (klucz wklejony w złą zmienną w logu), `Ollama` jako klucz bez względu na wielkość liter, komentarz compose i wiersz `LLM_OLLAMA_URL` w README, pusty `_set` w teście; LATER: `LLM_EXTRA_BODY` bez listy dozwolonych kluczy przy `edenai` (niepotwierdzone, czy Eden AI ma klucze trasowania). Testy czerwone przed poprawką (7); `bash scripts/gate.sh api -rs` → 924 passed, `GATE: PASS (api)` / next commit człowieka / blocker brak.
 - K3.1-3: done N1–N3, S1/S2 w ostatniej szansie, temperatura ponowień i domyślne ustawienia Eden AI. Walidacja odpowiedzi E1 w pamięci 8/8 / next decyzja lidera o trasie i pomiar po wdrożeniu / blocker brak.
+- K2-FINAL (`mikolaj/k2-final` od `1c3ebd2`, bez commita): done binarny DOC (`olefile` 0.47 + własny odczyt Clx, historii i pól tekstowych), pasy dla wysokich skanów (folder 9: 1654 × 37424), odczyt w osobnym procesie z limitem czasu, pamięci i CPU, OCR obrazów osadzonych w PDF i DOCX, pola tekstowe DOCX bez dubli, przypisy i stopki DOCX; 71/71 plików COI odczytanych w obrazie API (Python 3.14.10, Tesseract 5.5.0), `POST /api/forms` z `LLM_FIXTURE` w kontenerze: 200 dla 8 formatów, 400 dla uszkodzonego PDF i dla PDF 2,3 MB po 64 s; `bash scripts/gate.sh api -rs` z Tesseractem na PATH → 1012 passed, 0 pominiętych, `GATE: PASS (api)`; w obrazie API testy odczytu 365 passed; mutacje 105/105 wykrytych na końcowym kodzie (jedna wcześniejsza wskazała warunek bez znaczenia, usunięty z `ocr.py`); niezależna recenzja całego diffu (`reviewer`): FIX, zamknięte 5a, otwarte 2, 3, 4, 5b i drobne D1–D4 (`REVIEW.md`) / next poprawki z recenzji z testami RED/GREEN, potem bramka, obraz Docker i commit człowieka; `olefile` w `requirements.txt` (Request) / blocker: werdykt K2 PARTIAL do czasu poprawek z recenzji; bez `olefile` w obrazie DOC daje 500; bez Tesseracta na PATH 5 testów z prawdziwym OCR jest pomijanych.
+- K2-FINAL po recenzjach (bez commita): done 2, 3, 4, 5b, D1–D4 z `REVIEW.md` (każde odtworzone, potem test widziany na czerwono): ogon stderr 300 B i ciche biblioteki w procesie odczytu, 2 odczyty naraz z czekaniem do 60 s, brak danych języka i Leptoniki → 500 z powodem, scalanie pasów po ramkach z najbliższą kopią, OCR jednego obrazu 30 s, jedna gałąź blokowego `mc:AlternateContent`, `clean_text` w DOCX, strażnik cykli i 200 tys. operacji w PDF, budżet pikseli DOCX; druga recenzja `reviewer`: FIX (pieczęcie i krzywe skany w scalaniu) → naprawione → SHIP; `bash scripts/gate.sh api -rs` z Tesseractem → 1213 passed, 0 pominiętych, `GATE: PASS (api)`; obraz Docker (Python 3.14.10, Tesseract 5.5.0) 566 passed, `POST /api/forms` z `LLM_FIXTURE` 200 dla 19 plików z folderów 1, 5, 8, 9, macierz 71/71; mutacje 138/138 (136 w pełnym przebiegu, 2 domknięte testami); model scalania 12 000 przypadków bez błędu / next commit człowieka i PR / blocker: `olefile==0.47` w `requirements.txt` (Marcin) warunkiem scalenia; bez Tesseracta na PATH 7 testów z prawdziwym OCR jest pomijanych.
+- Dokumentacja architektury COI: done opis stanu `1c6544c`, diagramy, źródła i ograniczenia / next front i web bez roota / blocker brak.
