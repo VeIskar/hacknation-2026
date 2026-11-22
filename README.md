@@ -348,23 +348,6 @@ Stan wdrożenia opisuje sekcja [Znane ograniczenia](docs/ARCHITEKTURA.md#znane-o
 
 Lista z uzasadnieniem jest w `DECISIONS.md`.
 
-## Narzędzia przygotowane przed wydarzeniem
-
-Przed startem wydarzenia powstał wyłącznie szablon i narzędzia pracy. Nie zawierają kodu
-rozwiązującego zadanie.
-
-- Szkielet aplikacji: pusty front (Vite, React, TypeScript, Tailwind) z jedną stroną
-  zastępczą, API FastAPI z jednym adresem `/health`, `docker-compose.yml` i dwa pliki
-  Dockerfile.
-- Reguły dla agentów: `AGENTS.md`, `CLAUDE.md`, `DESIGN.md`, puste szablony `SPEC.md`,
-  `PROGRESS.md`, `PROGRESS.web.md`, `PROGRESS.api.md`, `DECISIONS.md`, `PITCH.md`.
-- Uprawnienia i hook: `.claude/settings.json`.
-- Bramka jakości: `scripts/gate.sh`, `scripts/stop-gate.sh`.
-- Testy narzędziowe: `frontend/tests/e2e/a11y.spec.ts` (axe i klawiatura),
-  `frontend/tests/e2e/shots.spec.ts` (zrzuty ekranów).
-- Role agentów: `.claude/agents/` (reviewer, a11y, pitch).
-- Procedury etapów: `.claude/skills/hn-*`.
-
 ## Zatrzask na testy
 
 Po akceptacji `SPEC.md` i testu akceptacyjnego człowiek zapina zatrzask:
