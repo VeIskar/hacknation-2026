@@ -70,37 +70,45 @@ sam model w pomiarze K1 potrzebował 238–344 s na formularz. Tryb lokalny prze
 ### Model w chmurze: Eden AI (D9)
 
 `LLM_PROVIDER=edenai` włącza Eden AI organizatorów. D9 dopuszcza tylko modele otwarte, które można
-uruchomić na własnej infrastrukturze, np. `ovhcloud/Qwen3.5-9B`.
+uruchomić na własnej infrastrukturze. Zalecana trasa to `flexai/Qwen3.5-9B@eu`. W pomiarze E1
+wyłączenie myślenia zadziałało na tej trasie. `ovhcloud/Qwen3.5-9B` zignorowała je i wyczerpała
+limit 8192 tokenów, zwracając pustą treść lub ucięty JSON. Trasę zatwierdza lider (D9 pkt 8).
 **W trybie Eden AI treść przesłanego pliku trafia do Eden AI jako tekst lub obrazy stron.**
 
 API nie wystartuje przy `edenai`, jeśli:
 
 - `LLM_BASE_URL` nie wskazuje `https://api.edenai.run` ani `https://api.eu.edenai.run`
-  (pusty daje `https://api.edenai.run/v3`);
-- brakuje `LLM_API_KEY` (wartość `ollama` z `env.example` się nie liczy);
+  (pusty daje `https://api.eu.edenai.run/v3`).
+- brakuje klucza Eden AI w `LLM_API_KEY`. Wartość `ollama` z `env.example` jest tylko dla Ollamy.
 - `LLM_MODEL` nie jest na liście modeli otwartych z `DECISIONS.md` (M1.7). Dziś to trasy Qwen3.5-9B.
 
 Komunikat błędu podaje nazwę zmiennej, bez jej wartości. Adres Eden AI przy `LLM_PROVIDER=ollama`
 też zatrzymuje start, żeby nie ominąć listy modeli.
 
-W powłoce Bash podaj klucz do środowiska w chwili uruchomienia. Nie zapisuj go w `.env` ani w repozytorium.
+Na macOS uruchom w Bashu lub zsh z kluczem Eden AI zapisanym w Pęku kluczy jako `hacknation-edenai`
+dla konta `$USER`. Klucz API trafia do środowiska uruchomienia. Nie zapisuj go w `.env` ani w repozytorium.
 
 ```bash
 (
   export LLM_PROVIDER=edenai
   export LLM_BASE_URL=https://api.eu.edenai.run/v3
-  export LLM_MODEL=ovhcloud/Qwen3.5-9B
+  export LLM_MODEL=flexai/Qwen3.5-9B@eu
   export LLM_CONTEXT_TOKENS=65536
-  export LLM_MAX_TOKENS=8192
+  export LLM_MAX_TOKENS=16384
+  export LLM_REASONING_EFFORT=off
+  export LLM_EXTRA_BODY='{"chat_template_kwargs":{"enable_thinking":false}}'
   export LLM_FIXTURE=
-  read -rs -p 'Klucz Eden AI: ' LLM_API_KEY
-  printf '\n'
+  LLM_API_KEY="$(security find-generic-password -a "$USER" -s hacknation-edenai -w)" || exit 1
   export LLM_API_KEY
 
-  # Aplikacja w kontenerach albo pomiar formularzy z powłoki.
   docker compose up -d --build api web
-  backend/.venv/bin/python scripts/generate_forms.py --out ../generated-forms-eden
 )
+```
+
+Żeby wygenerować pliki COI z tymi ustawieniami, wstaw w powyższym bloku zamiast polecenia Compose:
+
+```bash
+backend/.venv/bin/python scripts/generate_forms.py --out ../generated-forms-eden
 ```
 
 - Jeśli trasa odrzuci `reasoning_effort` lub `temperature`, ustaw odpowiednio
@@ -123,19 +131,19 @@ Zmienne z `env.example`. Compose przekazuje je do `api`, a pusta wartość daje 
 | `JWT_SECRET` | – | Sekret JWT, co najmniej 32/48/64 bajty dla HS256/HS384/HS512 |
 | `JWT_ALGORITHM` | `HS256` | `HS256`, `HS384` albo `HS512` |
 | `LLM_PROVIDER` | `ollama` | `ollama` albo `edenai` (D9). Inna wartość zatrzymuje start |
-| `LLM_BASE_URL` | Ollama w compose: `http://ollama:11434/v1`, lokalnie: `http://localhost:11434/v1`; Eden AI: `https://api.edenai.run/v3` | Serwer modelu zgodny z OpenAI. Zostaw w `.env` pusty, wtedy adres wynika z dostawcy. Przy `edenai` tylko host Eden AI |
+| `LLM_BASE_URL` | Ollama w Compose `http://ollama:11434/v1`, lokalnie `http://localhost:11434/v1`. Eden AI `https://api.eu.edenai.run/v3` | Serwer modelu zgodny z OpenAI. Pusta wartość wybiera adres dostawcy. Przy `edenai` tylko host Eden AI |
 | `LLM_OLLAMA_URL` | compose: `http://ollama:11434/v1` | Adres Ollamy dla pustego `LLM_BASE_URL`. Ustawia go compose; nie ma go w `env.example` |
-| `LLM_MODEL` | `qwen3.5:4b` | Nazwa modelu na serwerze. Przy `edenai` tylko model otwarty z listy w `DECISIONS.md` |
+| `LLM_MODEL` | Ollama `qwen3.5:4b`, Eden AI `flexai/Qwen3.5-9B@eu` | Nazwa modelu na serwerze. Przy `edenai` tylko model otwarty z listy w `DECISIONS.md` |
 | `LLM_API_KEY` | `ollama`; Eden AI: brak | Klucz API. Ollama go nie sprawdza. Przy `edenai` wymagany; podawaj go w powłoce, nie w `.env` |
 | `LLM_TIMEOUT_S` | `120` | Timeout dla pojedynczego zapytania w sekundach. Przekroczenie daje 503 |
 | `LLM_CONNECT_TIMEOUT_S` | `10` | Limit na nawiązanie połączenia z modelem w sekundach |
-| `LLM_CONTEXT_TOKENS` | `32768` | Kontekst analizy w tokenach, min. `8192`. Compose podaje tę samą liczbę Ollamie |
-| `LLM_MAX_TOKENS` | Ollama `4096`, Eden AI `8192` | Limit tokenów odpowiedzi uwzględniany w budżecie kontekstu |
-| `LLM_TEMPERATURE` | `0` | Temperatura od 0 do 2. `off` pomija parametr |
-| `LLM_REASONING_EFFORT` | `none` | Ustawienie toku rozumowania. `off` pomija parametr |
+| `LLM_CONTEXT_TOKENS` | Ollama `32768`, Eden AI `65536` | Kontekst analizy w tokenach, min. `8192`. Compose podaje tę samą liczbę Ollamie |
+| `LLM_MAX_TOKENS` | Ollama `4096`, Eden AI `16384` | Limit tokenów odpowiedzi uwzględniany w budżecie kontekstu |
+| `LLM_TEMPERATURE` | `0` | Temperatura od 0 do 2. Przy ponowieniu co najmniej 0,3. `off` pomija parametr także przy ponowieniu |
+| `LLM_REASONING_EFFORT` | Ollama `none`, Eden AI `off` | Ustawienie toku rozumowania. `off` pomija parametr |
 | `LLM_STRICT_SCHEMA` | `true` | Wartość `strict` w żądaniu schematu JSON. Dopuszczalne `true` i `false` |
-| `LLM_EXTRA_BODY` | pusty | Obiekt JSON z dodatkowymi parametrami. Własne ustawienia klienta, w tym model, wiadomości i format odpowiedzi, mają pierwszeństwo |
-| `LLM_ANALYSIS_BUDGET_S` | `170` | Budżet czasu prób w sekundach do sprawdzenia przed ponowieniem. Analiza sumuje czasy prób i dodaje 110% czasu ostatniej. Przekroczenie prognozy daje 503 |
+| `LLM_EXTRA_BODY` | Ollama pusty, Eden AI `{"chat_template_kwargs":{"enable_thinking":false}}` | Dodatkowe parametry żądania. Pole `LLM_EXTRA_BODY={}` zastępuje domyślny obiekt pustym. Ustawienia klienta, w tym model, wiadomości i format odpowiedzi, mają pierwszeństwo |
+| `LLM_ANALYSIS_BUDGET_S` | `170` | Budżet czasu prób w sekundach. Gdy suma czasów prób i 110% czasu ostatniej przekracza budżet, analiza próbuje naprawy ostatniej szansy zamiast ponowienia |
 | `LLM_MAX_ATTEMPTS` | `2` | Łączna liczba prób analizy, od 1 do 3 |
 | `LLM_FIXTURE` | pusty | Ścieżka do pliku `FormAnalysis`. Gdy ustawiona, model nie jest wołany (testy) |
 | `OCR_LANG` | `pol` | Język Tesseract dla skanów |

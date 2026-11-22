@@ -11,7 +11,7 @@ from env_proxy import record_proxy_use
 
 from app.config import Settings
 from app.errors import LLMUnavailable
-from app.llm import UNAVAILABLE_DETAIL, chat_json, image_part
+from app.llm import UNAVAILABLE_DETAIL, answer_token_limit, chat_json, image_part
 from app.models import FormAnalysis
 
 SETTINGS = Settings(llm_base_url="http://model.test/v1/", llm_model="qwen3.5:4b", llm_api_key="klucz", llm_timeout_s=5)
@@ -96,11 +96,22 @@ def test_eden_request_omits_disabled_parameters_and_protects_managed_keys(monkey
         "model": "ovhcloud/Qwen3.5-9B",
         "messages": MESSAGES,
         "stream": False,
-        "max_tokens": 8192,
+        "max_tokens": 16384,
         "response_format": {"type": "json_schema", "json_schema": {
             "name": "FormAnalysis", "schema": schema, "strict": False,
         }},
     }
+
+
+def test_answer_token_limit_defaults_by_provider_and_respects_explicit_value() -> None:
+    eden = Settings(
+        llm_provider="edenai", llm_base_url="https://api.eu.edenai.run/v3",
+        llm_model="flexai/Qwen3.5-9B@eu", llm_api_key="synthetic-test-key",
+    )
+    assert answer_token_limit(eden) == 16384
+    assert answer_token_limit(SETTINGS) == 4096
+    assert answer_token_limit(replace(eden, llm_max_tokens=8192)) == 8192
+    assert answer_token_limit(replace(SETTINGS, llm_max_tokens=1024)) == 1024
 
 
 def test_http_error_logs_status_and_redacts_before_limiting_body(caplog: pytest.LogCaptureFixture) -> None:

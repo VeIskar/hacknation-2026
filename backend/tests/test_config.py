@@ -310,7 +310,50 @@ def test_every_open_model_is_a_qwen35_9b_route() -> None:
 def test_eden_without_url_gets_eden_not_ollama(monkeypatch: pytest.MonkeyPatch) -> None:
     """Compose daje Ollamę tylko dostawcy `ollama`: pusty adres przy `edenai` to Eden AI."""
     _set(monkeypatch, {**EDEN_ENV, "LLM_BASE_URL": "", "LLM_OLLAMA_URL": OLLAMA_IN_COMPOSE})
-    assert Settings.from_env().llm_base_url == "https://api.edenai.run/v3"
+    assert Settings.from_env().llm_base_url == "https://api.eu.edenai.run/v3"
+
+
+@pytest.mark.parametrize("setting_exists", [False, True], ids=["nieustawione", "puste"])
+def test_eden_defaults_and_explicit_values_take_precedence(
+    monkeypatch: pytest.MonkeyPatch, setting_exists: bool,
+) -> None:
+    _set(monkeypatch, {"LLM_PROVIDER": "edenai", "LLM_API_KEY": "synthetic-test-key"})
+    overrides = {
+        "LLM_BASE_URL": "https://api.edenai.run/v3",
+        "LLM_MODEL": "ionos/Qwen/Qwen3.5-9B",
+        "LLM_CONTEXT_TOKENS": "49152",
+        "LLM_REASONING_EFFORT": "none",
+        "LLM_EXTRA_BODY": "{}",
+    }
+    for name in overrides:
+        if setting_exists:
+            monkeypatch.setenv(name, "")
+        else:
+            monkeypatch.delenv(name, raising=False)
+
+    defaults = Settings.from_env()
+    assert defaults.llm_base_url == "https://api.eu.edenai.run/v3"
+    assert defaults.llm_model == "flexai/Qwen3.5-9B@eu"
+    assert defaults.llm_context_tokens == 65536
+    assert defaults.llm_reasoning_effort is None
+    assert defaults.llm_extra_body == {"chat_template_kwargs": {"enable_thinking": False}}
+
+    _set(monkeypatch, overrides)
+    explicit = Settings.from_env()
+    assert explicit.llm_base_url == "https://api.edenai.run/v3"
+    assert explicit.llm_model == "ionos/Qwen/Qwen3.5-9B"
+    assert explicit.llm_context_tokens == 49152
+    assert explicit.llm_reasoning_effort == "none"
+    assert explicit.llm_extra_body == {}
+
+    _set(monkeypatch, {name: "" for name in overrides})
+    _set(monkeypatch, {"LLM_PROVIDER": "ollama", "LLM_OLLAMA_URL": "", "LLM_API_KEY": ""})
+    ollama = Settings.from_env()
+    assert ollama.llm_base_url == "http://localhost:11434/v1"
+    assert ollama.llm_model == "qwen3.5:4b"
+    assert ollama.llm_context_tokens == 32768
+    assert ollama.llm_reasoning_effort == "none"
+    assert ollama.llm_extra_body is None
 
 
 def test_ollama_without_url_gets_compose_service_or_localhost(monkeypatch: pytest.MonkeyPatch) -> None:
