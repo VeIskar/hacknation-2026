@@ -172,11 +172,12 @@
 
 /* Układ */
 
+/* Wąski ekran: jedna kolumna w kolejności DOM (nagłówek, pole pliku, papier, przycisk, opis).
+   Obszary siatki dostają elementy dopiero na szerokim ekranie, niżej. */
 .wb-main {
   display: grid;
   flex: 1;
   grid-template-columns: minmax(0, 46rem);
-  grid-template-areas: 'naglowek' 'papier' 'panel' 'inspektor';
   align-content: start;
   gap: 0 2rem;
   padding-top: 2rem;
@@ -185,7 +186,6 @@
 
 .wb-naglowek {
   display: flex;
-  grid-area: naglowek;
   flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
@@ -200,6 +200,13 @@
   line-height: 2.375rem;
   font-weight: 800;
   letter-spacing: -0.02em;
+}
+
+.wb-wstep {
+  max-width: 40rem;
+  margin: 0;
+  font-size: 1.125rem;
+  line-height: 1.6875rem;
 }
 
 .wb-id {
@@ -223,8 +230,106 @@
 }
 
 .panel {
-  grid-area: panel;
   min-width: 0;
+}
+
+.akcja {
+  min-width: 0;
+}
+
+.akcja .b-krok {
+  width: 100%;
+  min-height: 52px;
+}
+
+.akcja-opis {
+  margin: 0.75rem 0 0;
+  color: var(--color-muted);
+  font-size: 0.9375rem;
+  line-height: 1.375rem;
+}
+
+.uwaga {
+  margin: 0 0 1.5rem;
+  padding: 1rem 1.25rem;
+  border: 2px solid var(--color-navy);
+  border-radius: var(--radius-panel);
+}
+
+/* Jak to działa */
+
+.info {
+  min-width: 0;
+  margin-top: 3rem;
+}
+
+.info-tytul {
+  margin: 0 0 1rem;
+  color: var(--color-navy);
+  font-size: 1.375rem;
+  line-height: 1.75rem;
+  font-weight: 700;
+}
+
+.info-kroki {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin: 0 0 2rem;
+  padding: 0;
+  list-style: none;
+}
+
+.info-kroki li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.info-kroki b {
+  display: block;
+}
+
+.info-numer {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 2px solid var(--color-navy);
+  border-radius: 50%;
+  color: var(--color-navy);
+  font-size: 0.875rem;
+  font-weight: 800;
+}
+
+.info-opis {
+  display: block;
+  color: var(--color-muted);
+  font-size: 1rem;
+  line-height: 1.5rem;
+}
+
+.info-plik {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 1rem;
+  border-radius: var(--radius-panel);
+  background: var(--color-area);
+  color: var(--color-navy);
+}
+
+.info-plik .ikona {
+  margin-top: 2px;
+}
+
+.info-plik p {
+  margin: 0;
+  color: var(--color-ink);
+  font-size: 1rem;
+  line-height: 1.5rem;
 }
 
 /* Przyciski: główny z dolnym cieniem, drugi z ramką, trzeci jako odsyłacz */
@@ -296,9 +401,16 @@
 /* Papier */
 
 .papier {
-  grid-area: papier;
   min-width: 0;
-  margin-bottom: 1.5rem;
+  margin-block: 1rem 1.5rem;
+}
+
+.papier-tytul {
+  display: none;
+  margin: 0 0 0.75rem;
+  font-size: 1.125rem;
+  line-height: 1.625rem;
+  font-weight: 700;
 }
 
 /* Wąski ekran: wiersz z odsyłaczem, jak rozwijany akapit, a nie kolejny przycisk. */
@@ -422,105 +534,161 @@
 }
 
 .tytul-wniosku {
-  margin: 0 0 1rem;
+  margin: 0 0 0.25rem;
   font-size: 1.25rem;
   line-height: 1.75rem;
   font-weight: 700;
 }
 
-/* Panel boczny */
+/* Panel JSON obok podglądu: tytuł, ramka z szarym nagłówkiem i przewijanym kodem, rada pod spodem.
+   Na wąskim ekranie zwinięty do przełącznika pod podglądem. */
 
 .inspektor {
-  display: flex;
-  grid-area: inspektor;
-  flex-direction: column;
   min-width: 0;
-  margin-top: 2rem;
+  margin-top: 1.5rem;
+}
+
+.inspektor-tytul {
+  display: none;
+  margin: 0 0 0.75rem;
+  font-size: 1.125rem;
+  line-height: 1.625rem;
+  font-weight: 700;
+}
+
+.inspektor-tresc {
+  display: none;
+  margin-top: 1rem;
+}
+
+.inspektor[data-open='true'] .inspektor-tresc {
+  display: block;
+}
+
+.inspektor-ramka {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   overflow: hidden;
   border: 1px solid var(--color-line);
   border-radius: var(--radius-panel);
-  background: var(--color-paper);
 }
 
-.zakladki {
-  display: flex;
-  flex: none;
-  gap: 0.25rem;
-  padding: 0.25rem 0.75rem 0;
+.inspektor-co {
+  margin: 0;
+  padding: 0.75rem 1rem;
   border-bottom: 1px solid var(--color-line);
   background: var(--color-area);
+  font-size: 0.9375rem;
+  line-height: 1.375rem;
 }
 
-.zakladka {
-  min-width: 44px;
-  min-height: 44px;
-  padding: 0.5rem 0.875rem 0.375rem;
-  border: 0;
-  border-bottom: 3px solid transparent;
-  background: none;
-  color: var(--color-muted);
-  font: inherit;
-  font-size: 1.0625rem;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-/* Wybrana zakładka: granatowa kreska pod spodem i grubszy krój. */
-.zakladka[aria-selected='true'] {
-  border-bottom-color: var(--color-navy);
-  color: var(--color-navy);
-  font-weight: 800;
-}
-
-/* Panel przycina zawartość, więc obrys fokusu rysujemy do środka. */
-.zakladka:focus-visible,
-.inspektor-panel:focus-visible {
-  outline-offset: -3px;
-}
-
-.inspektor-panel {
-  min-height: 0;
-  padding: 1.25rem;
+.inspektor-ramka .json {
+  max-height: 60vh;
+  padding: 1rem;
   overflow: auto;
 }
 
-.inspektor-json {
-  max-height: 60vh;
+/* Kod przycina ramka, więc obrys fokusu rysujemy do środka. */
+.inspektor-ramka .json:focus-visible {
+  outline-offset: -3px;
 }
 
-.karta {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 1.25rem 1.5rem;
-  margin: 0;
-}
-
-.karta dt {
+.inspektor-rada {
+  margin: 0.75rem 0 0;
   color: var(--color-muted);
   font-size: 0.9375rem;
   line-height: 1.375rem;
 }
 
-.karta dd {
-  margin: 0;
+/* Kolory JSON-a: kontrast co najmniej 4,5:1 na białym. Kształt niesie też sam zapis. */
+.json-klucz {
   color: var(--color-navy);
-  font-size: 1.75rem;
-  line-height: 2.25rem;
-  font-weight: 800;
-  font-variant-numeric: tabular-nums;
+  font-weight: 700;
 }
 
-.karta-szeroki {
-  grid-column: 1 / -1;
+.json-tekst {
+  color: #1b6e36;
 }
 
-.karta-zrodlo {
-  margin: 1.5rem 0 0;
-  padding-top: 1rem;
-  border-top: 1px solid var(--color-line);
+.json-liczba,
+.json-stala {
+  color: #9a4a00;
+}
+
+/* Nagłówek wyniku: tytuł wniosku, plik i czas, liczby z JSON-a, kontrola techniczna. */
+.liczby {
+  max-width: 40rem;
+  margin: 1rem 0 0;
+}
+
+.kontrola {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 1rem 0 0;
+  padding: 0 0.625rem;
+  border: 2px solid var(--color-ok);
+  border-radius: var(--radius-control);
+  color: var(--color-ok);
+  font-size: 0.9375rem;
+  line-height: 1.75rem;
+  font-weight: 700;
+}
+
+.kontrola[data-wynik='bledy'] {
+  display: block;
+  padding: 0.5rem 0.75rem;
+  border-color: var(--color-error);
+  color: var(--color-ink);
+}
+
+.kontrola[data-wynik='bledy'] p {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  color: var(--color-error);
+}
+
+.kontrola ul {
+  margin: 0.25rem 0 0;
+  padding-left: 1.25rem;
+  font-weight: 400;
+}
+
+/* Podgląd eUsługi w ramie */
+.obywatel {
+  min-width: 0;
+}
+
+.obywatel-tytul {
+  margin: 0;
+  font-size: 1.125rem;
+  line-height: 1.625rem;
+  font-weight: 700;
+}
+
+.obywatel-uwaga {
+  margin: 0 0 0.75rem;
   color: var(--color-muted);
   font-size: 0.9375rem;
   line-height: 1.375rem;
+}
+
+/* Element wybrany do panelu JSON: jasne tło i pasek z lewej, inaczej niż obrys fokusu.
+   Przezroczysty pasek stoi zawsze, więc wybór nie przesuwa treści. */
+.rama .eu-section {
+  margin-inline: -0.875rem;
+  padding: 0.5rem 0.875rem 0.5rem calc(0.875rem - 4px);
+  border-left: 4px solid transparent;
+  border-radius: 0 var(--radius-panel) var(--radius-panel) 0;
+}
+
+.rama .eu-section[data-wybrany='true'] {
+  border-left-color: var(--color-navy);
+  /* Jasne tło: tekst błędu (#c3272f) ma na nim 5,1:1, szary opis pola 6,8:1. */
+  background: var(--color-area);
 }
 
 .json {
@@ -535,10 +703,42 @@
 
 .pole-etykieta {
   display: block;
-  margin: 0 0 0.75rem;
-  font-size: 1.1875rem;
+  margin: 0 0 0.25rem;
+  font-size: 1.125rem;
   line-height: 1.625rem;
   font-weight: 700;
+}
+
+.pole-opis {
+  margin: 0 0 0.75rem;
+  color: var(--color-muted);
+  font-size: 1rem;
+  line-height: 1.5rem;
+}
+
+.pole-tekst {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 30rem;
+  min-height: 48px;
+  padding: 0 0.75rem;
+  border: 2px solid var(--color-edge);
+  border-radius: var(--radius-control);
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font: inherit;
+}
+
+.token {
+  margin-top: 1.5rem;
+}
+
+.token[data-invalid='true'] .pole-tekst {
+  border-color: var(--color-error);
+}
+
+.token .blad {
+  margin: 0 0 0.75rem;
 }
 
 .strefa {
@@ -547,7 +747,7 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.75rem;
+  gap: 0.5rem;
   padding: 3rem 2rem;
   border: 2px dashed var(--color-edge);
   border-radius: var(--radius-panel);
@@ -564,13 +764,46 @@
   border-color: var(--color-navy);
 }
 
+.strefa[data-invalid='true'] {
+  border-style: solid;
+  border-color: var(--color-error);
+}
+
+/* Karta wybranego pliku: ikona po lewej, nazwa, rozmiar i odsyłacz „Zmień plik” w kolumnie. */
 .strefa[data-plik='tak'] {
-  flex-flow: row wrap;
-  justify-content: space-between;
-  gap: 0.75rem 1.5rem;
-  padding: 1rem 1.25rem;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  justify-items: start;
+  align-items: start;
+  gap: 0 0.75rem;
+  padding: 1rem;
   border: 2px solid var(--color-line);
   text-align: left;
+}
+
+.strefa[data-plik='tak'] > .ikona {
+  grid-row: 1 / span 2;
+}
+
+.strefa[data-plik='tak'][data-over='true'] {
+  border-color: var(--color-navy);
+}
+
+.strefa[data-plik='tak'][data-invalid='true'] {
+  border-color: var(--color-error);
+}
+
+/* Pusta strefa: akcja nie jest pozycjonowana, więc input wypełnia całą strefę.
+   Karta pliku: akcja jest pozycjonowana, więc input przykrywa tylko odsyłacz. */
+.strefa-akcja {
+  display: inline-flex;
+  margin-top: 0.5rem;
+}
+
+.strefa[data-plik='tak'] .strefa-akcja {
+  position: relative;
+  grid-column: 2;
+  margin-top: 0.25rem;
 }
 
 .strefa input {
@@ -582,15 +815,21 @@
   cursor: pointer;
 }
 
-/* Input jest przezroczysty, więc jego obrysu nie widać. Ten sam obrys rysuje strefa. */
-.strefa:has(input:focus-visible) {
+/* Input jest przezroczysty, więc jego obrysu nie widać. Ten sam obrys rysuje strefa albo odsyłacz. */
+.strefa[data-plik='nie']:has(input:focus-visible),
+.strefa[data-plik='tak'] .strefa-akcja:has(input:focus-visible) {
   outline: 3px solid var(--color-navy);
   outline-offset: 2px;
 }
 
-/* Przeglądarka bez :has() (Firefox przed 121) pominęłaby regułę wyżej i fokus byłby niewidoczny. */
+.strefa[data-plik='tak'] .strefa-akcja:has(input:focus-visible) {
+  border-radius: var(--radius-control);
+}
+
+/* Przeglądarka bez :has() (Firefox przed 121) pominęłaby reguły wyżej i fokus byłby niewidoczny. */
 @supports not selector(:has(*)) {
-  .strefa:focus-within {
+  .strefa[data-plik='nie']:focus-within,
+  .strefa[data-plik='tak'] .strefa-akcja:focus-within {
     outline: 3px solid var(--color-navy);
     outline-offset: 2px;
   }
@@ -604,37 +843,46 @@
   font-weight: 700;
 }
 
+.strefa-albo {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 1rem;
+  line-height: 1.5rem;
+}
+
 .strefa-plik {
   min-width: 0;
   margin: 0;
   overflow-wrap: anywhere;
 }
 
+.strefa-nazwa {
+  display: block;
+  font-size: 1.0625rem;
+  line-height: 1.5rem;
+}
+
 .strefa-rozmiar {
+  display: block;
   color: var(--color-muted);
   font-size: 0.9375rem;
-  white-space: nowrap;
-}
-
-.formaty {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 0.375rem;
-  margin: 0.25rem 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.formaty li {
-  padding: 0 0.5rem;
-  border: 1px solid var(--color-edge);
-  border-radius: var(--radius-control);
-  background: var(--color-paper);
-  color: var(--color-muted);
-  font-size: 0.8125rem;
   line-height: 1.375rem;
+}
+
+/* Odsyłacz „Zmień plik”: wygląd linku, cel 44 px, bo pod nim leży prawdziwe pole pliku. */
+.strefa-zmien {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--color-action);
+  font-size: 1.0625rem;
   font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.strefa-akcja:hover .strefa-zmien {
+  color: var(--color-action-hover);
 }
 
 .blad {
@@ -694,6 +942,10 @@
   }
 
   .pasek-opis {
+    display: none;
+  }
+
+  .wersja-dalej {
     display: none;
   }
 
@@ -759,6 +1011,44 @@
     min-height: 48px;
   }
 
+  .wb-wstep {
+    font-size: 1.25rem;
+    line-height: 2rem;
+  }
+
+  .wb-main[data-uklad='wczytaj'] .wb-naglowek {
+    padding-bottom: 2.75rem;
+  }
+
+  .akcja .b-krok {
+    width: auto;
+    min-height: 48px;
+  }
+
+  /* Bez papieru „Jak to działa” stoi z boku od samej góry, jak we wzorcu. */
+  .wb-main[data-uklad='wczytaj'][data-papier='nie'] {
+    grid-template-columns: minmax(0, 2fr) minmax(16rem, 1fr);
+    grid-template-rows: auto auto 1fr;
+    grid-template-areas: 'naglowek info' 'panel info' 'akcja info';
+  }
+
+  .wb-main[data-uklad='wczytaj'][data-papier='nie'] .wb-naglowek {
+    grid-area: naglowek;
+  }
+
+  .wb-main[data-uklad='wczytaj'][data-papier='nie'] .panel {
+    grid-area: panel;
+  }
+
+  .wb-main[data-uklad='wczytaj'][data-papier='nie'] .akcja {
+    grid-area: akcja;
+  }
+
+  .wb-main[data-uklad='wczytaj'][data-papier='nie'] .info {
+    grid-area: info;
+    margin-top: 0.75rem;
+  }
+
   .tytul-wniosku {
     font-size: 1.5rem;
     line-height: 2rem;
@@ -779,31 +1069,72 @@
   }
 }
 
-/* Szeroki ekran: narzędzie na pełną szerokość. Papier stoi po lewej i zostaje przy przewijaniu,
-   bo cała kartka mieści się w oknie. */
+/* Szeroki ekran: papier stoi obok i zostaje przy przewijaniu, bo cała kartka mieści się w oknie.
+   Wczytanie i analiza: treść po lewej, oryginał po prawej. Wynik: oryginał, eUsługa, JSON. */
 @media (min-width: 1200px) {
-  .wb-main[data-uklad='dwa'] {
-    grid-template-columns: minmax(18rem, 26rem) minmax(0, 40rem);
-    grid-template-rows: auto 1fr;
-    grid-template-areas: 'papier naglowek' 'papier panel';
-    column-gap: 4rem;
+  .wb-main[data-papier='tak'] .wb-naglowek {
+    grid-area: naglowek;
   }
 
-  .wb-main[data-uklad='wynik'] {
+  .wb-main[data-papier='tak'] .panel {
+    grid-area: panel;
+  }
+
+  .wb-main[data-papier='tak'] .papier {
+    grid-area: papier;
+  }
+
+  .wb-main[data-papier='tak'] .akcja {
+    grid-area: akcja;
+  }
+
+  .wb-main[data-papier='tak'] .info {
+    grid-area: info;
+  }
+
+  .wb-main[data-uklad='wczytaj'][data-papier='tak'] {
+    grid-template-columns: minmax(0, 1.42fr) minmax(20rem, 1fr);
+    grid-template-rows: auto auto auto 1fr;
+    grid-template-areas: 'naglowek papier' 'panel papier' 'akcja papier' 'info papier';
+  }
+
+  .wb-main[data-uklad='analiza'][data-papier='tak'] {
+    grid-template-columns: minmax(0, 1.42fr) minmax(20rem, 1fr);
+    grid-template-rows: auto 1fr;
+    grid-template-areas: 'naglowek papier' 'panel papier';
+  }
+
+  .wb-main[data-uklad='wynik'][data-papier='tak'] {
     grid-template-columns: minmax(18rem, 0.62fr) minmax(0, 1fr) minmax(17rem, 0.5fr);
     grid-template-areas: 'naglowek naglowek naglowek' 'papier panel inspektor';
   }
 
-  .wb-main[data-uklad='wynik-bez-papieru'] {
+  .wb-main[data-uklad='wynik'][data-papier='nie'] {
     grid-template-columns: minmax(0, 46rem) minmax(17rem, 26rem);
     grid-template-areas: 'naglowek naglowek' 'panel inspektor';
+  }
+
+  .wb-main[data-uklad='wynik'] .wb-naglowek {
+    grid-area: naglowek;
+  }
+
+  .wb-main[data-uklad='wynik'] .panel {
+    grid-area: panel;
+  }
+
+  .wb-main[data-uklad='wynik'] .inspektor {
+    grid-area: inspektor;
   }
 
   .papier {
     position: sticky;
     top: 1rem;
     align-self: start;
-    margin-bottom: 0;
+    margin-block: 0;
+  }
+
+  .papier-tytul {
+    display: block;
   }
 
   .papier-przelacznik {
@@ -816,28 +1147,74 @@
     margin-top: 0;
   }
 
+  /* Szare pole wokół kartki przy wczytaniu i analizie. W wyniku kolumna jest wąska, więc bez pola. */
+  .wb-main[data-uklad='wczytaj'] .papier-pole,
+  .wb-main[data-uklad='analiza'] .papier-pole {
+    padding: 1.75rem;
+    border-radius: var(--radius-panel);
+    background: var(--color-area);
+  }
+
   .papier-strony {
-    --papier-dodatki: 3.5rem;
+    --papier-dodatki: 6rem;
   }
 
   .papier-strony[data-strony='wiele'] {
-    --papier-dodatki: 10.5rem;
+    --papier-dodatki: 13rem;
+  }
+
+  .wb-main[data-uklad='wczytaj'] .papier-strony,
+  .wb-main[data-uklad='analiza'] .papier-strony {
+    --papier-dodatki: 9.5rem;
+  }
+
+  .wb-main[data-uklad='wczytaj'] .papier-strony[data-strony='wiele'],
+  .wb-main[data-uklad='analiza'] .papier-strony[data-strony='wiele'] {
+    --papier-dodatki: 16.5rem;
   }
 
   /* Szerokość z wysokości okna: kartka z podpisem i miniaturami nie wychodzi poza ekran. */
   .arkusz {
     width: min(100%, calc((100vh - 2rem - var(--papier-dodatki)) * var(--proporcja, 0.7067)));
+    margin-inline: auto;
+  }
+
+  .wb-main[data-uklad='wynik'] .arkusz {
+    margin-inline: 0;
   }
 
   .inspektor {
     position: sticky;
     top: 1rem;
+    display: flex;
+    flex-direction: column;
     align-self: start;
     max-height: calc(100vh - 2rem);
     margin-top: 0;
   }
 
-  .inspektor-json {
+  .inspektor-tytul {
+    display: block;
+  }
+
+  .inspektor-przelacznik {
+    display: none;
+  }
+
+  .inspektor-tresc,
+  .inspektor[data-open='true'] .inspektor-tresc {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    margin-top: 0;
+  }
+
+  .inspektor-ramka .json {
     max-height: none;
+  }
+
+  .wb-main[data-uklad='wynik'] .papier-tytul {
+    display: flex;
+    justify-content: space-between;
   }
 }

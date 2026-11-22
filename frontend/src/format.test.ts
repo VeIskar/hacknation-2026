@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formStats, formatBytes, formatElapsed, jsonFileName } from './format.ts'
+import { PAGES, formStats, formatBytes, formatElapsed, jsonFileName, plural } from './format.ts'
 import type { CoiCell, CoiField, CoiForm } from './types.ts'
 
 function field(techName: string, extra: Partial<CoiField> = {}): CoiField {
@@ -112,5 +112,25 @@ describe('formStats', () => {
       initialData: 1,
       conditions: 2,
     })
+  })
+})
+
+describe('plural', () => {
+  it('odmienia liczebnik jak w polszczyźnie', () => {
+    const cases: [number, string][] = [
+      [0, '0 stron'],
+      [1, '1 strona'],
+      [2, '2 strony'],
+      [4, '4 strony'],
+      [5, '5 stron'],
+      [11, '11 stron'],
+      [12, '12 stron'],
+      [14, '14 stron'],
+      [21, '21 stron'],
+      [22, '22 strony'],
+      [104, '104 strony'],
+      [112, '112 stron'],
+    ]
+    for (const [count, expected] of cases) expect(plural(count, PAGES)).toBe(expected)
   })
 })

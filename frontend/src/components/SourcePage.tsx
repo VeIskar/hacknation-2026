@@ -99,10 +99,16 @@ function Thumbnails({ pdf, current, onSelect }: ThumbnailsProps) {
   )
 }
 
-function PdfPaper({ file }: { file: File }) {
+interface PdfPaperProps {
+  file: File
+  pageNumber: number
+  onPageNumber: (pageNumber: number) => void
+  onPageCount: (pageCount: number) => void
+}
+
+function PdfPaper({ file, pageNumber, onPageNumber, onPageCount }: PdfPaperProps) {
   const [pdf, setPdf] = useState<PdfDocument | null>(null)
   const [failed, setFailed] = useState(false)
-  const [pageNumber, setPageNumber] = useState(1)
   const [ratio, setRatio] = useState(A4_RATIO)
   const [ready, setReady] = useState(false)
   const sheetRef = useRef<HTMLElement>(null)
@@ -115,8 +121,12 @@ function PdfPaper({ file }: { file: File }) {
     openPdf(file)
       .then((next) => {
         opened = next
-        if (current) setPdf(next)
-        else void next.destroy()
+        if (!current) {
+          void next.destroy()
+          return
+        }
+        setPdf(next)
+        onPageCount(next.pageCount)
       })
       .catch(() => {
         if (current) setFailed(true)
@@ -125,7 +135,8 @@ function PdfPaper({ file }: { file: File }) {
       current = false
       void opened?.destroy()
     }
-  }, [file])
+    // onPageCount to setter stanu z App: stały, więc PDF otwiera się raz na plik.
+  }, [file, onPageCount])
 
   useEffect(() => {
     if (!pdf || width === 0) return
@@ -152,23 +163,25 @@ function PdfPaper({ file }: { file: File }) {
   const many = pdf !== null && pdf.pageCount > 1
   return (
     <div className="papier-strony" data-strony={many ? 'wiele' : 'jedna'} style={{ '--proporcja': ratio } as CSSProperties}>
-      <figure className="arkusz" ref={sheetRef}>
-        <canvas
-          ref={canvasRef}
-          role="img"
-          aria-label={`Strona ${pageNumber} pliku ${file.name}`}
-          hidden={!ready || failed}
-          data-ready={ready && !failed}
-        />
-        {!ready && !failed && <p className="arkusz-zdanie">Wczytuję pierwszą stronę pliku.</p>}
-        {failed && <p className="arkusz-zdanie">Nie udało się pokazać pierwszej strony tego pliku.</p>}
-      </figure>
+      <div className="papier-pole">
+        <figure className="arkusz" ref={sheetRef}>
+          <canvas
+            ref={canvasRef}
+            role="img"
+            aria-label={`Strona ${pageNumber} pliku ${file.name}`}
+            hidden={!ready || failed}
+            data-ready={ready && !failed}
+          />
+          {!ready && !failed && <p className="arkusz-zdanie">Wczytuję pierwszą stronę pliku.</p>}
+          {failed && <p className="arkusz-zdanie">Nie udało się pokazać tego pliku. Analiza nadal jest możliwa.</p>}
+        </figure>
+      </div>
       {pdf && ready && !failed && (
         <p className="papier-podpis">
-          Strona {pageNumber} z {pdf.pageCount}
+          Strona {pageNumber} z {pdf.pageCount}.
         </p>
       )}
-      {pdf && many && !failed && <Thumbnails pdf={pdf} current={pageNumber} onSelect={setPageNumber} />}
+      {pdf && many && !failed && <Thumbnails pdf={pdf} current={pageNumber} onSelect={onPageNumber} />}
     </div>
   )
 }
@@ -187,30 +200,50 @@ function ImagePaper({ file }: { file: File }) {
 
   return (
     <div className="papier-strony" data-strony="jedna">
-      <figure className="arkusz arkusz-obraz">
-        <img ref={imageRef} alt={`Wczytany plik ${file.name}`} data-ready="true" />
-      </figure>
+      <div className="papier-pole">
+        <figure className="arkusz arkusz-obraz">
+          <img ref={imageRef} alt={`Wczytany plik ${file.name}`} data-ready="true" />
+        </figure>
+      </div>
     </div>
   )
 }
 
 const CONTENT_ID = 'papier-tresc'
 
+interface SourcePageProps {
+  file: File
+  /** Na ekranie wczytania przełącznik mówi o pierwszej stronie, potem o oryginale. */
+  stage: 'wczytaj' | 'dalej'
+  pageCount: number | null
+  onPageCount: (pageCount: number) => void
+}
+
 /**
  * Papier: oryginał wybranego pliku, renderowany w przeglądarce. Na wąskim ekranie jest zwinięty
- * do przycisku, na szerokim stoi obok i zostaje przy przewijaniu. Wołaj tylko dla PDF-a i obrazu.
+ * do przełącznika, na szerokim stoi obok i zostaje przy przewijaniu. Wołaj tylko dla PDF-a
+ * i obrazu, z `key` zależnym od pliku: nowy plik to nowy stan strony i przełącznika.
  */
-export function SourcePage({ file }: { file: File }) {
+export function SourcePage({ file, stage, pageCount, onPageCount }: SourcePageProps) {
   const [open, setOpen] = useState(false)
-  const fileKey = `${file.name}:${file.size}:${file.lastModified}`
+  const [pageNumber, setPageNumber] = useState(1)
+  const where = pageCount ? ` (strona ${pageNumber} z ${pageCount})` : ''
+  const label = stage === 'wczytaj' ? (open ? 'Ukryj pierwszą stronę' : 'Pokaż pierwszą stronę') : open ? 'Ukryj oryginał' : `Pokaż oryginał${where}`
   return (
-    <section className="papier" aria-label="Oryginał" data-open={open}>
+    // Tytuł widać od 1200 px. Węziej jest ukryty, ale dalej nazywa region.
+    <section className="papier" aria-labelledby="papier-tytul" data-open={open}>
+      <h2 className="papier-tytul" id="papier-tytul">
+        Oryginał
+      </h2>
       <button type="button" className="b papier-przelacznik" aria-expanded={open} aria-controls={CONTENT_ID} onClick={() => setOpen(!open)}>
-        {open ? 'Ukryj oryginał' : 'Pokaż oryginał'}
+        {label}
       </button>
       <div className="papier-tresc" id={CONTENT_ID}>
-        {/* key: nowy plik to nowy komponent, więc strona i stan podglądu zaczynają od zera. */}
-        {sourceKind(file) === 'pdf' ? <PdfPaper key={fileKey} file={file} /> : <ImagePaper key={fileKey} file={file} />}
+        {sourceKind(file) === 'pdf' ? (
+          <PdfPaper file={file} pageNumber={pageNumber} onPageNumber={setPageNumber} onPageCount={onPageCount} />
+        ) : (
+          <ImagePaper file={file} />
+        )}
       </div>
     </section>
   )

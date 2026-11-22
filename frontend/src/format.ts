@@ -1,3 +1,4 @@
+import { isSection } from './preview/answers.ts'
 import type { CoiField, CoiForm } from './types.ts'
 
 /** "42 s" albo "2 min 05 s". Sekundy obcinamy w dół: licznik nie wyprzedza zegara. */
@@ -55,18 +56,37 @@ export function formStats(form: CoiForm): FormStats {
     initialData: 0,
     conditions: 0,
   }
+  const countField = (field: CoiField) => {
+    stats.fields += 1
+    if (hasValidators(field)) stats.validators += 1
+    if (field.dictionaryName) stats.dictionaries += 1
+    if (field.defaultValueType === 'EXTERNAL_SYSTEM') stats.initialData += 1
+    if (field.states.length > 0) stats.conditions += 1
+  }
   for (const tab of form.tabs) {
     for (const { field: section } of tab.questions) {
+      // Pole poza sekcją liczy się jako pole, nie jako sekcja.
+      if (!isSection(section)) {
+        countField(section)
+        continue
+      }
       stats.sections += 1
       if (section.states.length > 0) stats.conditions += 1
-      for (const { field } of section.repeatingSectionGrid) {
-        stats.fields += 1
-        if (hasValidators(field)) stats.validators += 1
-        if (field.dictionaryName) stats.dictionaries += 1
-        if (field.defaultValueType === 'EXTERNAL_SYSTEM') stats.initialData += 1
-        if (field.states.length > 0) stats.conditions += 1
-      }
+      section.repeatingSectionGrid.forEach(({ field }) => countField(field))
     }
   }
   return stats
 }
+
+/**
+ * Liczba z rzeczownikiem w dobrej formie: [1 strona, 2 strony, 5 stron].
+ * `forms` to [jeden, dwa–cztery, pięć i więcej]. 12–14 biorą trzecią formę, 22–24 drugą.
+ */
+export function plural(count: number, forms: readonly [string, string, string]): string {
+  const ones = count % 10
+  const tens = count % 100
+  const form = count === 1 ? forms[0] : ones >= 2 && ones <= 4 && (tens < 12 || tens > 14) ? forms[1] : forms[2]
+  return `${count} ${form}`
+}
+
+export const PAGES = ['strona', 'strony', 'stron'] as const
