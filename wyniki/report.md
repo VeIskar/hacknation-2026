@@ -1,6 +1,6 @@
 # Raport generowania COI
 
-Pliki do oceny obejmują formularze F2–F4 i F6–F9. F5 to dodatkowy pomiar na formularzu referencyjnym.
+Pliki do oceny obejmują formularze F2–F4 i F6–F9.
 
 Oparcie w tekście i decyzje wnioskodawcy bez wykrytej przesłanki są przybliżeniami.
 
@@ -9,7 +9,6 @@ Oparcie w tekście i decyzje wnioskodawcy bez wykrytej przesłanki są przybliż
 | F2 | OK | 8.056 | 1 | 0 | 90.9 | 0 | 1 | 3 | 7 |
 | F3 | OK | 6.769 | 2 | 0 | 100.0 | 0 | 0 | 0 | 0 |
 | F4 | OK | 4.918 | 1 | 0 | 100.0 | 0 | 0 | 0 | 0 |
-| F5 | OK | 4.738 | 1 | 0 | 100.0 | 0 | 0 | 0 | 2 |
 | F6 | OK | 34.698 | 2 | 0 | 100.0 | 0 | 0 | 0 | 1 |
 | F7 | OK | 15.699 | 2 | 0 | 100.0 | 0 | 0 | 0 | 0 |
 | F8 | OK | 38.863 | 1 | 0 | 88.4 | 0 | 0 | 6 | 2 |
@@ -58,21 +57,6 @@ Oparcie w tekście i decyzje wnioskodawcy bez wykrytej przesłanki są przybliż
 - **SHOW** razem 6 / or 0 / and 0 / sekcje 0
 - **Walidatory** REQUIRED × 6, ZIP_CODE × 1
 - **Słowniki** Kraje × 1, TERYT_4G_DOWODOWY × 1
-- **Uwagi o walidatorach** 0
-- **Uwagi o słownikach** 0
-
-## F5
-
-- **Plik i format** Wniosek o stwierdzenie nadpłaty podatku.docx / docx
-- **Czasy (s)** extract 0.003 / analyze 4.726 / build+lint 0.003 / e2e 4.738
-- **Próby** 1
-  - 1. HTTP 200, 4.722 s, finish_reason stop, tokeny 3029/768
-- **Korekty strażnika** 3 / uwagi 0
-- **Lint** 0
-- **Przedmiot** strony 1 / sekcje 4 / pola 8
-- **SHOW** razem 14 / or 0 / and 0 / sekcje 2
-- **Walidatory** REQUIRED × 10, ZIP_CODE × 2
-- **Słowniki** Kraje × 2, TERYT_4G_DOWODOWY × 2
 - **Uwagi o walidatorach** 0
 - **Uwagi o słownikach** 0
 
