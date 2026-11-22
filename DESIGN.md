@@ -59,3 +59,10 @@ Judges reward simplicity and accessibility. Tokens live in frontend/src/index.cs
 - Motion: allowed when it shows where something came from or where it went.
 - Fonts: font files in the repo, no CDN. OFL-1.1 allowed for unmodified font files only,
   recorded in DECISIONS.md.
+
+## Workbench depth (lead decision, 22.11; overrides "Look" for the workbench only)
+
+- Three surfaces: desk (background), sheet (paper, eUsługa frame), panel (inspector).
+  A sheet has one soft shadow, the same everywhere. No other shadows.
+- Radius 8-12 px on panels and buttons. Paper sheets keep A4 proportions and square corners.
+- One primary colour per zone: ink in the workbench, action blue inside the eUsługa preview.
