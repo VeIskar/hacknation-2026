@@ -6,6 +6,7 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 
 from app.models import (
+    CHOICE_TYPES,
     ExtractedDocument,
     FormAnalysis,
     SubjectField,
@@ -29,13 +30,20 @@ _COMPOUND_COUNTRY_LABEL = re.compile(
     r"[,;/]|\b(?:i|oraz)\b|\b(?:lub|albo)\b(?!\s*(?:zamieszkania|zameldowania|pobytu)\b)"
 )
 _CORRECTION_PREFIX = "Korekta. "
-_APPLICANT_LABELS = frozenset({
-    "imie", "nazwisko", "imie i nazwisko", "nazwisko i imie", "pesel", "numer pesel",
-    "nip", "regon", "krs", "numer krs", "adres zamieszkania", "adres siedziby",
-    "adres do korespondencji", "telefon", "numer telefonu", "telefon kontaktowy",
-    "e-mail", "adres e-mail", "adres poczty elektronicznej", "nazwa wnioskodawcy",
-    "imie i nazwisko wnioskodawcy",
-})
+# Etykieta duplikatu -> decyzja, po której szablon pokazuje te dane (None: szablon pokazuje je zawsze).
+_APPLICANT_LABELS: dict[str, tuple[str, str | None] | None] = {
+    "imie": None, "nazwisko": None, "imie i nazwisko": None, "nazwisko i imie": None,
+    "nazwa wnioskodawcy": None, "imie i nazwisko wnioskodawcy": None,
+    "pesel": ("applicant_pesel", None), "numer pesel": ("applicant_pesel", None),
+    "nip": ("entity_ids", "NIP"), "regon": ("entity_ids", "REGON"),
+    "krs": ("entity_ids", "KRS"), "numer krs": ("entity_ids", "KRS"),
+    "adres zamieszkania": ("person_address", None), "adres siedziby": ("entity_address", None),
+    "adres do korespondencji": ("correspondence_address", None),
+    "telefon": ("contact", "PHONE"), "numer telefonu": ("contact", "PHONE"), "telefon kontaktowy": ("contact", "PHONE"),
+    "e-mail": ("contact", "EMAIL"), "adres e-mail": ("contact", "EMAIL"),
+    "adres poczty elektronicznej": ("contact", "EMAIL"),
+}
+_DESIGNATION_TITLE = re.compile(r"^\s*zalacznik\b|\b(do|nr)\s+(zarzadzenia|uchwaly|rozporzadzenia)\b")
 _APPLICANT_RULES = {
     "applicant_pesel": ("PESEL wnioskodawcy", r"pesel"),
     "proxy": ("pełnomocnictwo", r"pelnomocn"),
@@ -135,23 +143,70 @@ def _ground_applicant(applicant: dict, text: str, corrections: list[str]) -> Non
         corrections.append("Wyłączono wybór identyfikatora. Zostało mniej niż dwa identyfikatory.")
 
 
-def _prune_applicant_duplicates(pages: list[dict], sources: set[str]) -> tuple[list[dict], list[str]]:
-    retained, removed = [], []
+def _covered_by_template(label: str, applicant: dict) -> bool:
+    """Czy szablon danych wnioskodawcy pokaże te dane po decyzjach z groundingu."""
+    key = normalize_text(label).strip()
+    if key not in _APPLICANT_LABELS:
+        return False
+    decision = _APPLICANT_LABELS[key]
+    if decision is None:
+        return True
+    name, value = decision
+    return bool(applicant[name]) if value is None else value in applicant[name]
+
+
+def _prune_applicant_duplicates(
+    pages: list[dict], sources: set[str], applicant: dict,
+) -> tuple[list[dict], list[str], list[str]]:
+    """Usuwa tylko duplikaty, które pokaże szablon. Pozostałe zostają, żeby dane z papieru nie zniknęły.
+
+    Pole z warunkiem SHOW (własnym albo sekcji) to dane innej osoby lub ścieżki, np. imię trenera,
+    a nie bezwarunkowe dane wnioskodawcy z szablonu.
+    """
+    retained, removed, kept = [], [], []
     for page in pages:
         sections = []
         for section in page["sections"]:
             fields = []
+            section_conditioned = bool(section.get("show_if") or section.get("show_if_all"))
             for field in section["fields"]:
                 label = field["label"]
-                if normalize_text(label) in _APPLICANT_LABELS and label not in sources:
+                conditioned = section_conditioned or bool(field.get("show_if") or field.get("show_if_all"))
+                if conditioned or label in sources or normalize_text(label).strip() not in _APPLICANT_LABELS:
+                    fields.append(field)
+                elif _covered_by_template(label, applicant):
                     removed.append(label)
                 else:
+                    kept.append(label)
                     fields.append(field)
             if fields:
                 sections.append({**section, "fields": fields})
         if sections:
             retained.append({**page, "sections": sections})
-    return retained, removed
+    return retained, removed, kept
+
+
+def _ungrounded_choices(analysis: FormAnalysis, words: set[str]) -> list[str]:
+    labels = []
+    for page in analysis.subject_pages:
+        for section in page.sections:
+            for field in section.fields:
+                if field.type not in CHOICE_TYPES:
+                    continue
+                # Krótkie słowa (Tak, Nie) nie mają przedrostków do porównania i nie są sygnałem.
+                option_words = [_prefixes(normalize_text(option)) for option in field.options]
+                if any(option_words) and not any(words & prefixes for prefixes in option_words):
+                    labels.append(field.label)
+    return labels
+
+
+def _semantic_notes(analysis: FormAnalysis, words: set[str]) -> list[str]:
+    """Sygnały błędów modelu, których walidacja nie łapie. Bez cytowania dokumentu."""
+    notes = []
+    if _DESIGNATION_TITLE.search(normalize_text(analysis.title)):
+        notes.append("Tytuł wygląda na oznaczenie załącznika lub aktu, a nie na nazwę wniosku.")
+    notes.extend(f"Żadna opcja pola „{label}” nie występuje w tekście." for label in _ungrounded_choices(analysis, words))
+    return notes
 
 
 def ground(analysis: FormAnalysis, doc: ExtractedDocument) -> GroundingResult:
@@ -163,8 +218,10 @@ def ground(analysis: FormAnalysis, doc: ExtractedDocument) -> GroundingResult:
     data = analysis.model_dump(mode="json")
     corrections = []
     _ground_applicant(data["applicant"], text, corrections)
-    pages, removed = _prune_applicant_duplicates(data["subject_pages"], subject_show_source_labels(analysis.subject_pages))
-    notes = []
+    pages, removed, kept = _prune_applicant_duplicates(
+        data["subject_pages"], subject_show_source_labels(analysis.subject_pages), data["applicant"],
+    )
+    notes = [f"Zachowano „{label}” w przedmiocie. Szablon wnioskodawcy nie zbiera tych danych." for label in kept]
     if pages:
         data["subject_pages"] = pages
         corrections.extend(f"Usunięto duplikat danych wnioskodawcy „{label}” z przedmiotu." for label in removed)
@@ -173,6 +230,7 @@ def ground(analysis: FormAnalysis, doc: ExtractedDocument) -> GroundingResult:
 
     grounded = FormAnalysis.model_validate(data)
     words = _prefixes(text)
+    notes.extend(_semantic_notes(grounded, words))
     for page in grounded.subject_pages:
         for section in page.sections:
             for field in section.fields:

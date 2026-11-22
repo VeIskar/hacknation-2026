@@ -135,13 +135,13 @@ def test_s1_converts_empty_choices_and_keeps_their_own_conditions(options: dict)
 
 @pytest.mark.parametrize(("sections", "message"), [
     ([_section("Sekcja", _field("Cel", show_if=_check()))], "w przedmiocie nie ma pola"),
-    ([_section("Sekcja", _field("Tryb", "RADIO", options=["A"]), _field("Tryb", "SELECT", options=["A"]),
+    ([_section("Sekcja", _field("Tryb", "RADIO", options=["A", "Z"]), _field("Tryb", "SELECT", options=["A", "Z"]),
                _field("Cel", show_if=_check()))], "jest niejednoznaczna w przedmiocie"),
     ([_section("Sekcja", _field("Tryb"), _field("Cel", show_if=_check()))], "nie jest polem wyboru"),
-    ([_section("Sekcja", _field("Tryb", "RADIO", options=["A"], show_if=_check()))], "wskazuje to samo pole"),
-    ([_section("Sekcja", _field("Cel", show_if=_check()), _field("Tryb", "RADIO", options=["A"]))], "musi być przed"),
-    ([_section("Sekcja", _field("Tryb", "RADIO", options=["A"]), show_if=_check())], "wewnątrz ukrywanej sekcji"),
-    ([_section("Sekcja", _field("Tryb", "RADIO", options=["A"]),
+    ([_section("Sekcja", _field("Tryb", "RADIO", options=["A", "Z"], show_if=_check()))], "wskazuje to samo pole"),
+    ([_section("Sekcja", _field("Cel", show_if=_check()), _field("Tryb", "RADIO", options=["A", "Z"]))], "musi być przed"),
+    ([_section("Sekcja", _field("Tryb", "RADIO", options=["A", "Z"]), show_if=_check())], "wewnątrz ukrywanej sekcji"),
+    ([_section("Sekcja", _field("Tryb", "RADIO", options=["A", "Z"]),
                _field("Cel", show_if=_check(equals="B", any_of=["A"])))], "nie ma opcji 'B'"),
 ], ids=["brak", "niejednoznaczna", "typ", "samo-odwolanie", "kolejnosc", "wewnatrz-sekcji", "equals"])
 def test_s2_subject_matches_each_reason_rejected_by_the_model(sections: list[dict], message: str) -> None:
@@ -176,14 +176,14 @@ def test_s2_preserves_valid_cross_page_references_and_filters_only_invalid_alter
 
 @pytest.mark.parametrize(("extra", "message"), [
     ((_field("Cel", show_if=_check()),), "w dodatkowych danych wnioskodawcy nie ma pola"),
-    ((_field("Cel", show_if=_check()), _field("Tryb", "RADIO", options=["A"]),
-      _field("Tryb", "SELECT", options=["A"])), "jest niejednoznaczna"),
-    ((_field("Tryb", "RADIO", options=["A"], show_if=_check()),), "wskazuje to samo pole"),
+    ((_field("Cel", show_if=_check()), _field("Tryb", "RADIO", options=["A", "Z"]),
+      _field("Tryb", "SELECT", options=["A", "Z"])), "jest niejednoznaczna"),
+    ((_field("Tryb", "RADIO", options=["A", "Z"], show_if=_check()),), "wskazuje to samo pole"),
     ((_field("Cel", show_if=_check()), _field("Tryb")), "nie jest polem wyboru"),
-    ((_field("Cel", show_if=_check(equals="B")), _field("Tryb", "RADIO", options=["A"])), "nie ma opcji 'B'"),
+    ((_field("Cel", show_if=_check(equals="B")), _field("Tryb", "RADIO", options=["A", "Z"])), "nie ma opcji 'B'"),
 ], ids=["poza-lista", "niejednoznaczna", "samo-odwolanie", "typ", "equals"])
 def test_s2_applicant_uses_the_same_source_scope_as_the_model(extra: tuple[dict, ...], message: str) -> None:
-    data = _form(_section("Przedmiot", _field("Tryb", "RADIO", options=["A"])), extra=extra)
+    data = _form(_section("Przedmiot", _field("Tryb", "RADIO", options=["A", "Z"])), extra=extra)
     with pytest.raises(ValidationError, match=message):
         FormAnalysis.model_validate(data)
     repaired, notes = repair_analysis(data, last_chance=True)

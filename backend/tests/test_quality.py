@@ -96,7 +96,11 @@ def test_ground_matches_closed_label_list_and_removes_empty_pages_and_sections()
         "imię i nazwisko wnioskodawcy",
     )
     distinct = ["Imię kandydata", "Telefon opiekuna", "Numer PESEL osoby wskazanej"]
-    data = _analysis_data("BOTH")
+    # Każdy duplikat ma decyzję szablonu z przesłanką w tekście, więc szablon go pokaże.
+    data = _analysis_data(
+        "BOTH", applicant_pesel=True, entity_ids=["NIP", "REGON", "KRS"], person_address=True,
+        entity_address=True, correspondence_address=True, contact=["PHONE", "EMAIL"],
+    )
     data["subject_pages"] = [
         {"title": "Duplikaty", "sections": [{
             "title": "Identyfikacja",
@@ -108,7 +112,9 @@ def test_ground_matches_closed_label_list_and_removes_empty_pages_and_sections()
         ]},
     ]
     analysis = _valid(data)
-    grounded = quality.ground(analysis, _document(NEUTRAL))
+    evidence = " PESEL, NIP, REGON, KRS, adres zamieszkania i siedziby, korespondencja, telefon, e-mail."
+    grounded = quality.ground(analysis, _document(NEUTRAL + evidence))
+    assert grounded.analysis.applicant == analysis.applicant
     assert [page.title for page in grounded.analysis.subject_pages] == ["Kandydat"]
     assert [section.title for section in grounded.analysis.subject_pages[0].sections] == ["Dane osoby"]
     assert _subject_fields(grounded.analysis) == distinct
@@ -137,7 +143,7 @@ def test_ground_preserves_duplicate_label_used_as_show_source(key: str, target: 
 
 def test_ground_keeps_subject_if_every_page_would_be_removed() -> None:
     data = _analysis_data("BOTH", entity_ids=["REGON"])
-    data["subject_pages"][0]["sections"][0]["fields"] = [{"label": "PESEL", "type": "TEXT_FIELD"}]
+    data["subject_pages"][0]["sections"][0]["fields"] = [{"label": "Imię", "type": "TEXT_FIELD"}]
     analysis = _valid(data)
     result = quality.ground(analysis, _document(NEUTRAL))
     assert result.analysis.subject_pages == analysis.subject_pages

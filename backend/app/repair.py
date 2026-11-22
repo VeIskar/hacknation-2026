@@ -85,6 +85,15 @@ def _set_checkbox_option(field: Node, notes: list[str]) -> None:
         notes.append(f"N3 {_label(field)!r}: uzupełniono opcję CHECKBOX")
 
 
+def _single_choice_to_checkbox(field: Node, notes: list[str]) -> None:
+    """Jednej opcji RADIO ani SELECT nie da się odznaczyć, więc to pojedyncze zaznaczenie. Opcja i warunki zostają."""
+    options = field.get("options")
+    if (field.get("type") in ("RADIO", "SELECT") and isinstance(options, list) and len(options) == 1
+            and _text(options[0]) is not None and _text(field.get("label")) is not None):
+        notes.append(f"N4 {_label(field)!r}: zmieniono {field['type']} z jedną opcją na CHECKBOX")
+        field["type"] = "CHECKBOX"
+
+
 def _source_index(targets: list[LocatedNode]) -> Sources:
     sources: Sources = defaultdict(list)
     for position, node in targets:
@@ -231,6 +240,7 @@ def repair_analysis(data: Any, *, last_chance: bool) -> tuple[Any, list[str]]:
     for position, field in targets:
         if position[2] >= 0:
             _set_checkbox_option(field, notes)
+            _single_choice_to_checkbox(field, notes)
     if last_chance:
         subject_sources, extra_sources = _source_index(subject), _source_index(extra)
         _convert_empty_choices(subject, subject_sources, notes)
