@@ -416,18 +416,19 @@ def test_reports_grounding_notes_and_coi_issues(
     assert _run(out, "2", transport=transport) == 0
     row, = _report(out)
     grounding = row["grounding"]
-    assert grounding["corrections"] == 2
+    assert grounding["corrections"] == 1
     assert any("REGON" in note for note in grounding["notes"])
-    assert any("PESEL" in note for note in grounding["notes"])
+    # Szablon nie zbiera PESEL (applicant_pesel=false), więc pole zostaje w przedmiocie.
+    assert any("Zachowano „PESEL”" in note for note in grounding["notes"])
     assert any("Brak oparcia w tekście" in note for note in grounding["notes"])
     assert "PESEL" in row["quality"]["validator_issues"][0]
     assert "Działki" in row["quality"]["dictionary_issues"][0]
     corrected = json.loads((out / "F2.analysis.json").read_text(encoding="utf-8"))
     assert corrected["applicant"]["entity_ids"] == []
     fields = corrected["subject_pages"][0]["sections"][0]["fields"]
-    assert [field["label"] for field in fields] == ["Dyscypliny", "Cel"]
+    assert [field["label"] for field in fields] == ["Dyscypliny", "Cel", "PESEL"]
     md = (out / "report.md").read_text(encoding="utf-8")
-    assert "**Korekty strażnika** 2" in md
+    assert "**Korekty strażnika** 1" in md
     assert "**Uwagi o walidatorach** 1" in md
     assert "**Uwagi o słownikach** 1" in md
     assert all(note not in md for note in grounding["notes"])

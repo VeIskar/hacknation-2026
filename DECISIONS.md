@@ -354,6 +354,17 @@ K3.1-2 (wpis uzupełniony 22.11 na podstawie diffu 2a139f9)
 - `GET /api/info` zwraca wyłącznie `llm` i `model`. Działa bez tokenu również przy `JWT_ENABLED=true`.
 - Benchmark woła sondę wersji wyłącznie dla Ollamy.
 
+E1-SEM – zgodność ze źródłem po żywym E1 (22.11)
+
+- Strażnik usuwa duplikat danych wnioskodawcy tylko wtedy, gdy szablon go pokaże po decyzjach. Inaczej
+  pole zostaje w przedmiocie z notatką. Na `main` F2 tracił NIP, telefon i e-mail, a F7 telefon.
+- Pole lub sekcja z warunkiem SHOW nie jest duplikatem szablonu. Na `main` F9 tracił imiona kandydata i trenera.
+- N4: RADIO lub SELECT z jedną opcją staje się CHECKBOX. Opcja i warunki zostają.
+- Notatki bez korekty: tytuł z numerem załącznika lub aktu, pole wyboru bez żadnej opcji z tekstu.
+- Odrzucone po pomiarze: reguły promptu dla wariantów, zgód, tytułu i opcji. F9 trwał 88–205 s
+  zamiast 42–57 s, a warunki wariantów pojawiały się niestale. Ponowienie przy opcjach spoza tekstu:
+  F2 trzy razy oddał te same „Yeah/No”.
+
 ## Event: whole project
 
 - **D7 – odpowiedzialność.** Lider rozstrzyga kontrakty, zakres i integrację. `SPEC.md` określa kontrakty, `DECISIONS.md` zapisuje decyzje, `DELEGACJA.md` wyznacza wykonawców, a `PROGRESS*.md` rejestruje postęp i wyniki bramek.
