@@ -10,7 +10,7 @@ validate_upload → extract → analyze → quality.ground → build_form → li
 kontrola pliku    tekst/OCR   model AI   strażnik         generator    linter
 ```
 
-API przetwarza plik tylko w pamięci (Treść pkt 5: bez trwałego zapisu). Zastrzeżenie dotyczące bufora nginx opisuje [Znane ograniczenia](docs/ARCHITEKTURA.md#znane-ograniczenia).
+nginx przekazuje plik strumieniowo do API, które przetwarza plik w pamięci (Treść pkt 5).
 Model zwraca opis formularza
 (`FormAnalysis`). Strażnik (`quality.ground`) porównuje go z tekstem dokumentu: poprawia dane
 wnioskodawcy i usuwa powtórzone pola. Przy `LLM_FIXTURE` jest pominięty. Generator buduje JSON COI,
@@ -31,10 +31,11 @@ a linter sprawdza schemat i Reguły techniczne.
 |---|---|---|---|---|
 | `api` | `backend/Dockerfile`, baza `python:3.14.10-slim-trixie` | `app` (UID 10001) | 8000 | Tesseract 5 z językiem `pol` do OCR skanów. System plików tylko do odczytu, `/tmp` w pamięci, `cap_drop: ALL`, `no-new-privileges` |
 | `ollama` | `ollama/Dockerfile`, baza `ollama/ollama:0.40.15` | `ollama` (UID 10002) | brak | Lokalny serwer modelu. Model w wolumenie `ollama-models`. Usługi chmurowe Ollamy wyłączone (`OLLAMA_NO_CLOUD=1`) |
-| `web` | `frontend/Dockerfile` (`node:22-slim`, potem `nginx:1.27-alpine`) | jak w obrazie nginx | 5173 | Front i proxy `/api/` do `api` |
+| `web` | `frontend/Dockerfile` (`node:22.23.5-bookworm-slim`, potem `nginx:1.30.7-alpine3.24`) | `nginx` (UID/GID 101) | 5173 → 8080 | Front i proxy `/api/` do `api`. System plików tylko do odczytu, `/tmp` w pamięci, `cap_drop: ALL`, `no-new-privileges` |
 
 Compose ma stałą nazwę projektu `hacknation-2026`. Wolumen z modelem jest więc wspólny dla każdego
 katalogu (klon, worktree), a model nie pobiera się drugi raz.
+Obrazy serwisów mają tag `1.0.0` i prefiks nazwy projektu. Compose buduje je lokalnie z Dockerfile.
 
 Podczas Hackathonu **Docker Hub bez logowania** często zwraca `toomanyrequests`. Te same obrazy są w lustrze
 `mirror.gcr.io`. Pobierz je stamtąd i nadaj nazwę z Dockerfile:
@@ -50,16 +51,21 @@ podman tag  mirror.gcr.io/ollama/ollama:0.40.15 docker.io/ollama/ollama:0.40.15
 
 ```bash
 cp env.example .env                 # ustawienia; .env nigdy nie trafia do repozytorium
+docker compose build               # buduje obrazy api, web i ollama
 bash scripts/pull_model.sh          # raz: pobiera model LLM_MODEL do wolumenu (ok. 3,3 GB)
-docker compose up -d --build        # api :8000, web :5173, ollama w sieci compose
+docker compose up -d                # api :8000, web :5173, ollama w sieci compose
 docker compose ps                   # api i ollama „healthy”
 curl http://127.0.0.1:8000/health   # {"status":"ok"}
+curl http://127.0.0.1:5173/api/info # odczyt informacji o modelu przez proxy nginx
 ```
 
 Aplikacja: http://127.0.0.1:5173. API: http://127.0.0.1:8000, opis OpenAPI: http://127.0.0.1:8000/docs.
 
 - Z Podmanem bez roota używaj `127.0.0.1`, nie `localhost`. Przekierowanie portów nie obsługuje `::1`.
-- API czyta `.env` raz, przy starcie. Po zmianie `.env` wykonaj `docker compose up -d api`.
+- Po zmianie `.env` wykonaj `docker compose up -d api`, a potem `docker compose restart web`,
+  aby nginx odczytał adres odtworzonego kontenera API.
+- nginx ogranicza całe żądanie do 25 MiB, wliczając narzut `multipart/form-data`.
+  Ustaw `MAX_FILE_SIZE_MB` najwyżej na 24, jeśli limit pliku ma działać tak samo przez proxy i bezpośrednio.
 - Po zmianie gałęzi albo `git pull` zbuduj obrazy od nowa: `docker compose up -d --build`. Bez
   `--build` kontener działa na starym kodzie.
 - Zatrzymanie: `docker compose down`. **Bez `-v`**, bo `-v` usuwa wolumen z modelem.
@@ -69,6 +75,14 @@ Aplikacja: http://127.0.0.1:5173. API: http://127.0.0.1:8000, opis OpenAPI: http
 Domyślnie `api` woła lokalną Ollamę (`http://ollama:11434/v1`, model `qwen3.5:4b`). Na samym CPU
 sam model w pomiarze K1 potrzebował 238–344 s na formularz. Tryb lokalny przekracza więc granicę
 200 s na cały proces z D11 (cel to ok. 180 s). Do pomiarów lokalnych można zwiększyć `LLM_TIMEOUT_S`.
+
+Osobny projekt Compose dostaje własny wolumen Ollamy. Gdy porty 5173 i 8000 są wolne, przygotuj
+model dla projektu testowego i uruchom aplikację pod tą samą nazwą.
+
+```bash
+COMPOSE_PROJECT_NAME=hacknation-test bash scripts/pull_model.sh
+docker compose -p hacknation-test up -d --build
+```
 
 ### Model w chmurze: Eden AI (D9)
 
@@ -126,6 +140,9 @@ każdy dokument dostaje tę samą analizę. Służy tylko testom.
 ## Konfiguracja
 
 Zmienne z `env.example`. Compose przekazuje je do `api`, a pusta wartość daje wartość domyślną.
+`JWT_SECRET` i klucz Eden AI trafiają wyłącznie do środowiska uruchomionego `api`. Sekret JWT można
+podać w lokalnym `.env` albo przez środowisko wdrożenia. Dla `JWT_ENABLED=true` ustaw sekret
+o długości wymaganej przez wybrany algorytm.
 
 | Zmienna | Domyślnie | Znaczenie |
 |---|---|---|

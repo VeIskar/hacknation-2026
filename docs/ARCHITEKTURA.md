@@ -35,17 +35,14 @@ flowchart LR
 Tryb modelu wybiera `LLM_PROVIDER`. Repozytorium domyślnie używa lokalnej Ollamy, która działa bez klucza i bez internetu (D9 pkt 1). Lokalny model na samym CPU nie mieści się w celu D11, więc ścieżką live demo jest Eden AI (D12 pkt 2). Ollama zostaje alternatywą bez internetu (D12 pkt 3).
 [Wybór dostawcy](../backend/app/config.py#L185-L215) · [D9](../DECISIONS.md?plain=1#L365) · [D12](../DECISIONS.md?plain=1#L385)
 
-Kontrakt web przewiduje obsługę przeglądarki i proxy ścieżki `/api/` do `api:8000`.
-nginx ustawia `proxy_read_timeout 300s`. [Konfiguracja nginx](../frontend/nginx.conf#L1-L17)
+Serwis `web` udostępnia aplikację przeglądarce i przekazuje ścieżki `/api/` do `api:8000`.
+nginx ustawia `proxy_read_timeout 300s`. [Konfiguracja nginx](../frontend/nginx.conf)
 
 | Usługa | Obraz bazowy | Użytkownik | Port hosta → kontenera | Rola |
 |---|---|---|---|---|
 | `api` | `docker.io/library/python:3.14.10-slim-trixie` | `app`, `USER 10001:10001` | `8000 → 8000` | FastAPI przyjmuje plik i zwraca JSON COI. [Dockerfile](../backend/Dockerfile#L4-L28) · [Compose](../docker-compose.yml#L11-L22) |
-| `ollama` | `docker.io/ollama/ollama:0.40.15` | `ollama`, `USER 10002:10002` | Bez portu hosta. `11434` w sieci Compose. | Serwuje lokalny model. [Dockerfile](../ollama/Dockerfile#L4-L18) · [Compose](../docker-compose.yml#L69-L88) |
-| `web` | `node:22-slim` do budowy, `nginx:1.27-alpine` do uruchomienia | Użytkownik obrazu. Proces główny nginx działa jako root. | `5173 → 80` | Serwuje aplikację i przekazuje `/api/`. [Dockerfile](../frontend/Dockerfile#L1-L11) · [Compose](../docker-compose.yml#L61-L67) |
-
-Compose dla `web` nie ustawia `read_only`, `cap_drop` ani `no-new-privileges`.
-Zmiana na nginx bez roota pozostaje otwarta. [Compose](../docker-compose.yml#L61-L67) · [Otwarty Request M1.3 (PROGRESS.api.md, Requests)](../PROGRESS.api.md#requests)
+| `ollama` | `docker.io/ollama/ollama:0.40.15` | `ollama`, `USER 10002:10002` | Bez portu hosta. `11434` w sieci Compose. | Serwuje lokalny model. [Dockerfile](../ollama/Dockerfile#L4-L18) · [Compose](../docker-compose.yml) |
+| `web` | `node:22.23.5-bookworm-slim` do budowy, `nginx:1.30.7-alpine3.24` do uruchomienia | `nginx`, `USER 101:101` | `5173 → 8080` | Serwuje aplikację z fallbackiem do `index.html` i przekazuje `/api/`. [Dockerfile](../frontend/Dockerfile) · [Compose](../docker-compose.yml) |
 
 ## Przepływ żądania POST /api/forms
 
@@ -241,10 +238,10 @@ API przetwarza przesłany plik wyłącznie w pamięci. Odczyt żądania kończy 
 Domyślny limit pliku to 10 MB (10 × 1024² bajtów). Parser multipart używa bufora większego od żądania.
 API sprawdza nazwę i zgodność zawartości z rozszerzeniem. [Obsługa pliku](../backend/app/files.py#L86-L170) · [Rozmiar](../backend/app/config.py#L15) · [Limit domyślny](../backend/app/config.py#L193-L203)
 
-`frontend/nginx.conf` ustawia `client_max_body_size 25m`, ale nie ustawia `client_body_buffer_size`.
-Ciało większe od bufora nginx zapisuje w całości lub części do pliku tymczasowego.
-Przesłany plik może trafić na dysk kontenera `web` przed dotarciem do API.
-[Konfiguracja nginx](../frontend/nginx.conf#L1-L18) · [dokumentacja nginx, dyrektywa client_body_buffer_size](https://nginx.org/en/docs/http/ngx_http_core_module.html#client_body_buffer_size)
+nginx przyjmuje żądania do 25 MiB, wliczając narzut `multipart/form-data`. Ciało żądania do `/api/`
+przekazuje strumieniowo, dzięki czemu API może wcześniej odrzucić zbyt duży plik lub żądanie bez tokenu.
+Pliki robocze nginx i plik PID trafiają do `/tmp` na `tmpfs`.
+[Konfiguracja nginx](../frontend/nginx.conf) · [Compose](../docker-compose.yml)
 
 Przy `JWT_ENABLED=true` API sprawdza token przed odczytem pliku. Akceptuje algorytmy HMAC i wymaga `exp`.
 `GET /health` i `GET /api/info` działają bez tokenu. `/api/info` zwraca `llm` i `model`.
@@ -253,8 +250,8 @@ Przy `JWT_ENABLED=true` API sprawdza token przed odczytem pliku. Akceptuje algor
 | Kontener | Użytkownik i ustawienia bezpieczeństwa |
 |---|---|
 | `api` | `USER 10001:10001`, `read_only: true`, `tmpfs: /tmp`, `cap_drop: ALL`, `no-new-privileges:true`. [Dockerfile](../backend/Dockerfile#L16-L28) · [Compose](../docker-compose.yml#L11-L22) |
-| `ollama` | `USER 10002:10002`, `read_only: true`, `tmpfs: /tmp`, `cap_drop: ALL`, `no-new-privileges:true`. `OLLAMA_NO_CLOUD: "1"` wyłącza tryb chmurowy Ollamy. [Dockerfile](../ollama/Dockerfile#L7-L18) · [Compose](../docker-compose.yml#L69-L88) |
-| `web` | `nginx:1.27-alpine`, użytkownik obrazu, proces główny działa jako root. Compose nie ustawia `read_only`, `tmpfs`, `cap_drop` ani `no-new-privileges`. [Dockerfile](../frontend/Dockerfile#L8-L11) · [Compose](../docker-compose.yml#L61-L67) · [Otwarty Request M1.3 (PROGRESS.api.md, Requests)](../PROGRESS.api.md#requests) |
+| `ollama` | `USER 10002:10002`, `read_only: true`, `tmpfs: /tmp`, `cap_drop: ALL`, `no-new-privileges:true`. `OLLAMA_NO_CLOUD: "1"` wyłącza tryb chmurowy Ollamy. [Dockerfile](../ollama/Dockerfile#L7-L18) · [Compose](../docker-compose.yml) |
+| `web` | `USER 101:101`, `read_only: true`, `tmpfs: /tmp`, `cap_drop: ALL`, `no-new-privileges:true`. [Dockerfile](../frontend/Dockerfile) · [Compose](../docker-compose.yml) |
 
 Odczyt uruchamia się w osobnym procesie, z limitami zasobów i listą dozwolonych zmiennych otoczenia.
 API przekazuje plik przez potok. Klucz modelu i sekret JWT pozostają poza otoczeniem procesu odczytu.
@@ -307,9 +304,6 @@ Decyzje wskazują także biblioteki systemowe na LGPL i GPL oraz inne licencje z
 
 ## Znane ograniczenia
 
-- Na `main` w commicie `1c6544c` plik `frontend/src/App.tsx` zawiera szablon, a interfejs z przebiegu demo jest w przygotowaniu. [Stan frontu](../frontend/src/App.tsx#L1-L11)
-- `web` używa `nginx:1.27-alpine` i dziedziczy użytkownika obrazu. Proces główny nginx działa jako root. Compose nie ustawia `read_only`, `cap_drop` ani `no-new-privileges`. [Dockerfile](../frontend/Dockerfile#L8-L11) · [Compose](../docker-compose.yml#L61-L67) · [Otwarty Request M1.3 (PROGRESS.api.md, Requests)](../PROGRESS.api.md#requests)
-- `frontend/nginx.conf` ustawia `client_max_body_size 25m`, ale nie ustawia `client_body_buffer_size`. Ciało większe od bufora może trafić do pliku tymczasowego na dysku `web` przed przekazaniem do API. API przetwarza plik w pamięci. [Konfiguracja nginx](../frontend/nginx.conf#L1-L18) · [dokumentacja nginx, dyrektywa client_body_buffer_size](https://nginx.org/en/docs/http/ngx_http_core_module.html#client_body_buffer_size) · [Odczyt pliku](../backend/app/files.py#L135-L170)
 - Odczyt nie renderuje stron PDF. PDF z AES daje 400. Brak obsługi wybranych kodowań obrazów i tekstu zamienionego na krzywe może pozostawić strony bez tekstu. [PDF bez renderera](../DECISIONS.md?plain=1#L292-L298) · [Poza zakresem K2-FINAL](../DECISIONS.md?plain=1#L337-L342)
 - OCR osadzonych obrazów może wyczerpać limit odczytu całego dokumentu. Liczba procesów Tesseracta zależy od `os.cpu_count()`, które nie uwzględnia limitu CPU kontenera. [Poza zakresem K2-FINAL](../DECISIONS.md?plain=1#L337-L342)
 - D14 pozostawia otwarty wybór słownika dla adresu zamieszkania. Obecny generator używa `TERYT_4G_DOWODOWY`. [D14](../DECISIONS.md?plain=1#L392-L395)

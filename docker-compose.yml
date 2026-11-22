@@ -9,6 +9,8 @@
 name: hacknation-2026
 services:
   api:
+    image: ${COMPOSE_PROJECT_NAME:-hacknation-2026}-api:1.0.0
+    pull_policy: never
     build: ./backend
     ports:
       - "8000:8000"
@@ -59,15 +61,26 @@ services:
       retries: 10
 
   web:
+    image: ${COMPOSE_PROJECT_NAME:-hacknation-2026}-web:1.0.0
+    pull_policy: never
     build: ./frontend
     ports:
-      - "5173:80"
+      - "5173:8080"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     depends_on:
       api:
         condition: service_healthy
 
   # Model lokalny (SPEC „Model”). Bez portu na hoście: woła go tylko `api` w sieci compose.
   ollama:
+    image: ${COMPOSE_PROJECT_NAME:-hacknation-2026}-ollama:1.0.0
+    pull_policy: never
     build: ./ollama
     volumes:
       - ollama-models:/home/ollama/.ollama

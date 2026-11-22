@@ -1,4 +1,4 @@
-"""M1.3: obraz `api` zgodny z Treść pkt 5, sprawdzony statycznie (bramka nie buduje obrazów).
+"""M1.3: statyczne sprawdzenie obrazów i Compose względem pkt 5 wymagań COI.
 
 Budowę i uruchomienie sprawdza się ręcznie: `docker compose build api`, `whoami` → `app`
 (PROGRESS.api.md, M1.3). Ten test pilnuje, żeby nikt po cichu nie cofnął tych ustaleń.
@@ -20,11 +20,13 @@ from compose import (
 )
 
 DOCKERFILE = (ROOT / "backend" / "Dockerfile").read_text(encoding="utf-8")
+WEB_DOCKERFILE = (ROOT / "frontend" / "Dockerfile").read_text(encoding="utf-8")
+NGINX_CONFIG = (ROOT / "frontend" / "nginx.conf").read_text(encoding="utf-8")
 
 
-def _instructions(name: str) -> list[str]:
+def _instructions(name: str, dockerfile: str = DOCKERFILE) -> list[str]:
     """Argumenty instrukcji Dockerfile (bez komentarzy, z połączonymi liniami `\\`)."""
-    text = re.sub(r"\\\n", " ", DOCKERFILE)
+    text = re.sub(r"\\\n", " ", dockerfile)
     lines = [line.strip() for line in text.splitlines() if not line.lstrip().startswith("#")]
     return [line.split(None, 1)[1] for line in lines if line.upper().startswith(name + " ")]
 
@@ -78,6 +80,27 @@ def test_ocr_with_polish_data_is_installed() -> None:
 def test_compose_api_has_no_persistent_writes_and_no_privileges() -> None:
     _assert_locked_down("api")
     assert not service("api").get("volumes"), "api: bez wolumenów (pliki tylko w pamięci)"
+
+
+def test_web_runs_as_non_root_on_an_unprivileged_port() -> None:
+    users = _instructions("USER", WEB_DOCKERFILE)
+    assert users and re.fullmatch(r"[1-9]\d*:[1-9]\d*", users[-1]), users
+    assert _instructions("EXPOSE", WEB_DOCKERFILE) == ["8080"]
+    assert service("web").get("ports") == ["5173:8080"]
+    assert re.findall(r"^\s*listen\s+(\d+);", NGINX_CONFIG, re.MULTILINE) == ["8080"]
+    _assert_locked_down("web")
+    assert not service("web").get("volumes"), "web: pliki tymczasowe tylko w tmpfs"
+
+
+def test_web_base_images_have_explicit_patch_versions() -> None:
+    node, nginx = (stage.split()[0] for stage in _instructions("FROM", WEB_DOCKERFILE))
+    assert re.fullmatch(r"node:22\.\d+\.\d+-bookworm-slim", node), node
+    assert re.fullmatch(r"nginx:\d+\.\d+\.\d+-alpine\d+\.\d+", nginx), nginx
+
+
+def test_compose_uses_locally_built_service_images() -> None:
+    for name in ("api", "web", "ollama"):
+        assert service(name).get("pull_policy") == "never", name
 
 
 # M1.5: model w compose.
