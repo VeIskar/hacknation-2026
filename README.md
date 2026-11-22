@@ -329,9 +329,16 @@ Komendy etapów w Claude Code: `/hn-krok` (jeden krok), `/hn-napraw` (jeden bł�
 uruchamia osoba integrująca. Inny agent (Codex, Cursor, Copilot) czyta `AGENTS.md` i pliki
 `.claude/skills/hn-*/SKILL.md`. Bez agenta wystarczy `bash scripts/gate.sh`.
 
-## Co jest prawdziwe, a co jest atrapą
+## Dane przykładowe w podglądzie
 
-(wypełnia `/hn-demo`)
+JSON nie zawiera danych wnioskodawcy ani list wartości słowników, tylko odwołania do nich: źródło danych
+inicjalnych (np. `"defaultValue": "MLPZ.name"` z `"defaultValueType": "EXTERNAL_SYSTEM"`)
+i nazwę słownika (`Kraje`, `TERYT_4G_DOWODOWY`). Prawdziwe wartości poda system docelowy eUsługi.
+
+Żeby podgląd dało się wypełnić, wstawia za te odwołania wartości przykładowe z
+`frontend/src/data/demo.ts`: jedną fikcyjną osobę, 10 krajów i same województwa. Plik słowników
+COI podaje nazwy słowników bez list wartości (D14). Interfejs mówi o tym nad podglądem:
+„Dane z rejestru i słowniki w podglądzie są przykładowe”.
 
 ## Ograniczenia
 
