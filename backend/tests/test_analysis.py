@@ -72,6 +72,13 @@ def _answer_with_self_reference(padding: int = 0) -> str:
     return json.dumps(data, ensure_ascii=False)
 
 
+def _answer_with_missing_condition_source() -> str:
+    data = json.loads(VALID)
+    field = data["subject_pages"][0]["sections"][0]["fields"][0]
+    field["show_if"] = {"field": "Nieistniejące pole testowe", "equals": "A"}
+    return json.dumps(data, ensure_ascii=False)
+
+
 def _measured_prompt_tokens(body: dict[str, Any]) -> int:
     """Tyle tokenów liczy prawdziwy serwer: 3,5 znaku na token (pomiar K3) i ok. 1950 na stronę skanu (K1)."""
     chars = images = 0
@@ -121,6 +128,27 @@ def test_valid_answer_is_returned_as_form_analysis_after_one_request() -> None:
     model = FakeModel(VALID)
     assert _run(model) == FormAnalysis.model_validate_json(VALID)
     assert len(model.requests) == 1
+
+
+def test_repairs_repeated_options_missing_checkbox_options_and_empty_identifier_choice(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    data = json.loads(VALID)
+    data["applicant"].update(entity_ids=[], entity_ids_one_of=True)
+    data["subject_pages"] = [{"title": "Przedmiot testowy", "sections": [{"title": "Zgody", "fields": [
+        {"label": "Cel", "type": "RADIO", "options": ["A", "B"]},
+        {"label": "Zgoda testowa", "type": "CHECKBOX", "show_if": {"field": "Cel", "equals": "A", "any_of": ["A"]}},
+    ]}]}]
+    model = FakeModel(json.dumps(data), VALID)
+
+    result = _run(model)
+
+    assert len(model.requests) == 1
+    assert result.applicant.entity_ids_one_of is False
+    checkbox = result.subject_pages[0].sections[0].fields[1]
+    assert checkbox.options == ["Tak"]
+    assert checkbox.show_if and checkbox.show_if.any_of == []
+    assert sum(msg.startswith("Analiza: naprawa – ") for msg in caplog.messages) == 3
 
 
 def test_request_carries_rules_schema_and_prepared_text() -> None:
@@ -185,6 +213,15 @@ def test_prompt_schema_keeps_every_description_and_the_applicant_contract() -> N
     assert [value for value in _values(schema, "title") if isinstance(value, str)] == []
 
 
+def test_prompt_schema_explains_option_lists_and_single_confirmations() -> None:
+    definitions = _prompt_schema()["$defs"]
+    alternatives = definitions["ShowIf"]["properties"]["any_of"]["description"]
+    choices = definitions["SubjectField"]["properties"]["options"]["description"]
+    assert "Pusta lista, gdy warunek to jedna opcja. Nigdy nie powtarzaj w any_of wartości equals." in alternatives
+    assert "Każda opcja wyboru to element options jednego pola, nigdy osobne pole." in choices
+    assert "Pojedyncza zgoda lub oświadczenie to CHECKBOX z jedną opcją „Tak”." in choices
+
+
 def test_invalid_answer_is_retried_with_the_validator_message() -> None:
     wrong = _answer_with_self_reference()
     model = FakeModel(wrong, VALID)
@@ -207,8 +244,23 @@ def test_truncated_answer_is_retried_with_a_note_about_length() -> None:
     assert correction.startswith(f"{TRUNCATED_NOTE}\n{CORRECTION_INTRO}\n- cały JSON: Invalid JSON")
 
 
+def test_retry_uses_a_temperature_floor_only_when_temperature_is_enabled() -> None:
+    observed = []
+    for temperature in (0, 0.2, 0.7, None):
+        settings = replace(SETTINGS, llm_temperature=temperature)
+        model = FakeModel("{}", VALID)
+        assert analyze(DOC, settings=settings, transport=model.transport) == FormAnalysis.model_validate_json(VALID)
+        assert settings.llm_temperature == temperature
+        observed.append([body.get("temperature", "pominięta") for body in model.requests])
+
+    assert observed == [[0, 0.3], [0.2, 0.3], [0.7, 0.7], ["pominięta", "pominięta"]]
+
+
 def test_two_invalid_answers_end_with_controlled_503_without_a_third_try() -> None:
-    model = FakeModel(_answer_with_self_reference(), _answer_with_self_reference(), VALID)
+    data = json.loads(VALID)
+    del data["title"]
+    invalid = json.dumps(data)
+    model = FakeModel(invalid, invalid, VALID)
     with pytest.raises(LLMUnavailable) as caught:
         _run(model)
     assert (caught.value.status_code, caught.value.detail) == (503, UNAVAILABLE_DETAIL)
@@ -226,6 +278,47 @@ def test_model_failure_is_503_and_is_not_retried() -> None:
 def _model_clock(monkeypatch: pytest.MonkeyPatch, *ticks: float) -> None:
     clock = iter(ticks)
     monkeypatch.setattr(llm, "time", SimpleNamespace(perf_counter=lambda: next(clock)))
+
+
+def test_last_chance_repairs_unresolved_condition_only_after_the_last_attempt(caplog: pytest.LogCaptureFixture) -> None:
+    model = FakeModel(*([_answer_with_missing_condition_source()] * 3))
+    settings = replace(SETTINGS, llm_max_attempts=3)
+
+    result = analyze(DOC, settings=settings, transport=model.transport)
+
+    assert result == FormAnalysis.model_validate_json(VALID)
+    assert len(model.requests) == 3
+    assert sum(msg.startswith("Analiza: naprawa – S2 ") for msg in caplog.messages) == 1
+    assert "Analiza: użyto napraw ostatniej szansy (liczba notatek: 1)" in caplog.messages
+
+
+def test_d11_refuses_a_retry_and_tries_last_chance(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    _model_clock(monkeypatch, 0, 90)
+    model = FakeModel(_answer_with_missing_condition_source())
+
+    assert _run(model) == FormAnalysis.model_validate_json(VALID)
+    assert len(model.requests) == 1
+    assert "pominięto ponowienie: budżet D11" in caplog.text
+    assert "Analiza: użyto napraw ostatniej szansy (liczba notatek: 1)" in caplog.messages
+
+
+def test_last_chance_cannot_parse_invalid_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    broken = '{"title": '
+    validate = analysis._validate
+    last_attempts: list[str] = []
+
+    def track(content: str, *, last_chance: bool = False) -> FormAnalysis:
+        if last_chance:
+            last_attempts.append(content)
+            return validate(content, last_chance=True)
+        return validate(content)
+
+    monkeypatch.setattr(analysis, "_validate", track)
+    model = FakeModel(_answer_with_missing_condition_source(), broken)
+    with pytest.raises(LLMUnavailable) as caught:
+        _run(model)
+    assert caught.value.status_code == 503
+    assert len(model.requests) == 2 and last_attempts == [broken]
 
 
 def test_retry_is_skipped_when_the_projected_time_exceeds_d11(

@@ -209,6 +209,29 @@ jak DOCX w K2.1. `openpyxl` i `odfpy` z DELEGACJA niepotrzebne, więc `requireme
   72 MB (39 MB po samym imporcie). Przed limitami recenzja zmierzyła 416–867 MB dla jednego
   długiego wiersza, głębokiego zagnieżdżenia i komórki z milionem elementów.
 
+K3.1-3 – E1 na Eden AI i naprawy analizy
+
+- Pomiar człowieka 22.11, 01:10–01:30. `ovhcloud/Qwen3.5-9B` ignorowała wyłączenie myślenia przy
+  `reasoning_effort` ustawionym na `none` lub `disable` oraz przy `chat_template_kwargs.enable_thinking=false`.
+  Odpowiedzi z limitem 8192 kończyły się `length`, bez treści lub z uciętym JSON-em. Na
+  `flexai/Qwen3.5-9B@eu` z `reasoning_effort=off` i `enable_thinking=false` model nie zwracał toku
+  rozumowania. Przepustowość wyniosła ok. 130–160 tok/s, a próby 3,5–65 s. Trasę zatwierdza lider (D9 pkt 8).
+- E1 na flexai z kontekstem 65536, limitem odpowiedzi 8192 i trzema próbami: F4, F6, F7, F8 przeszły
+  z lint 0 i oparciem 90–100%. F2, F3, F5, F9 dały 503. F9 przy limicie 16384 zakończył generację
+  z 8549 tokenami i `stop`, po czym walidacja zgłosiła 29 błędów. Przy temperaturze 0 próby 2 i 3
+  powtórzyły wynik z użyciem 5130/1387 tokenów.
+- Walidacja surowych odpowiedzi F2–F9 potwierdziła W1, powtórzone alternatywy (25 błędów wobec 24 w
+  pierwotnym histogramie), W2, CHECKBOX bez opcji (11 błędów, 15 pól po uwzględnieniu zamaskowanych),
+  W3, sprzeczny wybór identyfikatora (1), W4, RADIO bez opcji (2 w F5 oraz 3 ujawnione po N1–N3 w F9)
+  i W5, brakujące źródło w F4 lub opcja w F6. Po ostatniej szansie walidacja kontraktu dała 8/8.
+- Kontrakt D4 zostaje. Przed walidacją każdej próby usuwamy duplikaty alternatyw, wyłączamy wybór
+  identyfikatora przy mniej niż dwóch i uzupełniamy pustą opcję CHECKBOX. Tylko w ostatniej szansie
+  zamieniamy puste RADIO/SELECT na CHECKBOX z `Tak`, aktualizujemy odwołania i usuwamy niepoprawne
+  warunki. Każda naprawa jest oznaczona w logu. Temperatura ponowienia wynosi co najmniej 0,3, gdy jest włączona.
+- Przy `edenai` domyślne są `https://api.eu.edenai.run/v3`, `flexai/Qwen3.5-9B@eu`, kontekst 65536,
+  limit odpowiedzi 16384, `reasoning_effort=off` i `chat_template_kwargs.enable_thinking=false`.
+  Kontekst 65536 zostawia miejsce dla F8 i 16384 tokenów odpowiedzi. Obowiązuje walidacja dostawcy M1.7.
+
 ## Event: whole project
 
 - **D7 – odpowiedzialność.** Lider rozstrzyga kontrakty, zakres i integrację. `SPEC.md` określa kontrakty, `DECISIONS.md` zapisuje decyzje, `DELEGACJA.md` wyznacza wykonawców, a `PROGRESS*.md` rejestruje postęp i wyniki bramek.

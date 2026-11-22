@@ -21,7 +21,8 @@ _REASONING_EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh"}
 # D9 (M1.7): Ollama lokalnie albo Eden AI organizatorów. Inny dostawca zatrzymuje start.
 PROVIDERS = ("ollama", "edenai")
 OLLAMA_URL = "http://localhost:11434/v1"
-EDENAI_URL = "https://api.edenai.run/v3"
+EDENAI_URL = "https://api.eu.edenai.run/v3"
+EDENAI_MODEL = "flexai/Qwen3.5-9B@eu"
 EDENAI_HOSTS = frozenset({"api.edenai.run", "api.eu.edenai.run"})
 # D9 pkt 7 i 8: przez Eden AI tylko otwarty Qwen3.5-9B (Apache-2.0, wagi publiczne).
 # Lista tras z publicznego katalogu Eden AI; nowy model wymaga wpisu w DECISIONS.md.
@@ -91,10 +92,10 @@ def _env_temperature() -> float | None:
         raise ValueError("LLM_TEMPERATURE ma być liczbą od 0 do 2 albo 'off'") from None
 
 
-def _env_extra_body() -> dict[str, Any] | None:
+def _env_extra_body(default: dict[str, Any] | None) -> dict[str, Any] | None:
     raw = _env("LLM_EXTRA_BODY", "")
     if not raw:
-        return None
+        return default
     error = "LLM_EXTRA_BODY ma być obiektem JSON"
     try:
         body = json.loads(raw)
@@ -185,10 +186,11 @@ class Settings:
         strict_schema = _env("LLM_STRICT_SCHEMA", "true").lower()
         if strict_schema not in {"true", "false"}:
             raise ValueError("LLM_STRICT_SCHEMA ma być 'true' albo 'false'")
-        reasoning_effort = _env("LLM_REASONING_EFFORT", "none").lower()
         provider = _env("LLM_PROVIDER", "ollama").lower()
+        eden = provider == "edenai"
+        reasoning_effort = _env("LLM_REASONING_EFFORT", "off" if eden else "none").lower()
         # Compose podaje adres Ollamy osobno (LLM_OLLAMA_URL), żeby nie trafił do Eden AI.
-        default_url = EDENAI_URL if provider == "edenai" else _env("LLM_OLLAMA_URL", OLLAMA_URL)
+        default_url = EDENAI_URL if eden else _env("LLM_OLLAMA_URL", OLLAMA_URL)
         return cls(
             llm_provider=provider,
             max_file_size_mb=_env_positive_int("MAX_FILE_SIZE_MB", 10),
@@ -196,10 +198,10 @@ class Settings:
             jwt_secret=os.environ.get("JWT_SECRET") or None,
             jwt_algorithm=_env("JWT_ALGORITHM", "HS256"),
             llm_base_url=_env("LLM_BASE_URL", default_url),
-            llm_model=_env("LLM_MODEL", "qwen3.5:4b"),
+            llm_model=_env("LLM_MODEL", EDENAI_MODEL if eden else "qwen3.5:4b"),
             llm_api_key=_env("LLM_API_KEY", "ollama" if provider == "ollama" else ""),
             llm_timeout_s=_env_positive_float("LLM_TIMEOUT_S", 120.0),
-            llm_context_tokens=_env_positive_int("LLM_CONTEXT_TOKENS", 32768),
+            llm_context_tokens=_env_positive_int("LLM_CONTEXT_TOKENS", 65536 if eden else 32768),
             llm_fixture=os.environ.get("LLM_FIXTURE") or None,
             ocr_lang=_env("OCR_LANG", "pol"),
             add_validators=_env_bool("ADD_VALIDATORS", True),
@@ -207,7 +209,7 @@ class Settings:
             llm_temperature=_env_temperature(),
             llm_reasoning_effort=None if reasoning_effort == "off" else reasoning_effort,
             llm_strict_schema=strict_schema == "true",
-            llm_extra_body=_env_extra_body(),
+            llm_extra_body=_env_extra_body({"chat_template_kwargs": {"enable_thinking": False}} if eden else None),
             llm_connect_timeout_s=_env_positive_float("LLM_CONNECT_TIMEOUT_S", 10.0),
             llm_analysis_budget_s=_env_positive_float("LLM_ANALYSIS_BUDGET_S", 170.0),
             llm_max_attempts=_env_positive_int("LLM_MAX_ATTEMPTS", 2),

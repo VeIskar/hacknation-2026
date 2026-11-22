@@ -51,7 +51,7 @@ def provider(settings: Settings) -> str:
 def answer_token_limit(settings: Settings) -> int:
     if settings.llm_max_tokens is not None:
         return settings.llm_max_tokens
-    return 8192 if provider(settings) == "edenai" else 4096
+    return 16384 if provider(settings) == "edenai" else 4096
 
 
 def build_request(

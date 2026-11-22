@@ -11,6 +11,7 @@ import logging
 import math
 import re
 from collections.abc import Sequence
+from dataclasses import replace
 from functools import cache
 from typing import Any
 
@@ -29,6 +30,7 @@ from app.llm import (
     provider,
 )
 from app.models import ExtractedDocument, FormAnalysis
+from app.repair import repair_analysis
 
 log = logging.getLogger(__name__)
 
@@ -225,14 +227,20 @@ def correction_message(exc: ValidationError, finish_reason: str | None, intro: s
     return "\n".join(lines)
 
 
-def _validate(content: str) -> FormAnalysis:
+def _validate(content: str, *, last_chance: bool = False) -> FormAnalysis:
     """Przez json.loads, bo parser Pydantic odrzuca samotny surogat (\\ud83d), zanim models.py zamieni go na U+FFFD."""
     try:
         data = json.loads(content)
     except (ValueError, RecursionError):
         # Błąd składni opisuje Pydantic, tak samo jak pozostałe błędy dla modelu.
         return FormAnalysis.model_validate_json(content)
-    return FormAnalysis.model_validate(data)
+    repaired, notes = repair_analysis(data, last_chance=last_chance)
+    for note in notes:
+        log.warning("Analiza: naprawa – %s", note)
+    analysis = FormAnalysis.model_validate(repaired)
+    if last_chance:
+        log.warning("Analiza: użyto napraw ostatniej szansy (liczba notatek: %d)", len(notes))
+    return analysis
 
 
 def _retry_messages(
@@ -284,8 +292,12 @@ def analyze(
     elapsed_s = 0.0
     for attempt in range(1, max_attempts + 1):
         _ensure_fits(messages, attempt, context_tokens, max_tokens)
+        attempt_settings = settings
+        if attempt > 1 and settings.llm_temperature is not None:
+            attempt_settings = replace(settings, llm_temperature=max(settings.llm_temperature, 0.3))
         result = chat_json(
-            messages, FormAnalysis.model_json_schema(), settings=settings, max_tokens=max_tokens, transport=transport
+            messages, FormAnalysis.model_json_schema(), settings=attempt_settings,
+            max_tokens=max_tokens, transport=transport,
         )
         elapsed_s += result.elapsed_s
         if result.reasoning:
@@ -296,18 +308,20 @@ def analyze(
         except ValidationError as exc:
             kinds = ", ".join(sorted({error["type"] for error in exc.errors()}))
             _log_attempt(logging.WARNING, attempt, max_attempts, result, f"{exc.error_count()} błędów walidacji ({kinds})")
-            if attempt == max_attempts:
-                break
-            projected_s = elapsed_s + result.elapsed_s * 1.1
-            if projected_s > settings.llm_analysis_budget_s:
+            if attempt < max_attempts:
+                projected_s = elapsed_s + result.elapsed_s * 1.1
+                if projected_s <= settings.llm_analysis_budget_s:
+                    messages = _retry_messages(base, result, exc, attempt, context_tokens, max_tokens)
+                    continue
                 log.warning(
                     "Analiza, próba %d/%d: pominięto ponowienie: budżet D11 "
                     "(próby %.1f s, ostatnia %.1f s, prognoza %.1f s, budżet %.1f s).",
                     attempt, max_attempts, elapsed_s, result.elapsed_s, projected_s, settings.llm_analysis_budget_s,
                 )
-                raise LLMUnavailable(detail=UNAVAILABLE_DETAIL) from exc
-            messages = _retry_messages(base, result, exc, attempt, context_tokens, max_tokens)
-            continue
+            try:
+                return _validate(result.content, last_chance=True)
+            except ValidationError as last_error:
+                raise LLMUnavailable(detail=UNAVAILABLE_DETAIL) from last_error
         _log_attempt(logging.INFO, attempt, max_attempts, result, "poprawna analiza")
         return analysis
     raise LLMUnavailable(detail=UNAVAILABLE_DETAIL)

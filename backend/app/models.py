@@ -129,7 +129,11 @@ class ShowIf(StrictModel):
     )
     equals: Text = Field(description="Dokładna nazwa opcji, po której element jest widoczny.")
     any_of: list[Text] = Field(
-        default_factory=list, description="Dodatkowe opcje tego samego pola, łączone z equals przez lub, bez powtórzeń."
+        default_factory=list,
+        description=(
+            "Dodatkowe opcje tego samego pola, łączone z equals przez lub. "
+            "Pusta lista, gdy warunek to jedna opcja. Nigdy nie powtarzaj w any_of wartości equals."
+        ),
     )
 
     @model_validator(mode="after")
@@ -151,7 +155,12 @@ class SubjectField(StrictModel):
     required: bool = Field(default=True, description="Czy pole jest obowiązkowe")
     description: DescriptionText = Field(default="", description="Krótka podpowiedź pod etykietą; pusta, gdy zbędna")
     options: list[Text] = Field(
-        default_factory=list, description="Opcje dla RADIO, CHECKBOX i SELECT; dla innych typów pusta lista"
+        default_factory=list,
+        description=(
+            "Opcje dla RADIO, CHECKBOX i SELECT. Dla innych typów pusta lista. "
+            "Każda opcja wyboru to element options jednego pola, nigdy osobne pole. "
+            "Pojedyncza zgoda lub oświadczenie to CHECKBOX z jedną opcją „Tak”."
+        ),
     )
     show_if: ShowIf | None = Field(default=None, description="Warunek widoczności pola. Można go łączyć z show_if_all.")
     show_if_all: list[ShowIf] = Field(
