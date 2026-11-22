@@ -224,8 +224,8 @@ Kody błędów (`SPEC.md`, „API contract”). Ciało jest zawsze `{"detail": "
 | 500 | `Coś poszło nie tak. Spróbuj ponownie.` | nieoczekiwany błąd; szczegóły w `docker compose logs api` |
 
 Stan obecny:
-- `.doc`, `.xlsx` i `.ods` przechodzą kontrolę pliku, ale dają 400 „Nie udało się odczytać treści
-  pliku.”, dopóki odczyt (K2) nie obsłuży tych formatów. Działają PDF, DOCX, JPG, JPEG i PNG.
+- API odczytuje PDF, DOCX, DOC (binarny Word 97–2003), XLSX, ODS,
+  JPG, JPEG i PNG.
 - `.doc`, który w środku jest DOCX, jest czytany jak DOCX. `.jpe` jest traktowany jak `.jpg`.
 - JSON odrzucony przez linter daje 500 z błędami w logu. To rozwiązanie tymczasowe, czeka na decyzję.
 
