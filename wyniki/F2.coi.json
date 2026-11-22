@@ -1563,14 +1563,14 @@
                   "description": "",
                   "options": [
                     {
-                      "id": "Yeah",
-                      "name": "Yeah",
-                      "techName": "yeah"
+                      "id": "Gotówką w kasie organu",
+                      "name": "Gotówką w kasie organu",
+                      "techName": "gotowka_w_kasie_organu"
                     },
                     {
-                      "id": "No",
-                      "name": "No",
-                      "techName": "no"
+                      "id": "Przelewem na rachunek w banku",
+                      "name": "Przelewem na rachunek w banku",
+                      "techName": "przelewem_na_rachunek_w_banku"
                     }
                   ],
                   "validation": [
@@ -1601,7 +1601,7 @@
                   "states": [
                     {
                       "type": "SHOW",
-                      "query": "(\"Yeah\" in tabs['Wniosek o zwrot opłaty skarbowej' in title].questions['informacje_dotyczace_sposobu_zwrotu_oplaty_skarbowej' in field.techName].field.repeatingSectionGrid['sposob_zwrotu_oplaty' in field.techName].field.__userAnswer)"
+                      "query": "(\"Przelewem na rachunek w banku\" in tabs['Wniosek o zwrot opłaty skarbowej' in title].questions['informacje_dotyczace_sposobu_zwrotu_oplaty_skarbowej' in field.techName].field.repeatingSectionGrid['sposob_zwrotu_oplaty' in field.techName].field.__userAnswer)"
                     }
                   ],
                   "questionOrder": 1,

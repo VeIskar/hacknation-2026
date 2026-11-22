@@ -138,3 +138,7 @@ Oparcie w tekście i decyzje wnioskodawcy bez wykrytej przesłanki są przybliż
 - **Słowniki** Kraje × 2, TERYT_4G_DOWODOWY × 2
 - **Uwagi o walidatorach** 0
 - **Uwagi o słownikach** 0
+
+## Poprawki ręczne
+
+- F2: model podał opcje „Yeah” i „No” w polu „Sposób zwrotu opłaty”. Wpisaliśmy opcje z dokumentu i poprawiliśmy warunek pokazania numeru rachunku.
