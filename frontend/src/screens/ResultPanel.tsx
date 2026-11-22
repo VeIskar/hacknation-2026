@@ -1,4 +1,5 @@
 import { formStats, formatElapsed } from '../format.ts'
+import { Preview } from '../preview/Preview.tsx'
 import type { CoiForm } from '../types.ts'
 
 interface Props {
@@ -38,6 +39,7 @@ export function ResultPanel({ form, json, elapsedMs, jsonShown, jsonRegionId }: 
           {json}
         </pre>
       )}
+      <Preview form={form} />
     </div>
   )
 }

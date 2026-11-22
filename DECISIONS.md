@@ -47,6 +47,12 @@ F1 (web):
   zakreślenia pod ciemnym tekstem. Nigdy jako obrys fokusu, przycisk ani pasy. Obrys fokusu jest ciemny.
 - Podgląd pierwszej strony: PDF przez pdfjs-dist, JPG i PNG natywnie, inne formaty dostają jedno zdanie.
 
+F2 (web):
+
+| What          | Why                                                                                   | Licence |
+| ------------- | ------------------------------------------------------------------------------------- | ------- |
+| jsonata 2.2.2 | warunki SHOW z JSON-a COI liczone w podglądzie tym samym językiem zapytań, bez własnego parsera | MIT     |
+
 ## Event: api
 
 Decyzje lidera po recenzji P0 (2026-11-21). Kod: `backend/app/errors.py`, `backend/app/models.py`.

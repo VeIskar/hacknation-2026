@@ -1,5 +1,6 @@
 @import 'tailwindcss';
 @import './warsztat.css' layer(components);
+@import './eusluga.css' layer(components);
 
 /* Kroje bez zmian, z repozytorium, bez CDN (D15 w DECISIONS.md). Licencje: src/fonts/<kroj>/OFL.txt. */
 @font-face {

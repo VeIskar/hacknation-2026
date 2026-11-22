@@ -1,5 +1,6 @@
 // Oczy: przechodzi przepływ na atrapie modelu i zapisuje zrzuty każdego stanu w 1440 i 390 px
-// do frontend/shots/. Sprawdza też krok 8 (zły typ pliku) i pobranie pliku JSON.
+// do frontend/shots/. Sprawdza też krok 8 (zły typ pliku), pobranie pliku JSON i podgląd eUsługi:
+// dane z rejestru, warunek SHOW, błąd walidacji, przejście do strony końcowej.
 //
 // Użycie (z katalogu frontend/):
 //   node scripts/look.mjs                      plik PDF generowany tutaj
@@ -85,14 +86,88 @@ function check(name, ok, detail = '') {
   if (!ok) failures.push(name)
 }
 
+// Podgląd eUsługi na atrapie modelu: etykiety niżej pochodzą z backend/tests/fixtures/fields.json.
+async function preview(page, width, shot) {
+  const region = (name) => page.getByRole('region', { name })
+  const pageTitle = (name) => page.getByRole('heading', { level: 3, name })
+  const next = page.getByRole('button', { name: 'Dalej' })
+  const focused = (selector) => page.evaluate((query) => document.activeElement?.matches(query) ?? false, selector)
+
+  const pesel = region('Twoje dane').getByLabel('Numer PESEL')
+  check(
+    `${width}: PESEL z rejestru ma 11 cyfr i jest tylko do odczytu`,
+    /^\d{11}$/.test(await pesel.inputValue()) && !(await pesel.isEditable()),
+  )
+  check(`${width}: krok jest podany tekstem`, await page.getByText('Krok 1 z 4', { exact: true }).isVisible())
+  check(`${width}: sekcja z niespełnionym SHOW nie istnieje w DOM`, (await region('Dane innej osoby').count()) === 0)
+  const ownZip = await region('Adres zamieszkania').getByLabel('Kod pocztowy').count()
+  check(`${width}: przy kraju „Polska” jest jedno pole „Kod pocztowy”`, ownZip === 1, String(ownZip))
+  await shot('01-dane')
+
+  await page.getByRole('radio', { name: 'Innej osoby' }).check()
+  const otherAddress = region('Adres zamieszkania innej osoby')
+  await otherAddress.waitFor()
+  check(`${width}: „Innej osoby” pokazuje „Dane innej osoby”`, await region('Dane innej osoby').isVisible())
+  await shot('02-innej-osoby')
+
+  const zip = otherAddress.getByLabel('Kod pocztowy')
+  await zip.fill('12345')
+  await next.click()
+  const zipError = otherAddress.getByText('Wpisz kod pocztowy w formacie 00-000')
+  await zipError.waitFor()
+  check(`${width}: po błędach fokus stoi na podsumowaniu`, await focused('.eu-summary'))
+  check(`${width}: błędne pole ma aria-invalid`, (await zip.getAttribute('aria-invalid')) === 'true')
+  const summaryLinks = await page.locator('.eu-summary a').evaluateAll((links) => links.map((link) => link.getBoundingClientRect().height))
+  check(`${width}: linki podsumowania mają co najmniej 44 px`, summaryLinks.every((height) => height >= 44), summaryLinks.join(', '))
+  check(`${width}: błąd zatrzymuje na stronie „Dane”`, await pageTitle('Dane').isVisible())
+  await shot('03-blad-walidacji')
+  await page.locator('.eu-summary').getByRole('link', { name: 'Wpisz kod pocztowy w formacie 00-000' }).click()
+  check(`${width}: link z podsumowania przenosi fokus do pola`, await zip.evaluate((el) => el === document.activeElement))
+
+  await page.getByRole('radio', { name: 'Swoim' }).check()
+  await region('Dane innej osoby').waitFor({ state: 'detached' })
+  check(`${width}: błędy pól z ukrytych sekcji znikają z podsumowania`, (await page.locator('.eu-summary').count()) === 0)
+  await next.click()
+  await pageTitle('Informacje o nadpłacie').waitFor()
+  check(`${width}: po zmianie strony fokus stoi na jej tytule`, await focused('.eu-page'))
+  await page.getByLabel('Podatek, którego dotyczy nadpłata').fill('Podatek od nieruchomości')
+  await page.getByLabel('Kwota').fill('120,50')
+  await page.getByLabel('Uzasadnienie').fill('Podatek został zapłacony dwa razy.')
+  await page.getByRole('radio', { name: 'Zwrócić przelewem na rachunek bankowy' }).check()
+  await page.getByLabel('Numer rachunku').fill('61 1090 1014 0000 0712 1981 2874')
+  await page
+    .getByLabel('Plik deklaracji podatkowej')
+    .setInputFiles({ name: 'korekta-deklaracji.pdf', mimeType: 'application/pdf', buffer: samplePdf() })
+  await next.click()
+  await pageTitle('Kontakt i zgody').waitFor()
+
+  await page.getByRole('button', { name: 'Wstecz' }).click()
+  await pageTitle('Informacje o nadpłacie').waitFor()
+  const amount = await page.getByLabel('Kwota').inputValue()
+  check(`${width}: odpowiedzi zostają po „Wstecz”`, amount === '120,50', amount)
+  await next.click()
+  await pageTitle('Kontakt i zgody').waitFor()
+
+  await next.click()
+  await page.locator('.eu-summary').waitFor()
+  check(`${width}: wymagana zgoda zatrzymuje „Dalej”`, await pageTitle('Kontakt i zgody').isVisible())
+  await page.getByRole('checkbox', { name: /Wyrażam zgodę/ }).check()
+  await next.click()
+  await pageTitle('Strona końcowa').waitFor()
+  check(`${width}: strona końcowa to „Krok 4 z 4”`, await page.getByText('Krok 4 z 4', { exact: true }).isVisible())
+  check(`${width}: strona końcowa nie ma „Dalej”`, (await next.count()) === 0)
+  check(`${width}: strona końcowa pokazuje wpisaną kwotę`, await page.locator('.eu-review').getByText('120,50').isVisible())
+  await shot('04-strona-koncowa')
+}
+
 async function walk(browser, source, [width, height]) {
   const context = await browser.newContext({ viewport: { width, height }, acceptDownloads: true, locale: 'pl-PL' })
   const page = await context.newPage()
   const errors = []
   page.on('pageerror', (error) => errors.push(String(error)))
   // Każdy stan dostaje zrzut i kontrolę axe z tymi samymi tagami co tests/e2e/a11y.spec.ts.
-  const shot = async (target, name) => {
-    await target.screenshot({ path: join(shots, `f1-${name}-${width}.png`), fullPage: true })
+  const shot = async (target, name, prefix = 'f1') => {
+    await target.screenshot({ path: join(shots, `${prefix}-${name}-${width}.png`), fullPage: true })
     const result = await new AxeBuilder({ page: target }).withTags(axeTags).analyze()
     const found = result.violations.map((violation) => `${violation.id} (${violation.nodes[0].target.join(' ')})`)
     check(`${width}: axe ${name}`, found.length === 0, found.join(', '))
@@ -140,6 +215,9 @@ async function walk(browser, source, [width, height]) {
   const form = JSON.parse(await readFile(await download.path(), 'utf-8'))
   check(`${width}: „Pobierz JSON” daje plik .json`, name.endsWith('.json'), name)
   check(`${width}: pierwsza strona to „Dane”, ostatnia to FINISH`, form.tabs[0].title === 'Dane' && form.tabs.at(-1).type === 'FINISH')
+
+  await page.getByRole('button', { name: 'Ukryj JSON' }).click()
+  await preview(page, width, (name) => shot(page, name, 'f2'))
 
   // Krok 8 z "Demo flow": nazwa .pdf, treść nie jest PDF-em.
   const fresh = await context.newPage()
@@ -198,7 +276,7 @@ async function main() {
     await browser.close()
   }
   console.log('mapa zależności: ekranu jeszcze nie ma (etap 4), bez zrzutu')
-  console.log(`zrzuty: ${shots}/f1-*.png`)
+  console.log(`zrzuty: ${shots}/f1-*.png i f2-*.png`)
 }
 
 process.on('exit', stopAll)

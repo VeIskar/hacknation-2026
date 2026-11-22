@@ -27,6 +27,14 @@ export interface CoiField {
   defaultValue?: string | string[]
   defaultValueType?: string
   dictionaryName?: string
+  consentSectionConfig?: { consents: CoiConsent[] }
+  /** Tylko w podglądzie: SPEC "Field contract" nie dopuszcza tego klucza w pliku. */
+  __userAnswer?: string | string[]
+}
+
+export interface CoiConsent {
+  description: string
+  required?: boolean
 }
 
 export interface CoiCell {
