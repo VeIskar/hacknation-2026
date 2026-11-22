@@ -44,17 +44,7 @@ const viewports = [
   [390, 844],
 ]
 
-function samplePdf() {
-  const lines = ['WNIOSEK O WYDANIE ZASWIADCZENIA', 'Imie i nazwisko', 'PESEL', 'Adres zamieszkania', 'Kod pocztowy']
-  const text = lines.map((line, i) => `${i === 0 ? '72 760 Td' : '0 -32 Td'} (${line}) Tj`).join(' ')
-  const stream = `BT /F1 14 Tf ${text} ET`
-  const objects = [
-    '<< /Type /Catalog /Pages 2 0 R >>',
-    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
-    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
-    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
-    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
-  ]
+function pdfBuffer(objects) {
   let pdf = '%PDF-1.4\n'
   const offsets = []
   objects.forEach((body, i) => {
@@ -66,6 +56,30 @@ function samplePdf() {
   pdf += offsets.map((offset) => `${String(offset).padStart(10, '0')} 00000 n \n`).join('')
   pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`
   return Buffer.from(pdf, 'latin1')
+}
+
+function samplePdf() {
+  const lines = ['WNIOSEK O WYDANIE ZASWIADCZENIA', 'Imie i nazwisko', 'PESEL', 'Adres zamieszkania', 'Kod pocztowy']
+  const text = lines.map((line, i) => `${i === 0 ? '72 760 Td' : '0 -32 Td'} (${line}) Tj`).join(' ')
+  const stream = `BT /F1 14 Tf ${text} ET`
+  return pdfBuffer([
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+  ])
+}
+
+function scannedPdf(jpeg, width, height) {
+  const stream = 'q 595 0 0 842 0 0 cm /I Do Q'
+  return pdfBuffer([
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /XObject << /I 4 0 R >> >> /Contents 5 0 R >>',
+    `<< /Type /XObject /Subtype /Image /Width ${width} /Height ${height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>\nstream\n${jpeg}\nendstream`,
+    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+  ])
 }
 
 // Materiały COI leżą poza gitem, zwykle tylko w głównym katalogu roboczym, nie w worktree.
@@ -138,8 +152,10 @@ function stopAll() {
 }
 
 const failures = []
+let checks = 0
 let jwtToken = ''
 function check(name, ok, detail = '') {
+  checks++
   console.log(`${ok ? 'OK  ' : 'BŁĄD'} ${name}${detail ? `: ${detail}` : ''}`)
   if (!ok) failures.push(name)
 }
@@ -459,11 +475,12 @@ async function jsonPanelChecks(page, width) {
   check(`${label}: fokus w sekcji nie wyłącza „Pokaż JSON”`, (await showJson.getAttribute('aria-pressed')) === 'true')
   await page.getByRole('region', { name: 'Adres zamieszkania', exact: true }).getByRole('heading').click()
   check(`${label}: klik w sekcję wraca do JSON-u elementu`, (await showJson.getAttribute('aria-pressed')) === 'false')
-  await page.getByRole('region', { name: 'Twoje dane' }).click()
+  await page.getByRole('region', { name: 'Twoje dane' }).getByRole('heading').click()
   check(`${label}: klik w sekcję pokazuje jej JSON`, (await element())?.field?.techName === 'twoje_dane')
   check(`${label}: opis mówi, który to element`, ((await page.locator('.inspektor-co').textContent()) ?? '').includes('„Twoje dane”'))
-  await page.getByRole('region', { name: 'Adres zamieszkania', exact: true }).getByRole('combobox').first().focus()
-  check(`${label}: fokus z klawiatury też wybiera sekcję`, (await element())?.field?.techName === 'adres_zamieszkania')
+  const country = page.getByRole('region', { name: 'Adres zamieszkania', exact: true }).getByRole('combobox').first()
+  await country.focus()
+  check(`${label}: fokus z klawiatury wybiera dokładne pole`, `eu-${(await element())?.field?.id}` === await country.getAttribute('id'))
   await page.screenshot({ path: join(shots, `f3-05-json-elementu-${width}.png`), fullPage: true })
   // Fokus z klawiatury: Tab z ostatniego przycisku podglądu prowadzi do kodu JSON.
   await page.getByRole('button', { name: 'Dalej' }).focus()
@@ -651,17 +668,119 @@ async function anyJsonChecks(browser, files) {
   if (nadplata) await registryHintCheck(browser, nadplata)
 }
 
-async function openJson(browser, path, viewport) {
+async function openJson(browser, path, viewport, source = { name: 'wniosek.pdf', mimeType: 'application/pdf', buffer: samplePdf() }) {
   const raw = await readFile(path, 'utf-8')
   const context = await browser.newContext({ viewport, locale: 'pl-PL' })
   const page = await context.newPage()
   const errors = watch(page)
   await page.route('**/api/forms', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: raw }))
   await page.goto(web)
-  await page.getByLabel('Plik formularza').setInputFiles({ name: 'wniosek.pdf', mimeType: 'application/pdf', buffer: samplePdf() })
+  await page.getByLabel('Plik formularza').setInputFiles(source)
   await page.getByRole('button', { name: 'Analizuj formularz' }).click()
   await page.getByRole('heading', { level: 1, name: 'Podgląd eUsługi' }).waitFor({ timeout: 20_000 })
   return { context, page, errors, form: JSON.parse(raw) }
+}
+
+async function paperCoverage(page) {
+  const counter = page.getByText(/^Pola ze źródłem na papierze:/)
+  await counter.waitFor({ timeout: 20_000 })
+  return (await counter.textContent())?.trim()
+}
+
+async function matchOnPaper(page, cell, label, paperPage) {
+  const id = cell.field.id
+  const marker = page.locator(`[data-preview-link="${id}"]`)
+  const tab = page.locator(`[data-paper-link="${id}"]`)
+  await marker.waitFor()
+  await marker.press('Enter')
+  await tab.waitFor()
+  await page.waitForFunction((id) => document.activeElement?.getAttribute('data-paper-link') === id, id)
+  check(`${label}: znacznik i zakładka mają ten sam numer`, (await tab.textContent()) === (await marker.textContent()))
+  const description = await tab.getAttribute('aria-describedby')
+  check(`${label}: zakładka podaje treść PDF w opisie dostępności`,
+    (await page.locator(`[id="${description}"]`).textContent())?.includes('Tekst na papierze: '))
+  check(`${label}: właściwa strona PDF i aktywna zakładka`,
+    await page.getByText(new RegExp(`^Strona ${paperPage} z \\d+\\.$`)).isVisible() && (await tab.getAttribute('aria-pressed')) === 'true')
+  const activeRects = page.locator('.papier-zaznaczenia [data-aktywny="true"]')
+  const bounds = await activeRects.first().boundingBox()
+  const canvas = await page.locator('.arkusz canvas[data-ready="true"]').boundingBox()
+  check(`${label}: prostokąt zaznaczenia jest wewnątrz kartki`, bounds && canvas && bounds.width > 0 && bounds.height > 0 &&
+    bounds.x >= canvas.x - 1 && bounds.y >= canvas.y - 1 && bounds.x + bounds.width <= canvas.x + canvas.width + 1 &&
+    bounds.y + bounds.height <= canvas.y + canvas.height + 1)
+  const panel = page.locator('#panel-json')
+  check(`${label}: panel pokazuje dokładny fragment odpowiedzi API`, JSON.stringify(JSON.parse(await panel.textContent())) === JSON.stringify(cell))
+  const target = await tab.boundingBox()
+  check(`${label}: zakładka ma 44 × 44 px`, target?.width >= 44 && target?.height >= 44)
+  await tab.press('Enter')
+  check(`${label}: Enter na papierze oddaje fokus właściwemu elementowi`,
+    await page.evaluate((id) => document.getElementById(`podglad-${id}`)?.contains(document.activeElement), id))
+}
+
+async function sourceChecks(browser, path, source, viewport, folder) {
+  const label = `F${folder} źródła ${viewport.width}`
+  const { context, page, errors, form } = await openJson(browser, path, viewport, source)
+  const cells = form.tabs.flatMap(({ questions }) =>
+    questions.flatMap((cell) => [cell, ...(cell.field.repeatingSectionGrid ?? [])]),
+  )
+  const named = (title) => cells.find(({ field }) => field.title === title)
+  const noMarker = async (cell) => (await page.locator(`[data-preview-link="${cell.field.id}"]`).count()) === 0
+  const coverage = await paperCoverage(page)
+  const expected = folder === 5 ? 3 : 2
+  const total = folder === 5 ? 55 : 90
+  check(`${label}: licznik potwierdzonych pól`, coverage === `Pola ze źródłem na papierze: ${expected} z ${total}`, coverage)
+  if (folder === 5) {
+    const pesel = named('Numer PESEL')
+    const control = page.locator(`[id="eu-${pesel.field.id}"]`)
+    await control.focus()
+    check(`${label}: fokus na polu wskazuje jego JSON`, (await page.locator('#panel-json').textContent())?.includes('"numer_pesel"'))
+    await matchOnPaper(page, pesel, `${label} PESEL`, 1)
+    check(`${label}: brak zakładki dla „Nazwa urzędu” i „Imię”`, await noMarker(named('Nazwa urzędu')) && await noMarker(named('Imię')))
+    const justification = named('Uzasadnienie')
+    const jump = page.locator(`[data-paper-link="${justification.field.id}"]`)
+    await jump.press('Enter')
+    check(`${label}: zakładka prowadzi do innego kroku i ustawia fokus`,
+      await page.getByText('Krok 2 z 4', { exact: true }).isVisible() &&
+      await page.evaluate((id) => document.activeElement?.id === `eu-${id}`, justification.field.id))
+    await matchOnPaper(page, named('Korekta deklaracji'), `${label} sekcja`, 1)
+  } else {
+    await nextPage(page)
+    const trainer = named('Dane trenera')
+    const athletes = named('Dane podopiecznych trenera')
+    check(`${label}: sekcja „Dane sportowca” powtarza się bez zakładki`, await noMarker(named('Dane sportowca')))
+    check(`${label}: dane trenera czekają na warunek SHOW`, await noMarker(trainer))
+    await page.getByRole('radio', { name: 'Wniosek o przyznanie wyróżnienia sportowego' }).check()
+    await matchOnPaper(page, trainer, `${label} trener`, 12)
+    await page.getByRole('checkbox', { name: 'Wypełnij dane trenera' }).check()
+    await matchOnPaper(page, athletes, `${label} podopieczni`, 13)
+    await page.getByRole('radio', { name: 'Wniosek o przyznanie stypendium sportowego' }).check()
+    await page.locator(`[data-paper-link="${athletes.field.id}"]`).waitFor({ state: 'detached' })
+    check(`${label}: SHOW usuwa oba znaczniki ukrytego pola`, await noMarker(athletes))
+    check(`${label}: zmiana SHOW zachowuje licznik całego pliku`, (await paperCoverage(page)) === coverage)
+    await page.getByRole('radio', { name: 'Wniosek o przyznanie wyróżnienia sportowego' }).check()
+    await matchOnPaper(page, athletes, `${label} powrót`, 13)
+  }
+  const axe = await new AxeBuilder({ page }).withTags(axeTags).analyze()
+  check(`${label}: axe`, axe.violations.length === 0, JSON.stringify(axe.violations.map(({ id, nodes }) => [id, nodes.map(({ target }) => target)])))
+  check(`${label}: brak błędów JavaScript`, errors.length === 0, errors.join(' | '))
+  await page.screenshot({ path: join(shots, `f4a-f${folder}-${viewport.width}.png`), fullPage: true })
+  const raster = folder === 5 && viewport.width === 1440
+    ? await page.locator('.arkusz canvas').evaluate((canvas) => ({
+        jpeg: canvas.toDataURL('image/jpeg').split(',')[1],
+        width: canvas.width,
+        height: canvas.height,
+      }))
+    : null
+  await context.close()
+  if (!raster) return
+
+  const image = scannedPdf(Buffer.from(raster.jpeg, 'base64').toString('latin1'), raster.width, raster.height)
+  const scan = await openJson(browser, path, viewport, { name: 'skan-f5.pdf', mimeType: 'application/pdf', buffer: image })
+  check('F5 skan: licznik wskazuje zero', (await paperCoverage(scan.page))?.includes(': 0 z '))
+  check('F5 skan: czytelny komunikat o braku tekstu', await scan.page.getByText(/Ten PDF nie zawiera warstwy tekstowej/).isVisible())
+  await scan.page.locator('.arkusz canvas[data-ready="true"]').waitFor()
+  check('F5 skan: papier się renderuje bez zakładek i prostokątów', (await scan.page.locator('[data-paper-link], [data-preview-link], .papier-zaznaczenia').count()) === 0)
+  check('F5 skan: brak błędów JavaScript', scan.errors.length === 0, scan.errors.join(' | '))
+  await scan.context.close()
 }
 
 // Wynik API dla formularza 9: walidatory dowodu i ePUAP w przeglądarce, za dwoma warunkami SHOW.
@@ -895,13 +1014,21 @@ async function main() {
     if (second) for (const viewport of viewports) await walkShort(browser, second, viewport, 'p9')
     const jsonFiles = await anyJsonFiles()
     await anyJsonChecks(browser, jsonFiles)
+    const f5 = jsonFiles.find((path) => basename(path).includes('NadpłatyPodatku'))
+    const f9 = jsonFiles.find((path) => basename(path) === 'F9.coi.json')
+    if (!process.argv[2] && f5 && real.main) {
+      for (const [width, height] of viewports) await sourceChecks(browser, f5, source, { width, height }, 5)
+    }
+    if (f9 && second) {
+      for (const [width, height] of viewports) await sourceChecks(browser, f9, second, { width, height }, 9)
+    }
     console.log(`dowolny JSON: ${jsonFiles.length} plików (${jsonFiles.map((path) => basename(path)).join(', ')})`)
   } finally {
     await browser.close()
   }
   console.log('mapa zależności: ekranu jeszcze nie ma (etap 4), bez zrzutu')
   console.log(real.main ? `papier: ${source.name}${second ? ` i ${second.name}` : ''}` : 'papier: plik generowany w skrypcie, bo nie ma materialy/')
-  console.log(`zrzuty: ${shots}/f1-*.png, f2-*.png${second ? ' i p9-*.png' : ''}`)
+  console.log(`zrzuty: ${shots}/f1-*.png, f2-*.png${second ? ', p9-*.png i f4a-*.png' : ''}`)
 }
 
 process.on('exit', stopAll)
@@ -910,7 +1037,7 @@ for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => process.exi
 main()
   .then(() => {
     stopAll()
-    console.log(failures.length ? `LOOK: FAIL (${failures.length})` : 'LOOK: PASS')
+    console.log(failures.length ? `LOOK: FAIL (${failures.length}/${checks})` : `LOOK: PASS (${checks} kontroli)`)
     process.exit(failures.length ? 1 : 0)
   })
   .catch((error) => {

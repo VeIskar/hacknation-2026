@@ -5,10 +5,11 @@ import type { CoiForm } from '../types.ts'
 
 export type JsonMode = 'element' | 'plik'
 
-/** Wybrany element eUsługi: sekcja `cellIndex` na stronie `tabIndex` pliku z API. */
+/** Pozycja elementu w oryginalnym pliku z API. */
 export interface JsonSelection {
   tabIndex: number
   cellIndex: number
+  childIndex?: number
 }
 
 interface Props {
@@ -24,6 +25,7 @@ interface Props {
 }
 
 const CONTENT_ID = 'json-tresc'
+const LOCATION_ID = 'json-miejsce'
 
 function Highlighted({ json }: { json: string }) {
   const tokens = useMemo(() => jsonTokens(json), [json])
@@ -46,12 +48,14 @@ function Highlighted({ json }: { json: string }) {
 export function JsonPanel({ form, fullJson, selection, mode, open, onToggle, panelId }: Props) {
   // Plik z API może nie mieć kluczy, które podgląd uzupełnił na kopii. Stąd `?.` przy każdym kroku.
   const tab = selection ? form.tabs?.[selection.tabIndex] : undefined
-  const cell = selection ? tab?.questions?.[selection.cellIndex] : undefined
+  const top = selection ? tab?.questions?.[selection.cellIndex] : undefined
+  const cell = selection?.childIndex === undefined ? top : top?.field?.repeatingSectionGrid?.[selection.childIndex]
   const elementJson = useMemo(() => (cell ? JSON.stringify(cell, null, 2) : ''), [cell])
   const whole = mode === 'plik' || !cell
   const title = whole ? 'Cały plik JSON' : 'JSON wybranego elementu'
-  const kind = SECTION_TYPES.has(cell?.field?.type ?? '') ? 'sekcja' : 'element'
-  const where = cell ? `Strona „${tab?.title ?? ''}”, ${kind} „${cell.field?.title ?? ''}”.` : ''
+  const kind = SECTION_TYPES.has(cell?.field?.type ?? '') ? 'sekcja' : 'pole'
+  const parent = selection?.childIndex === undefined ? '' : `, sekcja „${top?.field?.title ?? ''}”`
+  const where = cell ? `Strona „${tab?.title ?? ''}”${parent}, ${kind} „${cell.field?.title ?? ''}”.` : ''
 
   return (
     <section className="inspektor" aria-labelledby="json-tytul" data-open={open}>
@@ -63,16 +67,16 @@ export function JsonPanel({ form, fullJson, selection, mode, open, onToggle, pan
       </button>
       <div className="inspektor-tresc" id={CONTENT_ID}>
         <div className="inspektor-ramka">
-          {!whole && <p className="inspektor-co">{where}</p>}
+          {!whole && <p className="inspektor-co" id={LOCATION_ID}>{where}</p>}
           {/* Przewijany obszar: fokus z klawiatury pozwala przewijać go strzałkami. */}
-          <pre className="json" id={panelId} role="region" tabIndex={0} aria-label={whole ? 'Cały plik JSON' : `JSON: ${where}`}>
+          <pre className="json" id={panelId} role="region" tabIndex={0} aria-label={title} aria-describedby={whole ? undefined : LOCATION_ID}>
             <Highlighted json={whole ? fullJson : elementJson} />
           </pre>
         </div>
         <p className="inspektor-rada">
           {whole
             ? 'Przycisk „Pobierz JSON” zapisuje odpowiedź serwera bez zmian.'
-            : 'Kliknij element eUsługi, aby zobaczyć jego JSON. Cały plik otworzysz przyciskiem „Pokaż JSON”.'}
+            : 'Wybierz element eUsługi lub zakładkę na papierze, aby zobaczyć jego JSON.'}
         </p>
       </div>
     </section>

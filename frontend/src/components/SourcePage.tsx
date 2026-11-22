@@ -1,8 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, KeyboardEvent, RefObject } from 'react'
 import { openPdf } from '../pdf.ts'
 import type { PdfDocument } from '../pdf.ts'
 import { sourceKind } from '../source.ts'
+import { matchSources } from '../sourceMatches.ts'
+import type { SourceMatch, SourceMatches } from '../sourceMatches.ts'
+import type { CoiForm } from '../types.ts'
 
 const A4_RATIO = 595 / 842
 const THUMBNAIL_WIDTH = 48
@@ -37,6 +40,7 @@ interface ThumbnailsProps {
 
 function Thumbnails({ pdf, current, onSelect }: ThumbnailsProps) {
   const count = Math.min(pdf.pageCount, MAX_THUMBNAILS)
+  const tabStop = Math.min(current, count)
   const canvases = useRef<(HTMLCanvasElement | null)[]>([])
   const buttons = useRef<(HTMLButtonElement | null)[]>([])
 
@@ -61,7 +65,7 @@ function Thumbnails({ pdf, current, onSelect }: ThumbnailsProps) {
   // Jeden przystanek Tab dla całego rzędu, strzałki wybierają stronę.
   function onKeyDown(event: KeyboardEvent) {
     const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key]
-    const next = event.key === 'Home' ? 1 : event.key === 'End' ? count : step ? current + step : null
+    const next = event.key === 'Home' ? 1 : event.key === 'End' ? count : step ? tabStop + step : null
     if (next === null || next < 1 || next > count) return
     event.preventDefault()
     onSelect(next)
@@ -81,7 +85,7 @@ function Thumbnails({ pdf, current, onSelect }: ThumbnailsProps) {
             className="miniatura"
             aria-label={`Strona ${pageNumber}`}
             aria-pressed={pageNumber === current}
-            tabIndex={pageNumber === current ? 0 : -1}
+            tabIndex={pageNumber === tabStop ? 0 : -1}
             onClick={() => onSelect(pageNumber)}
           >
             <canvas
@@ -104,16 +108,86 @@ interface PdfPaperProps {
   pageNumber: number
   onPageNumber: (pageNumber: number) => void
   onPageCount: (pageCount: number) => void
+  form: CoiForm | null
+  onIndex: (result: SourceMatches | 'failed') => void
+  links: readonly SourceMatch[]
+  selectedId: string | null
+  currentTab?: number
+  focusLink: { id: string } | null
+  onSelectLink: (link: SourceMatch) => void
 }
 
-function PdfPaper({ file, pageNumber, onPageNumber, onPageCount }: PdfPaperProps) {
+const TAB_HEIGHT = 44
+const TAB_SPACING = 48
+
+function tabTop(match: SourceMatch) {
+  return Math.min(...match.rects.map(({ top }) => top))
+}
+
+function PaperLinks({ links, selectedId, currentTab, onSelectLink, height }: Pick<PdfPaperProps, 'links' | 'selectedId' | 'currentTab' | 'onSelectLink'> & { height: number }) {
+  const ordered = useMemo(() => [...links].sort((a, b) => tabTop(a) - tabTop(b)), [links])
+  const fits = (ordered.length - 1) * TAB_SPACING + TAB_HEIGHT <= height
+  let nextTop = 0
+  const tops: number[] = []
+  for (const [index, link] of ordered.entries()) {
+    const limit = height - TAB_HEIGHT - (ordered.length - 1 - index) * TAB_SPACING
+    const top = Math.min(Math.max(tabTop(link) * height - TAB_HEIGHT / 2, nextTop), limit)
+    tops.push(top)
+    nextTop = top + TAB_SPACING
+  }
+  return (
+    <>
+      <div className="papier-zaznaczenia" aria-hidden="true">
+        {ordered.flatMap(({ id, rects }) => rects.map(({ left, top, width, height: rectHeight }, index) => (
+          <span
+            key={`${id}-${index}`}
+            data-aktywny={id === selectedId}
+            style={{ left: `${left * 100}%`, top: `${top * 100}%`, width: `${width * 100}%`, height: `${rectHeight * 100}%` }}
+          />
+        )))}
+      </div>
+      <div className="papier-zakladki" data-na-boku={fits} role="group" aria-label="Źródła na tej stronie">
+        {ordered.map((link, index) => {
+          const otherStep = link.tabIndex !== currentTab
+          const descriptionId = `papier-opis-${link.id}`
+          const excerpt = link.text.replace(/[.…_]{2,}/g, ' ').replace(/\s+/g, ' ').trim()
+          return (
+            <Fragment key={link.id}>
+              <button
+                type="button"
+                className="zrodlo-znacznik"
+                data-paper-link={link.id}
+                data-inny-krok={otherStep}
+                aria-label={`Źródło ${link.number}. Przejdź do kroku ${link.tabIndex + 1}.`}
+                aria-describedby={descriptionId}
+                aria-pressed={link.id === selectedId}
+                style={fits ? { top: tops[index] } : undefined}
+                onClick={() => onSelectLink(link)}
+              >
+                {link.number}
+              </button>
+              <span id={descriptionId} hidden>Element eUsługi: {link.title}. Tekst na papierze: {excerpt}</span>
+            </Fragment>
+          )
+        })}
+      </div>
+    </>
+  )
+}
+
+function PdfPaper({ file, pageNumber, onPageNumber, onPageCount, form, onIndex, links, selectedId, currentTab, focusLink, onSelectLink }: PdfPaperProps) {
   const [pdf, setPdf] = useState<PdfDocument | null>(null)
-  const [failed, setFailed] = useState(false)
+  const [openFailed, setOpenFailed] = useState(false)
+  const [failedPage, setFailedPage] = useState<number | null>(null)
   const [ratio, setRatio] = useState(A4_RATIO)
-  const [ready, setReady] = useState(false)
+  const [renderedPage, setRenderedPage] = useState<number | null>(null)
   const sheetRef = useRef<HTMLElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const width = useWidth(sheetRef)
+  const focusedLink = useRef(focusLink)
+  const ready = renderedPage === pageNumber
+  const failed = openFailed || failedPage === pageNumber
+  const showLinks = ready && !failed && links.length > 0
 
   useEffect(() => {
     let current = true
@@ -129,7 +203,7 @@ function PdfPaper({ file, pageNumber, onPageNumber, onPageCount }: PdfPaperProps
         onPageCount(next.pageCount)
       })
       .catch(() => {
-        if (current) setFailed(true)
+        if (current) setOpenFailed(true)
       })
     return () => {
       current = false
@@ -137,6 +211,25 @@ function PdfPaper({ file, pageNumber, onPageNumber, onPageCount }: PdfPaperProps
     }
     // onPageCount to setter stanu z App: stały, więc PDF otwiera się raz na plik.
   }, [file, onPageCount])
+
+  useEffect(() => {
+    if (!form) return
+    if (openFailed) {
+      onIndex('failed')
+      return
+    }
+    if (!pdf) return
+    const controller = new AbortController()
+    void pdf.readTextPages(controller.signal).then(
+      (pages) => {
+        if (!controller.signal.aborted) onIndex(matchSources(form, pages))
+      },
+      () => {
+        if (!controller.signal.aborted) onIndex('failed')
+      },
+    )
+    return () => controller.abort()
+  }, [form, onIndex, openFailed, pdf])
 
   useEffect(() => {
     if (!pdf || width === 0) return
@@ -148,10 +241,11 @@ function PdfPaper({ file, pageNumber, onPageNumber, onPageCount }: PdfPaperProps
           if (!current || !canvasRef.current) return
           paint(canvasRef.current, page.canvas)
           setRatio(page.ratio)
-          setReady(true)
+          setRenderedPage(pageNumber)
+          setFailedPage(null)
         })
         .catch(() => {
-          if (current) setFailed(true)
+          if (current) setFailedPage(pageNumber)
         })
     }, RENDER_DELAY_MS)
     return () => {
@@ -160,10 +254,20 @@ function PdfPaper({ file, pageNumber, onPageNumber, onPageCount }: PdfPaperProps
     }
   }, [pdf, pageNumber, width])
 
+  useEffect(() => {
+    if (!showLinks || !width || !focusLink || focusedLink.current === focusLink) return
+    const buttons = sheetRef.current?.querySelectorAll<HTMLButtonElement>('[data-paper-link]')
+    const button = buttons && Array.from(buttons).find((element) => element.dataset.paperLink === focusLink.id)
+    if (button?.getClientRects().length) {
+      focusedLink.current = focusLink
+      button.focus()
+    }
+  })
+
   const many = pdf !== null && pdf.pageCount > 1
   return (
     <div className="papier-strony" data-strony={many ? 'wiele' : 'jedna'} style={{ '--proporcja': ratio } as CSSProperties}>
-      <div className="papier-pole">
+      <div className="papier-pole" data-zrodla={links.length > 0}>
         <figure className="arkusz" ref={sheetRef}>
           <canvas
             ref={canvasRef}
@@ -172,13 +276,19 @@ function PdfPaper({ file, pageNumber, onPageNumber, onPageCount }: PdfPaperProps
             hidden={!ready || failed}
             data-ready={ready && !failed}
           />
-          {!ready && !failed && <p className="arkusz-zdanie">Wczytuję pierwszą stronę pliku.</p>}
+          {!ready && !failed && <p className="arkusz-zdanie">{pageNumber === 1 ? 'Wczytuję pierwszą stronę pliku.' : `Wczytuję stronę ${pageNumber}.`}</p>}
           {failed && <p className="arkusz-zdanie">Nie udało się pokazać tego pliku. Analiza nadal jest możliwa.</p>}
+          {showLinks && <PaperLinks links={links} selectedId={selectedId} currentTab={currentTab} onSelectLink={onSelectLink} height={width / ratio} />}
         </figure>
       </div>
       {pdf && ready && !failed && (
         <p className="papier-podpis">
           Strona {pageNumber} z {pdf.pageCount}.
+        </p>
+      )}
+      {showLinks && (
+        <p className="papier-podpis">
+          Numery zakładek odpowiadają numerom w eUsłudze. Przerywana ramka wskazuje inny krok.
         </p>
       )}
       {pdf && many && !failed && <Thumbnails pdf={pdf} current={pageNumber} onSelect={onPageNumber} />}
@@ -211,12 +321,12 @@ function ImagePaper({ file }: { file: File }) {
 
 const CONTENT_ID = 'papier-tresc'
 
-interface SourcePageProps {
-  file: File
+interface SourcePageProps extends PdfPaperProps {
   /** Na ekranie wczytania przełącznik mówi o pierwszej stronie, potem o oryginale. */
   stage: 'wczytaj' | 'dalej'
   pageCount: number | null
-  onPageCount: (pageCount: number) => void
+  open: boolean
+  onToggleOpen: () => void
 }
 
 /**
@@ -224,9 +334,8 @@ interface SourcePageProps {
  * do przełącznika, na szerokim stoi obok i zostaje przy przewijaniu. Wołaj tylko dla PDF-a
  * i obrazu, z `key` zależnym od pliku: nowy plik to nowy stan strony i przełącznika.
  */
-export function SourcePage({ file, stage, pageCount, onPageCount }: SourcePageProps) {
-  const [open, setOpen] = useState(false)
-  const [pageNumber, setPageNumber] = useState(1)
+export function SourcePage({ stage, pageCount, open, onToggleOpen, ...paperProps }: SourcePageProps) {
+  const { file, pageNumber } = paperProps
   const where = pageCount ? ` (strona ${pageNumber} z ${pageCount})` : ''
   const label = stage === 'wczytaj' ? (open ? 'Ukryj pierwszą stronę' : 'Pokaż pierwszą stronę') : open ? 'Ukryj oryginał' : `Pokaż oryginał${where}`
   return (
@@ -235,12 +344,12 @@ export function SourcePage({ file, stage, pageCount, onPageCount }: SourcePagePr
       <h2 className="papier-tytul" id="papier-tytul">
         Oryginał
       </h2>
-      <button type="button" className="b papier-przelacznik" aria-expanded={open} aria-controls={CONTENT_ID} onClick={() => setOpen(!open)}>
+      <button type="button" className="b papier-przelacznik" aria-expanded={open} aria-controls={CONTENT_ID} onClick={onToggleOpen}>
         {label}
       </button>
       <div className="papier-tresc" id={CONTENT_ID}>
         {sourceKind(file) === 'pdf' ? (
-          <PdfPaper file={file} pageNumber={pageNumber} onPageNumber={setPageNumber} onPageCount={onPageCount} />
+          <PdfPaper {...paperProps} />
         ) : (
           <ImagePaper file={file} />
         )}
