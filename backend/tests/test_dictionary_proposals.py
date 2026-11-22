@@ -52,6 +52,9 @@ def test_proposes_the_document_list_for_official_approval(proposals):
     ("W jakim państwie się urodziłeś", ("Polska", "Niemcy"), {"dictionaryName": "Kraje"}),
     ("Gmina miejsca zamieszkania", ("Zgierz", "Stryków"), {}),
     ("Kraje pobytu", ("Polska", "Niemcy", "Czechy"), {}),
+    ("Posiadane obywatelstwo", ("Polska", "Niemcy"), {}),
+    ("Kraj / państwo", ("Polska", "Niemcy"), {}),
+    ("Kraj zamieszkania lub pobytu", ("Polska", "Niemcy"), {}),
 ])
 def test_skips_existing_catalog_domain(proposals, title, options, binding):
     text = f"{title}:\n" + "\n".join(f"- {option}" for option in options)

@@ -220,10 +220,10 @@ def test_dictionary_issues_reports_unknown_names_and_missing_country_dictionary(
     unknown = quality.dictionary_issues(_coi_field("Wybór", [], kind="SELECT", dictionaryName="Numer działki"))
     assert len(unknown) == 1 and "Numer działki" in unknown[0]
     options = [{"id": country, "name": country} for country in COUNTRIES]
-    for kind in ("RADIO", "SELECT"):
-        missing = quality.dictionary_issues(_coi_field("Kraj urodzenia", [], kind=kind, options=options))
-        assert len(missing) == 1 and "Kraje" in missing[0]
-    assert quality.dictionary_issues(_coi_field("Kraj urodzenia", [], kind="CHECKBOX", options=options)) == []
+    missing = quality.dictionary_issues(_coi_field("Kraj urodzenia", [], kind="TEXT_FIELD"))
+    assert len(missing) == 1 and "Kraje" in missing[0]
+    for kind in ("RADIO", "SELECT", "CHECKBOX"):
+        assert quality.dictionary_issues(_coi_field("Kraj urodzenia", [], kind=kind, options=options)) == []
     assert quality.dictionary_issues(_coi_field("Państwo", [], kind="SELECT", dictionaryName="Kraje")) == []
     assert quality.dictionary_issues(_coi_field("Kod kraju", [], kind="SELECT")) == []
 
@@ -238,7 +238,10 @@ def test_generated_fixtures_pass_quality_checks(name: str) -> None:
     assert quality.dictionary_issues(form) == []
 
 
-@pytest.mark.parametrize("label", ["Kraj urodzenia", "Państwo", "Obywatelstwo", "Kod kraju", "Krajowy rejestr"])
+@pytest.mark.parametrize("label", [
+    "Kraj urodzenia", "Państwo", "Obywatelstwo", "Posiadane obywatelstwo",
+    "Kraj / państwo", "Kraj zamieszkania lub pobytu", "Kod kraju", "Krajowy rejestr",
+])
 def test_generator_matches_country_labels_by_word(label: str) -> None:
     data = _analysis_data("PERSON")
     data["subject_pages"][0]["sections"][0]["fields"] = [{"label": label, "type": "TEXT_FIELD"}]
@@ -256,6 +259,8 @@ def test_generator_matches_country_labels_by_word(label: str) -> None:
 @pytest.mark.parametrize(("label", "kind", "options"), [
     pytest.param("Państwo członkowskie UE?", "RADIO", ["Tak", "Nie"], id="tak-nie"),
     pytest.param("Kraj urodzenia", "SELECT", COUNTRIES[:4], id="cztery-opcje"),
+    pytest.param("Data nabycia obywatelstwa", "TEXT_FIELD", [], id="atrybut-obywatelstwa"),
+    pytest.param("Kraj i miejscowość urodzenia", "TEXT_FIELD", [], id="dwie-dane"),
     pytest.param("Kraj urodzenia", "CHECKBOX", COUNTRIES, id="checkbox"),
     pytest.param("Kraj urodzenia", "FILE_UPLOADER", [], id="plik"),
 ])
@@ -285,15 +290,15 @@ def test_country_choices_with_special_option_stay_inline(special: str) -> None:
 
 
 @pytest.mark.parametrize(("kind", "count"), [("SELECT", 6), ("RADIO", 5)])
-def test_country_field_with_enough_country_choices_uses_dictionary(kind: str, count: int) -> None:
+def test_country_field_preserves_closed_choices(kind: str, count: int) -> None:
     data = _analysis_data("PERSON")
     data["subject_pages"][0]["sections"][0]["fields"] = [
         {"label": "Kraj urodzenia", "type": kind, "options": COUNTRIES[:count]},
     ]
     form = build_form(_valid(data))
     field = by_tech_name(form)["kraj_urodzenia"]
-    assert (field["type"], field["dictionaryName"], field["options"]) == ("SELECT", "Kraje", [])
-    assert field["searchEnabled"] and "defaultValue" not in field
+    assert field["type"] == kind and "dictionaryName" not in field
+    assert [option["id"] for option in field["options"]] == COUNTRIES[:count]
     assert lint.check(form) == []
     assert quality.dictionary_issues(form) == []
 
@@ -332,11 +337,11 @@ def test_country_used_as_show_source_preserves_inline_options(
     assert quality.dictionary_issues(form) == []
 
 
-def test_subject_show_source_does_not_protect_same_label_in_applicant_data() -> None:
-    field = {"label": "Kraj urodzenia", "type": "RADIO", "options": COUNTRIES}
-    data = _analysis_data("PERSON", applicant_extra_fields=[field.copy()])
+def test_subject_closed_choices_do_not_prevent_country_dictionary_in_applicant_data() -> None:
+    label = "Kraj urodzenia"
+    data = _analysis_data("PERSON", applicant_extra_fields=[{"label": label, "type": "TEXT_FIELD"}])
     data["subject_pages"][0]["sections"][0]["fields"] = [
-        field,
+        {"label": label, "type": "RADIO", "options": COUNTRIES},
         {
             "label": "Miejscowość urodzenia", "type": "TEXT_FIELD",
             "show_if_all": [{"field": "Kraj urodzenia", "equals": "Austria"}],

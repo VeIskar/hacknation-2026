@@ -412,6 +412,60 @@ def test_country_fields_default_to_poland(name: str, count: int) -> None:
         assert item["searchEnabled"] is True, item["techName"]
 
 
+@pytest.mark.parametrize(("name", "suffixes"), [
+    pytest.param("fields.json", ("", "_siedziba", "_inna_osoba"), id="F5"),
+    pytest.param("analysis_form9.json", ("_siedziba", "_korespondencyjny"), id="F9"),
+])
+def test_export_binds_coi_dictionaries_to_address_selects(name: str, suffixes: tuple[str, ...]) -> None:
+    items = by_tech_name(json.loads(JSONResponse(generated(name)).body))
+    dictionaries = {tech_name: item for tech_name, item in items.items() if "dictionaryName" in item}
+    assert set(dictionaries) == {f"{prefix}{suffix}" for prefix in ("kraj", "wojewodztwo") for suffix in suffixes}
+    for tech_name, item in dictionaries.items():
+        country = tech_name.startswith("kraj")
+        assert item["dictionaryName"] == ("Kraje" if country else "TERYT_4G_DOWODOWY")
+        assert item["type"] == "SELECT" and item["options"] == []
+        assert item["defaultValue"] == (["Polska"] if country else [])
+        assert item["searchEnabled"] is True and item.get("multiLevelTree", False) is (not country)
+        assert item["readOnly"] is False and "defaultValueType" not in item
+    for suffix in suffixes:
+        foreign_city = items[f"miejscowosc{suffix}_zagranica"]
+        assert foreign_city["type"] == "TEXT_FIELD"
+        assert "dictionaryName" not in foreign_city and "defaultValue" not in foreign_city
+
+
+@pytest.mark.parametrize(("name", "addressee", "identity", "editable"), [
+    pytest.param(
+        "fields.json", "nazwa_urzedu", {"numer_pesel": "MLPZ.pesel"},
+        {
+            "kod_pocztowy": "MLPZ.postCode",
+            "ulica": "MLPZ.street",
+            "numer_budynku": "MLPZ.building",
+            "numer_lokalu": "MLPZ.apartment",
+            "adres_e_mail": "MLPZ.email",
+        },
+        id="F5",
+    ),
+    pytest.param("analysis_form9.json", "nazwa_organu", {}, {}, id="F9"),
+])
+def test_export_binds_initial_values_only_to_matching_fields(
+    name: str, addressee: str, identity: dict[str, str], editable: dict[str, str],
+) -> None:
+    items = by_tech_name(json.loads(JSONResponse(generated(name)).body))
+    identity = {"imie": "MLPZ.name", "nazwisko": "MLPZ.surname", **identity}
+    editable = {"numer_telefonu": "MLPZ.phoneNumber", **editable}
+    actual = {
+        tech_name: (item["type"], item.get("defaultValue"), item["defaultValueType"], item["readOnly"])
+        for tech_name, item in items.items() if "defaultValueType" in item
+    }
+    expected = {
+        tech_name: ("TEXT_FIELD", source, "EXTERNAL_SYSTEM", tech_name in identity)
+        for tech_name, source in (identity | editable).items()
+    }
+    assert actual == expected
+    assert {tech_name for tech_name, item in items.items() if item["readOnly"]} == {addressee, *identity}
+    assert items[addressee]["defaultValue"] == analysis(name).addressee.name
+
+
 # --- warianty wnioskodawcy ------------------------------------------------------------------------
 
 

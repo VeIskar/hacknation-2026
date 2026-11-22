@@ -36,8 +36,6 @@ from app.quality import (
     COUNTRY_DICTIONARY,
     normalize_text,
     should_use_country_dictionary,
-    show_source_labels,
-    subject_show_source_labels,
 )
 
 # SZABLONY, rozdz. 5: walidatory to nasze rozszerzenie. False = validation [] wszędzie, jak we wzorcach.
@@ -73,9 +71,8 @@ def build_form(a: FormAnalysis) -> dict:
         data = _add_applicant_fields(data, a.applicant.applicant_extra_fields, names)
     titles = subject_page_titles(page.title for page in a.subject_pages)
     sources: dict[str, _Source] = {}
-    show_sources = subject_show_source_labels(a.subject_pages)
     subject = [
-        tab(title, _subject_sections(page.sections, title, names, sources, show_sources))
+        tab(title, _subject_sections(page.sections, title, names, sources))
         for page, title in zip(a.subject_pages, titles, strict=True)
     ]
     form = {"title": a.title, "tabs": [data, *subject, contact, finish], "flow": {"links": []}}
@@ -143,13 +140,12 @@ def _add_applicant_fields(page: dict, fields: list[SubjectField], names: Names) 
     for applicant_field, field_name in zip(fields, field_names, strict=True):
         located.setdefault(applicant_field.label, field_name)
 
-    show_sources = show_source_labels(fields)
     items = []
     for applicant_field, field_name in zip(fields, field_names, strict=True):
         states = []
         if condition := applicant_field.show_if:
             states = show(answer_is(condition.equals, page["title"], section_name, located[condition.field]))
-        items.append(_subject_field(applicant_field, field_name, states, is_show_source=applicant_field.label in show_sources))
+        items.append(_subject_field(applicant_field, field_name, states))
     extra = section(section_name, title, items)
     sections = [question["field"] for question in page["questions"]]
     index = next(
@@ -186,7 +182,6 @@ def _show_conditions(
 
 def _subject_sections(
     source_sections: list[SubjectSection], title: str, names: Names, sources: dict[str, _Source],
-    show_sources: set[str],
 ) -> list[dict]:
     """Źródła z wcześniejszych pól są już dostępne wraz z warunkami ich widoczności."""
     sections = []
@@ -197,9 +192,7 @@ def _subject_sections(
         for subject_field in subject_section.fields:
             field_name = names.claim(subject_field.label, "pole")
             field_guards = _show_conditions(subject_field, sources)
-            fields.append(_subject_field(
-                subject_field, field_name, show(" and ".join(field_guards)), is_show_source=subject_field.label in show_sources,
-            ))
+            fields.append(_subject_field(subject_field, field_name, show(" and ".join(field_guards))))
             sources.setdefault(subject_field.label, _Source(title, section_name, field_name, section_guards + field_guards))
         sections.append(section(
             section_name, subject_section.title, fields,
@@ -224,11 +217,9 @@ def _validator_from_label(label: str) -> str | None:
     return None if _COMPOUND_LABEL.search(remainder) else validator
 
 
-def _subject_field(subject_field: SubjectField, tech_name: str, states: list[dict], *, is_show_source: bool) -> dict:
+def _subject_field(subject_field: SubjectField, tech_name: str, states: list[dict]) -> dict:
     validation = [template.REQUIRED] if subject_field.required else []
-    if should_use_country_dictionary(
-        subject_field.label, subject_field.type.value, subject_field.options, is_show_source=is_show_source,
-    ):
+    if should_use_country_dictionary(subject_field.label, subject_field.type.value):
         return field(
             "SELECT", tech_name, subject_field.label,
             description=field_description(subject_field.description),

@@ -25,6 +25,12 @@ Gate: `bash scripts/gate.sh api -rs` → bez zmian kodu w tym kroku (tylko dokum
 
 ## Plan
 
+Krok COI 3.3.I (gałąź `mikolaj/coi-33i`).
+
+- `backend/app/quality.py` i `backend/app/generator/form.py`: zawęzić automatyczne użycie `Kraje` do pojedynczego pola bez własnej listy.
+- `backend/tests/test_quality.py` i `backend/tests/test_generator.py`: sprawdzić pola z dokumentu, zapis słowników i źródeł oraz brak przypisań do cudzych danych.
+- Wygenerować F5 i F9 z PDF i fixture’ów analizy, porównać JSON-y i uruchomić bramkę API oraz niezależną recenzję.
+
 Krok COI 3.3.II (Codex, worktree `codex/dictionary-proposals`).
 
 - `scripts/propose_dictionaries.py` odczyta raport E1 i JSON-y COI oraz sprawdzi opcje w pliku źródłowym.
@@ -242,6 +248,8 @@ Krok K2-FINAL, poprawki po recenzji (`REVIEW.md`: 2, 3, 4, 5b, D1–D4), każda 
 - Mikołaj → lider (K2-FINAL, `DELEGACJA.md` rozdz. 3 i 6): K2 czyta DOC przez `olefile`, a XLSX, ODS i DOCX bez `openpyxl`, `odfpy` i `python-docx`. Renderer PDF (`pypdfium2`) to otwarta decyzja z `DECISIONS.md`: bez niego nie czytamy JBIG2, JPEG 2000 ani tekstu zamienionego na krzywe.
 
 ## Log
+
+- COI 3.3.I: poprawiono regułę P4 dla list zamkniętych i etykiet wieloznacznych. F5 i F9 z PDF i fixture’ów są bajtowo zgodne z bazą, lint 0. Bramka API 1368 passed, 7 skipped, niezależna recenzja SHIP. Werdykt PARTIAL, pozostają wybór TERYT z D14, interpretacja readOnly dla MLPZ i próba importu COI. Następny krok to commit człowieka i PR.
 
 - COI 3.3.II: done osobny raport propozycji E1, PDF F9 → 20 wartości ze str. 3, `cmp` zgodny dla JSON-a COI i raportu E1, 16 nowych testów, bramka API `1363 passed, 1 warning`, niezależna recenzja SHIP / next akceptacja i commit człowieka / blocker brak.
 
