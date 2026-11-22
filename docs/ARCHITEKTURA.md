@@ -12,22 +12,28 @@ Eden AI jest jedynym dopuszczonym zewnętrznym API modelu. [Wyłączenia w SPEC]
 
 ## Przegląd architektury
 
-Diagram pokazuje drogę pliku przez proxy, analizę u wybranego dostawcy i kontrolę gotowego JSON-a.
+Diagram pokazuje drogę pliku przez proxy, odczyt w osobnym procesie, analizę w jednym z dwóch trybów modelu i kontrolę gotowego JSON-a.
 
 ```mermaid
 flowchart LR
     Browser["Przeglądarka"] --> Web["web nginx"]
-    Web --> API["api FastAPI"]
-    API --> Read["Odczyt w procesie potomnym"]
-    Read --> Local["Ollama lokalnie"]
-    Read --> Cloud["Eden AI jako wyjątek D9"]
-    Local --> Analysis["Walidacja analizy w API"]
-    Cloud --> Analysis
+    Web -->|"/api/"| API["api FastAPI"]
+    API -->|"bajty pliku"| Read["Odczyt w procesie potomnym"]
+    Read -->|"tekst"| API
+    API -->|"tekst i schemat"| Model
+    subgraph Model["Model, jeden tryb wybrany przez LLM_PROVIDER"]
+        Local["Ollama lokalnie, domyślnie, bez internetu"]
+        Cloud["Eden AI, model otwarty, D9, ścieżka demo"]
+    end
+    Model -->|"FormAnalysis"| Analysis["Naprawy i walidacja"]
     Analysis --> Ground["Strażnik oparcia w tekście"]
     Ground --> Generator["Generator COI"]
     Generator --> Linter["Linter COI"]
     Linter --> Output["JSON COI"]
 ```
+
+Tryb modelu wybiera `LLM_PROVIDER`. Repozytorium domyślnie używa lokalnej Ollamy, która działa bez klucza i bez internetu (D9 pkt 1). Lokalny model na samym CPU nie mieści się w celu D11, więc ścieżką live demo jest Eden AI (D12 pkt 2). Ollama zostaje alternatywą bez internetu (D12 pkt 3).
+[Wybór dostawcy](../backend/app/config.py#L185-L215) · [D9](../DECISIONS.md?plain=1#L365) · [D12](../DECISIONS.md?plain=1#L385)
 
 Kontrakt web przewiduje obsługę przeglądarki i proxy ścieżki `/api/` do `api:8000`.
 nginx ustawia `proxy_read_timeout 300s`. [Konfiguracja nginx](../frontend/nginx.conf#L1-L17)
