@@ -1,65 +1,96 @@
-import { useRef, useState } from 'react'
-import type { FormEvent } from 'react'
-import { UploadIcon } from '../components/icons.tsx'
-import { formatBytes } from '../format.ts'
+import { useState } from 'react'
+import type { DragEvent, FormEvent, RefObject } from 'react'
+import { DocumentIcon, UploadIcon } from '../components/icons.tsx'
+import { PAGES, formatBytes, plural } from '../format.ts'
+import { ACCEPT_ATTRIBUTE, MAX_FILE_MB } from '../upload.ts'
+
+export const UPLOAD_FORM_ID = 'wczytaj'
+export const FILE_INPUT_ID = 'plik'
+export const TOKEN_INPUT_ID = 'token'
+
+/** Błąd przy polu: pliku (typ, nazwa, odpowiedź API) albo tokenu (401). */
+export interface UploadError {
+  text: string
+  target: 'plik' | 'token'
+}
 
 interface Props {
   file: File | null
-  error: string | null
+  pageCount: number | null
+  error: UploadError | null
   errorId: string
+  needToken: boolean
+  token: string
+  inputRef: RefObject<HTMLInputElement | null>
+  tokenRef: RefObject<HTMLInputElement | null>
   onChoose: (file: File | null) => void
+  onToken: (token: string) => void
   onSubmit: () => void
 }
 
-const FORMATS = ['PDF', 'DOC', 'DOCX', 'ODS', 'XLSX', 'JPG', 'PNG']
-
-export function UploadPanel({ file, error, errorId, onChoose, onSubmit }: Props) {
-  const inputRef = useRef<HTMLInputElement>(null)
+/**
+ * Pole pliku i token. Przycisk „Analizuj formularz” stoi osobno (atrybut `form`), bo na telefonie
+ * między kartą pliku a przyciskiem jest pierwsza strona pliku.
+ *
+ * Jeden prawdziwy input przez cały czas, w tym samym miejscu drzewa, więc fokus i wybór zostają
+ * po zmianie wyglądu. Pusta strefa: input jest przezroczysty i wypełnia całą strefę, więc klik,
+ * klawiatura i upuszczenie pliku działają natywnie. Po wyborze pliku input przykrywa tylko odsyłacz
+ * „Zmień plik”, a upuszczenie nowego pliku na kartę obsługuje `onDrop`.
+ */
+export function UploadPanel(props: Props) {
+  const { file, pageCount, error, errorId, needToken, token, inputRef, tokenRef, onChoose, onToken, onSubmit } = props
   const [over, setOver] = useState(false)
+  const fileError = error?.target === 'plik' ? error : null
+  const tokenError = error?.target === 'token' ? error : null
 
   function submit(event: FormEvent) {
     event.preventDefault()
-    if (!file) inputRef.current?.focus()
     onSubmit()
   }
 
+  // Na pustej strefie plik przyjmuje sam input. Na karcie pliku cel upuszczenia to karta.
+  function dragOver(event: DragEvent) {
+    if (!file) return
+    event.preventDefault()
+    setOver(true)
+  }
+
+  function drop(event: DragEvent) {
+    setOver(false)
+    if (!file || event.target === inputRef.current) return
+    event.preventDefault()
+    const dropped = event.dataTransfer.files[0]
+    if (dropped) onChoose(dropped)
+  }
+
+  const describedBy = ['plik-opis', 'plik-stan', fileError && errorId].filter(Boolean).join(' ')
+  const details = file ? [formatBytes(file.size), pageCount ? plural(pageCount, PAGES) : null].filter(Boolean).join(', ') : ''
+
   return (
-    <form onSubmit={submit} noValidate>
-      <label className="pole-etykieta" htmlFor="plik">
+    <form id={UPLOAD_FORM_ID} onSubmit={submit} noValidate>
+      <label className="pole-etykieta" htmlFor={FILE_INPUT_ID} id="plik-etykieta">
         Plik formularza
       </label>
-      <p className="sr-only" id="plik-opis">
-        Formaty: PDF, DOC, DOCX, ODS, XLSX, JPG albo PNG.
+      <p className="pole-opis" id="plik-opis">
+        PDF, DOC, DOCX, ODS, XLSX, JPG albo PNG. Najwyżej {MAX_FILE_MB} MB.
       </p>
-      {/* Prawdziwy input wypełnia całą strefę i jest przezroczysty: klik, klawiatura i upuszczenie
-          pliku działają natywnie. Przycisk w strefie to tylko rysunek, a obrys fokusu rysuje strefa
-          przez :has(:focus-visible). */}
       <div
         className="strefa"
         data-over={over}
         data-plik={file ? 'tak' : 'nie'}
+        data-invalid={fileError ? true : undefined}
         onDragEnter={() => setOver(true)}
         onDragLeave={() => setOver(false)}
-        onDrop={() => setOver(false)}
+        onDragOver={dragOver}
+        onDrop={drop}
       >
-        <input
-          ref={inputRef}
-          id="plik"
-          type="file"
-          title=""
-          accept=".pdf,.doc,.docx,.ods,.xlsx,.jpg,.jpeg,.jpe,.png"
-          aria-describedby={error ? `plik-opis plik-stan ${errorId}` : 'plik-opis plik-stan'}
-          aria-invalid={error ? true : undefined}
-          onChange={(event) => onChoose(event.target.files?.[0] ?? null)}
-        />
         {file ? (
           <>
+            <DocumentIcon size={28} />
             <p className="strefa-plik" id="plik-stan">
-              <b className="strefa-nazwa">{file.name}</b> <span className="strefa-rozmiar">{formatBytes(file.size)}</span>
+              <b className="strefa-nazwa">{file.name}</b>
+              <span className="strefa-rozmiar">{details}</span>
             </p>
-            <span className="b strefa-przycisk" aria-hidden="true">
-              Zmień plik
-            </span>
           </>
         ) : (
           <>
@@ -67,26 +98,61 @@ export function UploadPanel({ file, error, errorId, onChoose, onSubmit }: Props)
             <p className="strefa-glowne" id="plik-stan">
               {over ? 'Upuść plik tutaj' : 'Przeciągnij plik tutaj'}
             </p>
-            <span className="b b-main strefa-przycisk" aria-hidden="true">
-              Wybierz plik
-            </span>
-            <ul className="formaty" aria-hidden="true">
-              {FORMATS.map((format) => (
-                <li key={format}>{format}</li>
-              ))}
-            </ul>
+            <p className="strefa-albo" aria-hidden="true">
+              albo
+            </p>
           </>
         )}
+        <span className="strefa-akcja">
+          {/* Nazwa: etykieta i widoczny napis akcji, żeby zadziałało też sterowanie głosem. */}
+          <input
+            ref={inputRef}
+            id={FILE_INPUT_ID}
+            type="file"
+            title=""
+            accept={ACCEPT_ATTRIBUTE}
+            aria-labelledby="plik-etykieta plik-akcja"
+            aria-describedby={describedBy}
+            aria-invalid={fileError ? true : undefined}
+            onChange={(event) => onChoose(event.target.files?.[0] ?? null)}
+          />
+          <span className={file ? 'strefa-zmien' : 'b b-main strefa-przycisk'} id="plik-akcja" aria-hidden="true">
+            {file ? 'Zmień plik' : 'Wybierz plik'}
+          </span>
+        </span>
       </div>
-      {error && (
+      {fileError && (
         <p className="blad" id={errorId} role="alert" tabIndex={-1}>
-          {error}
+          {fileError.text}
         </p>
       )}
-      {/* Jeden przycisk główny naraz: przed wyborem pliku jest nim „Wybierz plik” w strefie. */}
-      <button type="submit" className={file ? 'b b-main b-krok' : 'b b-krok'}>
-        Analizuj formularz
-      </button>
+      {needToken && (
+        <div className="token" data-invalid={tokenError ? true : undefined}>
+          <label className="pole-etykieta" htmlFor={TOKEN_INPUT_ID}>
+            Token dostępu
+          </label>
+          <p className="pole-opis" id="token-opis">
+            Ten serwer wymaga tokenu. Wklej token od administratora. Zostaje tylko w tej karcie.
+          </p>
+          {tokenError && (
+            <p className="blad" id={errorId} role="alert" tabIndex={-1}>
+              {tokenError.text}
+            </p>
+          )}
+          <input
+            ref={tokenRef}
+            id={TOKEN_INPUT_ID}
+            className="pole-tekst"
+            type="password"
+            autoComplete="off"
+            spellCheck={false}
+            value={token}
+            aria-describedby={tokenError ? `token-opis ${errorId}` : 'token-opis'}
+            aria-invalid={tokenError ? true : undefined}
+            onChange={(event) => onToken(event.target.value)}
+          />
+        </div>
+      )}
     </form>
   )
 }

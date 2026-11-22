@@ -28,6 +28,8 @@
   --color-action-deep: #002d5e;
   --color-action-ink: #ffffff;
   --color-error: #c3272f;
+  /* Tylko znak „Kontrola techniczna: 0 błędów” (wzorzec Podgląd). Kontrast 6,6:1 na białym. */
+  --color-ok: #1b6e36;
 
   /* Dwa cienie w całej aplikacji: kartka papieru i dolna krawędź przycisku głównego. */
   --shadow-sheet: 0 1px 2px rgb(16 40 79 / 0.1), 0 6px 16px -6px rgb(16 40 79 / 0.18);

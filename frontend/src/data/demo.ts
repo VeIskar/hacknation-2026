@@ -22,6 +22,9 @@ export const DEMO_ENTITY = {
   regon: '123456785',
 } as const
 
+/** Przykładowa seria i numer dowodu osobistego z poprawną cyfrą kontrolną. */
+export const DEMO_ID_CARD = 'ABA300000'
+
 const VOIVODESHIPS = [
   'dolnośląskie',
   'kujawsko-pomorskie',

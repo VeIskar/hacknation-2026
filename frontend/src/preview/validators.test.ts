@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { DEMO_ENTITY, INITIAL_DATA } from '../data/demo.ts'
+import { DEMO_ENTITY, DEMO_ID_CARD, INITIAL_DATA } from '../data/demo.ts'
 import { makeField, makeSection, makeTab } from './testForm.ts'
 import { fieldFocusId } from './ids.ts'
-import { firstMissingConsent, isEmail, isNip, isPesel, isRegon, isZipCode, pageErrors, validateField } from './validators.ts'
+import { firstMissingConsent, isEmail, isIdCard, isNip, isPesel, isRegon, isZipCode, pageErrors, validateField } from './validators.ts'
 
 describe('sumy kontrolne', () => {
   it('PESEL: 11 cyfr i zgodna cyfra kontrolna', () => {
@@ -135,5 +135,30 @@ describe('pageErrors', () => {
 
   it('pomija ukryte pole, pola ukrytej sekcji i pola tylko do odczytu', () => {
     expect(pageErrors(tab, {}, new Set(['id-a', 'id-druga'])).map((error) => error.fieldId)).toEqual(['id-b'])
+  })
+})
+
+describe('SERIAL_NUMBER_ID_CARD', () => {
+  const card = makeField({ techName: 'dowod', validation: ['SERIAL_NUMBER_ID_CARD'] })
+
+  it('sprawdza cyfrę kontrolną dowodu osobistego', () => {
+    expect(isIdCard(DEMO_ID_CARD)).toBe(true)
+    expect(isIdCard('aba300000')).toBe(true)
+    expect(isIdCard('ABA400000')).toBe(false)
+    expect(isIdCard('AB1300000')).toBe(false)
+  })
+
+  it('mówi, jak poprawić format i błędny znak', () => {
+    expect(validateField(card, 'ABA 300000')).toBeNull()
+    expect(validateField(card, '123')).toBe('Wpisz 3 litery i 6 cyfr numeru dowodu osobistego')
+    expect(validateField(card, 'ABA400000')).toBe('Sprawdź numer dowodu osobistego, bo jeden znak jest błędny')
+  })
+})
+
+describe('pole poza sekcją', () => {
+  it('ma walidację jak pole w sekcji, z tytułem strony zamiast sekcji', () => {
+    const loose = makeField({ techName: 'luzne', validation: ['REQUIRED'] })
+    const tab = makeTab('Dane', [loose])
+    expect(pageErrors(tab, {}, new Set())).toEqual([{ fieldId: loose.id, sectionTitle: 'Dane', message: 'Uzupełnij pole „luzne”' }])
   })
 })

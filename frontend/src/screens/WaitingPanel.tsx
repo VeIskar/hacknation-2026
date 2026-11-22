@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { formatElapsed } from '../format.ts'
 
 interface Props {
+  /** Chwila wysłania żądania (`performance.now()`), a nie kliknięcia. */
   startedAt: number
   onCancel: () => void
 }
@@ -15,7 +16,11 @@ function useElapsed(startedAt: number): number {
   return now - startedAt
 }
 
-/** Oczekiwanie bez udawanych etapów: prawdziwy czas i jedno zdanie o tym, co robi serwer. */
+/**
+ * Oczekiwanie bez udawanych etapów: prawdziwy czas i jedno zdanie o tym, co robi serwer.
+ * „Przerwij analizę” przerywa żądanie w przeglądarce. API nie ma sposobu, by zatrzymać pracę
+ * serwera, więc komunikat po przerwaniu mówi to wprost (App.tsx).
+ */
 export function WaitingPanel({ startedAt, onCancel }: Props) {
   const elapsed = useElapsed(startedAt)
   return (
@@ -23,12 +28,12 @@ export function WaitingPanel({ startedAt, onCancel }: Props) {
       <p className="czas-etykieta" id="czas-etykieta">
         Analiza trwa
       </p>
-      {/* Licznik zmienia się co sekundę, więc czytnik ekranu go nie ogłasza. Ogłasza zdanie niżej. */}
+      {/* Licznik zmienia się co sekundę, więc czytnik ekranu go nie ogłasza. Zdanie niżej czytnik przeczyta po h1, na który przechodzi fokus. */}
       <p className="czas" role="timer" aria-live="off" aria-labelledby="czas-etykieta">
         {formatElapsed(elapsed)}
       </p>
-      <p className="zdanie" role="status">
-        Serwer czyta plik, a model układa z niego strony, sekcje i pola eUsługi.
+      <p className="zdanie">
+        Serwer czyta plik, a model układa z niego kroki, sekcje i pola eUsługi.
       </p>
       <p className="zdanie">Zwykle trwa to do 3 minut. Nie zamykaj tej karty.</p>
       <button type="button" className="b b-krok" onClick={onCancel}>

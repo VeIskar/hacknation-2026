@@ -1,5 +1,5 @@
 import type { CoiField, CoiTab } from '../types.ts'
-import { isEmptyAnswer } from './answers.ts'
+import { isEmptyAnswer, isSection } from './answers.ts'
 import type { Answer, Answers } from './answers.ts'
 
 function digits(value: string): number[] | null {
@@ -33,6 +33,16 @@ export function isRegon(value: string): boolean {
   const control = (weights: number[]) => (weightedSum(d, weights) % 11) % 10
   if (control([8, 9, 2, 3, 4, 5, 6, 7]) !== d[8]) return false
   return d.length === 9 || control([2, 4, 8, 5, 0, 9, 7, 3, 6, 1, 2, 4, 8]) === d[13]
+}
+
+// Seria i numer dowodu osobistego: 3 litery i 6 cyfr. Pierwsza cyfra jest kontrolna, wagi 7, 3, 1.
+const ID_CARD_WEIGHTS = [7, 3, 1, 0, 7, 3, 1, 7, 3]
+
+export function isIdCard(value: string): boolean {
+  const card = value.toUpperCase()
+  if (!/^[A-Z]{3}\d{6}$/.test(card)) return false
+  const values = [...card].map((char) => (/\d/.test(char) ? Number(char) : char.charCodeAt(0) - 55))
+  return weightedSum(values, ID_CARD_WEIGHTS) % 10 === values[3]
 }
 
 export function isZipCode(value: string): boolean {
@@ -78,6 +88,11 @@ const FORMAT_CHECKS: Record<string, (value: string) => string | null> = {
   },
   ZIP_CODE: (value) => (isZipCode(value) ? null : 'Wpisz kod pocztowy w formacie 00-000'),
   EMAIL: (value) => (isEmail(value) ? null : 'Wpisz adres e-mail w formacie nazwa@domena.pl'),
+  SERIAL_NUMBER_ID_CARD: (value) => {
+    const card = value.replace(/\s/g, '')
+    if (!/^[A-Za-z]{3}\d{6}$/.test(card)) return 'Wpisz 3 litery i 6 cyfr numeru dowodu osobistego'
+    return isIdCard(card) ? null : 'Sprawdź numer dowodu osobistego, bo jeden znak jest błędny'
+  },
 }
 
 export function validatorNames(field: CoiField): string[] {
@@ -121,10 +136,13 @@ export function pageErrors(tab: CoiTab, answers: Answers, hidden: ReadonlySet<st
   const errors: FieldError[] = []
   for (const { field: section } of tab.questions) {
     if (hidden.has(section.id)) continue
-    for (const { field } of section.repeatingSectionGrid) {
+    // Pole poza sekcją (Reguły techniczne go nie dopuszczają, ale plik może przyjść skądinąd).
+    const fields = isSection(section) ? section.repeatingSectionGrid.map((cell) => cell.field) : [section]
+    const sectionTitle = isSection(section) ? section.title : tab.title
+    for (const field of fields) {
       if (hidden.has(field.id) || field.readOnly) continue
       const message = validateField(field, answers[field.id])
-      if (message) errors.push({ fieldId: field.id, sectionTitle: section.title, message })
+      if (message) errors.push({ fieldId: field.id, sectionTitle, message })
     }
   }
   return errors

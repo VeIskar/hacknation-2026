@@ -30,8 +30,13 @@ function initialAnswer(field: CoiField): Answer {
   return Array.isArray(raw) ? (raw[0] ?? '') : raw
 }
 
+export function isSection(field: CoiField): boolean {
+  return field.type === 'SECTION'
+}
+
+/** Pola strony, które przyjmują odpowiedź albo ją pokazują: pola sekcji i pola poza sekcją. */
 export function fieldsOf(tab: CoiTab): CoiField[] {
-  return tab.questions.flatMap(({ field: section }) => section.repeatingSectionGrid.map(({ field }) => field))
+  return tab.questions.flatMap(({ field }) => (isSection(field) ? field.repeatingSectionGrid.map((cell) => cell.field) : [field]))
 }
 
 /** Stan początkowy podglądu: `defaultValue`, a dla danych z rejestru wartość z atrapy. */

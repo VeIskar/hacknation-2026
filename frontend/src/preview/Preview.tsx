@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { FormEvent, MouseEvent } from 'react'
 import { AlertIcon } from '../components/icons.tsx'
 import type { CoiField, CoiForm, CoiTab } from '../types.ts'
-import { initialAnswers, isEmptyAnswer, takesAnswer } from './answers.ts'
+import { fieldsOf, initialAnswers, isEmptyAnswer, isSection, takesAnswer } from './answers.ts'
 import type { Answer, Answers } from './answers.ts'
 import { hiddenIds } from './conditions.ts'
 import { Field } from './Field.tsx'
@@ -19,17 +19,29 @@ function shownAnswer(field: CoiField, answer: Answer | undefined): string {
 }
 
 function findField(tab: CoiTab, fieldId: string): CoiField | undefined {
-  for (const { field: section } of tab.questions) {
-    for (const { field } of section.repeatingSectionGrid) if (field.id === fieldId) return field
-  }
-  return undefined
+  return fieldsOf(tab).find((field) => field.id === fieldId)
+}
+
+function firstShown(tab: CoiTab, hidden: ReadonlySet<string>): string | null {
+  return tab.questions.find(({ field }) => !hidden.has(field.id))?.field.id ?? null
+}
+
+/** Skąd wybór: klik, fokus z klawiatury albo nowa strona. */
+export type SelectHow = 'klik' | 'fokus' | 'strona'
+
+interface Props {
+  /** Formularz po `normalizeForm`: wszystkie klucze są na miejscu. */
+  form: CoiForm
+  /** `id` elementu najwyższego poziomu (sekcji), którego JSON pokazuje panel obok. */
+  selectedId?: string | null
+  onSelect?: (id: string | null, how: SelectHow) => void
 }
 
 /**
  * eUsługa tak, jak zobaczy ją mieszkaniec. Strefa trzyma się DESIGN.md "Forms" i nie bierze
  * stylu warsztatu. Odpowiedzi żyją tutaj, więc przejście między stronami ich nie gubi.
  */
-export function Preview({ form }: { form: CoiForm }) {
+export function Preview({ form, selectedId = null, onSelect }: Props) {
   const [answers, setAnswers] = useState<Answers>(() => initialAnswers(form))
   // null do pierwszego przeliczenia: pole z warunkiem SHOW nie może mignąć, zanim warunek się policzy.
   const [hidden, setHidden] = useState<ReadonlySet<string> | null>(null)
@@ -73,6 +85,7 @@ export function Preview({ form }: { form: CoiForm }) {
     setErrors([])
     setPage(next)
     focusNext.current = 'heading'
+    onSelect?.(firstShown(form.tabs[next], hidden ?? new Set()), 'strona')
   }
 
   async function next(event: FormEvent) {
@@ -98,18 +111,26 @@ export function Preview({ form }: { form: CoiForm }) {
 
   return (
     <form className="eu" noValidate onSubmit={next} aria-label="eUsługa">
-      <p className="eu-step" id="eu-krok">
-        Krok {page + 1} z {form.tabs.length}
-      </p>
+      <div className="eu-head">
+        <p className="eu-step" id="eu-krok">
+          Krok {page + 1} z {form.tabs.length}
+        </p>
+        {/* Pasek tylko powtarza tekst wyżej, więc czytnik ekranu go pomija. */}
+        <div className="eu-bar" aria-hidden="true" style={{ gridTemplateColumns: `repeat(${form.tabs.length}, minmax(0, 1fr))` }}>
+          {form.tabs.map((other, index) => (
+            <span key={other.id} data-done={index <= page} />
+          ))}
+        </div>
+      </div>
       <h3 className="eu-page" ref={headingRef} tabIndex={-1} aria-describedby="eu-krok">
         {tab.title}
       </h3>
 
       {shownErrors.length > 0 && (
-        // Fokus stoi na ramce, a ogłasza się jej wnętrze: z rolą i fokusem na jednym elemencie
-        // czytnik ekranu przeczytałby podsumowanie dwa razy.
+        // Fokus przechodzi na ramkę, więc czytnik ekranu przeczyta ją sam. Rola alert dałaby
+        // drugie ogłoszenie tej samej treści.
         <div className="eu-summary" ref={summaryRef} tabIndex={-1}>
-          <div role="alert">
+          <div>
             <h4>
               <AlertIcon size={22} />
               Popraw błędy na tej stronie
@@ -133,9 +154,22 @@ export function Preview({ form }: { form: CoiForm }) {
 
       {tab.questions.map(({ field: section }) => {
         if (hidden.has(section.id)) return null
+        // Klik albo fokus w elemencie wybiera go do panelu JSON. Bez dodatkowego przystanku Tab.
+        const select = {
+          'data-wybrany': selectedId === section.id ? true : undefined,
+          onClick: () => onSelect?.(section.id, 'klik'),
+          onFocus: () => onSelect?.(section.id, 'fokus'),
+        }
+        if (!isSection(section)) {
+          return (
+            <div key={section.id} className="eu-section eu-luzne" {...select}>
+              <Field field={section} answer={answers[section.id]} error={errorOf(section)} onChange={(value) => answer(section, value)} />
+            </div>
+          )
+        }
         const headingId = `eu-sekcja-${section.id}`
         return (
-          <section key={section.id} className="eu-section" aria-labelledby={headingId}>
+          <section key={section.id} className="eu-section" aria-labelledby={headingId} {...select}>
             <h4 id={headingId}>{section.title}</h4>
             {!isRichTextEmpty(section.description) && (
               <div className="eu-note">
@@ -157,7 +191,7 @@ export function Preview({ form }: { form: CoiForm }) {
             if (other.type === 'FINISH') return null
             const rows = other.questions
               .filter(({ field: section }) => !hidden.has(section.id))
-              .flatMap(({ field: section }) => section.repeatingSectionGrid.map(({ field }) => field))
+              .flatMap(({ field: section }) => (isSection(section) ? section.repeatingSectionGrid.map(({ field }) => field) : [section]))
               .filter((field) => takesAnswer(field) && !hidden.has(field.id))
             return (
               <div key={other.id} className="eu-review-page">

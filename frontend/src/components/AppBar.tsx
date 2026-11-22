@@ -31,7 +31,9 @@ export function AppBar({ phase }: { phase: PhaseName }) {
       <div className="wersja">
         <p className="wb-wrap wersja-wiersz">
           <strong className="wersja-znak">Wersja testowa</strong>
-          <span>Sprawdź wynik przed importem do systemu docelowego.</span>
+          <span>
+            Sprawdź wynik przed importem<span className="wersja-dalej"> do systemu docelowego</span>.
+          </span>
         </p>
       </div>
       <nav className="wb-wrap etapy" aria-label="Etapy pracy">

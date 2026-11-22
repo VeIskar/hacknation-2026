@@ -35,6 +35,9 @@ const web = `http://localhost:${webPort}`
 const fixture = join(root, 'backend', 'tests', 'fixtures', 'fields.json')
 const secondApi = `http://localhost:${apiPort + 1}`
 const secondFixture = join(root, 'backend', 'tests', 'fixtures', 'analysis_form9.json')
+// Trzecie API wymaga tokenu (JWT_ENABLED=true). Sekret żyje tylko w tym procesie.
+const jwtApi = `http://localhost:${apiPort + 2}`
+const jwtSecret = 'look-' + 'x'.repeat(40)
 const axeTags = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']
 const viewports = [
   [1440, 900],
@@ -90,6 +93,23 @@ async function realPdfs() {
   return { main: await firstPdf(directory, '5. '), second: await firstPdf(directory, '9. ') }
 }
 
+// Wzorce COI (folder 1 i 5) i zapisane wyniki API z LOOK_JSON_DIR albo z generated-forms-final/
+// obok repozytorium. Wszystko poza gitem; bez tych plików kontrola jest pusta i mówi o tym.
+async function anyJsonFiles() {
+  const files = []
+  const directory = materialsDir()
+  if (directory) {
+    for (const folder of (await readdir(directory)).filter((name) => /^[15]\. /.test(name))) {
+      for (const name of await readdir(join(directory, folder))) if (name.endsWith('.json')) files.push(join(directory, folder, name))
+    }
+  }
+  const saved = process.env.LOOK_JSON_DIR ?? join(dirname(root), 'generated-forms-final')
+  if (existsSync(saved)) {
+    for (const name of (await readdir(saved)).sort()) if (name.endsWith('.coi.json')) files.push(join(saved, name))
+  }
+  return files
+}
+
 async function responds(url) {
   try {
     await fetch(url, { signal: AbortSignal.timeout(1000) })
@@ -118,6 +138,7 @@ function stopAll() {
 }
 
 const failures = []
+let jwtToken = ''
 function check(name, ok, detail = '') {
   console.log(`${ok ? 'OK  ' : 'BŁĄD'} ${name}${detail ? `: ${detail}` : ''}`)
   if (!ok) failures.push(name)
@@ -208,12 +229,13 @@ async function sameDocument(page, source, label) {
   const form = JSON.parse(await page.locator('.json').textContent())
   const sections = form.tabs.flatMap((tab) => tab.questions.map((cell) => cell.field))
   const fields = sections.flatMap((section) => section.repeatingSectionGrid.map((cell) => cell.field))
-  const card = Object.fromEntries(
-    await page.locator('.karta > div').evaluateAll((rows) => rows.map((row) => [row.querySelector('dt').textContent, row.querySelector('dd').textContent])),
-  )
-  const shown = `${card.Strony} stron, ${card.Sekcje} sekcji, ${card.Pola} pól`
+  const numbers = (await page.locator('.liczby').textContent()) ?? ''
+  const [, pages, sectionCount, fieldCount] = numbers.match(/^(\d+) \S+, (\d+) \S+ i (\d+) \S+\./) ?? []
+  const shown = `${pages} stron, ${sectionCount} sekcji, ${fieldCount} pól`
   const counted = `${form.tabs.length} stron, ${sections.length} sekcji, ${fields.length} pól`
-  check(`${label}: karta liczy to samo co JSON`, shown === counted, `karta ${shown}, JSON ${counted}`)
+  check(`${label}: liczby w nagłówku to liczby z JSON-a`, shown === counted, `nagłówek ${shown}, JSON ${counted}`)
+  const bar = await page.locator('.eu-bar span').count()
+  check(`${label}: pasek kroków ma tyle odcinków, ile stron`, bar === form.tabs.length, String(bar))
   await showJson.click()
   check(`${label}: krok podglądu liczy strony z JSON-a`, await page.getByText(`Krok 1 z ${form.tabs.length}`, { exact: true }).isVisible())
   check(`${label}: tytuł wniosku pochodzi z JSON-a`, await page.getByRole('heading', { level: 2, name: form.title, exact: true }).isVisible(), form.title)
@@ -243,7 +265,7 @@ async function toResult(page, source, width, shot, label, apiUrl = null) {
     await sheet.waitFor({ timeout: 20_000 })
     await shot(page, '02-plik-wybrany')
   } else {
-    const toggle = page.getByRole('button', { name: 'Pokaż oryginał' })
+    const toggle = page.getByRole('button', { name: 'Pokaż pierwszą stronę' })
     await toggle.waitFor()
     // Pytamy o całą treść papieru, nie o płótno: płótno jest niewidoczne także wtedy, gdy PDF jeszcze się rysuje.
     check(`${label}: wąski ekran zwija papier do przycisku`, !(await page.locator('#papier-tresc').isVisible()))
@@ -251,7 +273,7 @@ async function toResult(page, source, width, shot, label, apiUrl = null) {
     await toggle.click()
     await sheet.waitFor({ timeout: 20_000 })
     await shot(page, '02b-oryginal')
-    await page.getByRole('button', { name: 'Ukryj oryginał' }).click()
+    await page.getByRole('button', { name: 'Ukryj pierwszą stronę' }).click()
   }
 
   // Oczekiwanie: atrapa odpowiada od razu, więc odpowiedź wstrzymujemy tutaj, nie w aplikacji.
@@ -271,6 +293,8 @@ async function toResult(page, source, width, shot, label, apiUrl = null) {
 
   await page.getByRole('heading', { level: 1, name: 'Podgląd eUsługi' }).waitFor({ timeout: 20_000 })
   await page.unroute('**/api/forms')
+  check(`${label}: po wyniku fokus stoi na nagłówku h1`, await page.evaluate(() => document.activeElement?.tagName === 'H1'))
+  if (width < PAPER_BESIDE_FROM) check(`${label}: na telefonie JSON jest zwinięty pod podglądem`, !(await page.locator('#json-tresc').isVisible()))
   await shot(page, '04-wynik')
 }
 
@@ -290,6 +314,362 @@ function shooter(prefix, width, label) {
   }
 }
 
+// F3a: wczytanie i analiza bez szczęśliwej ścieżki. Kontrola pliku w przeglądarce, przerwanie,
+// błędy API i serwera pośredniego, token przy JWT_ENABLED=true, fokus i cele 44 px.
+async function uploadChecks(browser, source, [width, height]) {
+  const label = `wczytaj ${width}`
+  const context = await browser.newContext({ viewport: { width, height }, locale: 'pl-PL' })
+  const page = await context.newPage()
+  const errors = watch(page)
+  const shot = shooter('f3', width, label)
+  const analyze = page.getByRole('button', { name: 'Analizuj formularz' })
+  const alert = page.locator('#plik-blad')
+  const focused = (selector) => page.evaluate((query) => document.activeElement?.matches(query) ?? false, selector)
+  let requests = 0
+  page.on('request', (request) => {
+    if (request.url().endsWith('/api/forms')) requests++
+  })
+
+  await page.goto(web)
+  await page.getByRole('heading', { level: 1, name: 'Wczytaj formularz' }).waitFor()
+  check(`${label}: pusta strefa nie ma jeszcze przycisku „Analizuj formularz”`, (await analyze.count()) === 0)
+  check(`${label}: „Jak to działa” jest na ekranie`, await page.getByRole('heading', { level: 2, name: 'Jak to działa' }).isVisible())
+  check(`${label}: opis mówi o limicie 10 MB`, await page.getByText('Najwyżej 10 MB.').isVisible())
+
+  // Klawiatura: pierwszy Tab w treści trafia do pola pliku, a obrys rysuje strefa.
+  await page.locator('#plik').focus()
+  await page.keyboard.press('Shift+Tab')
+  await page.keyboard.press('Tab')
+  const ring = await page.locator('.strefa').evaluate((element) => getComputedStyle(element).outlineStyle)
+  check(`${label}: pole pliku z klawiatury ma obrys na strefie`, (await focused('#plik')) && ring === 'solid', ring)
+
+  // Kontrola w przeglądarce: zły typ, pusty plik i za duży plik nie idą do API.
+  const cases = [
+    [{ name: 'wniosek.txt', mimeType: 'text/plain', buffer: Buffer.from('tekst') }, 'Ten typ pliku nie jest obsługiwany'],
+    [{ name: 'pusty.pdf', mimeType: 'application/pdf', buffer: Buffer.alloc(0) }, 'Plik jest pusty'],
+    [{ name: 'duzy.pdf', mimeType: 'application/pdf', buffer: Buffer.alloc(10 * 1024 * 1024 + 1, 32) }, 'Limit to 10 MB'],
+  ]
+  for (const [file, expected] of cases) {
+    await page.getByLabel('Plik formularza').setInputFiles(file)
+    await analyze.click()
+    await alert.waitFor()
+    const text = (await alert.textContent()) ?? ''
+    check(`${label}: ${file.name} zatrzymany przed wysłaniem`, text.includes(expected) && requests === 0, `${text} (żądań: ${requests})`)
+    check(`${label}: po błędzie pliku fokus stoi na komunikacie`, await focused('#plik-blad'))
+    check(`${label}: pole pliku ma aria-invalid przy błędzie`, (await page.locator('#plik').getAttribute('aria-invalid')) === 'true')
+  }
+  await shot(page, '01-zly-typ')
+
+  // Karta pliku: nazwa, rozmiar, liczba stron i odsyłacz „Zmień plik” z celem 44 px.
+  await page.getByLabel('Plik formularza').setInputFiles(source)
+  check(`${label}: wybór nowego pliku czyści błąd`, (await alert.count()) === 0)
+  const card = page.locator('#plik-stan')
+  await page.getByText(/\d+ (strona|strony|stron)$/).first().waitFor({ timeout: 20_000 })
+  check(`${label}: karta pliku podaje nazwę i liczbę stron`, ((await card.textContent()) ?? '').includes(source.name))
+  const change = await page.locator('.strefa-akcja').boundingBox()
+  check(`${label}: odsyłacz „Zmień plik” ma co najmniej 44 px`, change.height >= 44 && change.width >= 44, `${change.width}×${change.height}`)
+  check(`${label}: nazwa pola pliku zawiera „Zmień plik”`, (await page.getByRole('button', { name: /Plik formularza Zmień plik/ }).count()) + (await page.getByLabel('Plik formularza Zmień plik').count()) > 0)
+
+  // Przerwanie: żądanie wisi, „Przerwij analizę” wraca do pliku z uczciwym komunikatem.
+  let release
+  const held = new Promise((resolve) => {
+    release = resolve
+  })
+  await page.route('**/api/forms', async (route) => {
+    await held
+    await route.continue().catch(() => {})
+  })
+  await analyze.click()
+  await page.getByRole('heading', { level: 1, name: 'Analiza formularza' }).waitFor()
+  check(`${label}: na ekranie analizy fokus stoi na nagłówku`, await focused('h1'))
+  await page.getByRole('button', { name: 'Przerwij analizę' }).click()
+  const notice = page.locator('#plik-uwaga')
+  await notice.waitFor()
+  const noticeText = (await notice.textContent()) ?? ''
+  check(`${label}: po przerwaniu komunikat nie obiecuje zatrzymania serwera`, noticeText.includes('Serwer mógł jeszcze dokończyć pracę'), noticeText)
+  check(`${label}: po przerwaniu fokus stoi na komunikacie`, await focused('#plik-uwaga'))
+  check(`${label}: po przerwaniu plik zostaje wybrany`, ((await card.textContent()) ?? '').includes(source.name))
+  await shot(page, '02-przerwano')
+  release()
+  await page.unroute('**/api/forms')
+
+  // Błędy API: detail bez zmian. Serwer pośredni bez detail i brak sieci: własne zdanie.
+  const responses = [
+    [{ status: 503, contentType: 'application/json', body: JSON.stringify({ detail: 'Model AI nie odpowiada. Spróbuj ponownie za chwilę.' }) }, 'Model AI nie odpowiada. Spróbuj ponownie za chwilę.'],
+    [{ status: 500, contentType: 'application/json', body: JSON.stringify({ detail: 'Coś poszło nie tak. Spróbuj ponownie.' }) }, 'Coś poszło nie tak. Spróbuj ponownie.'],
+    [{ status: 504, contentType: 'text/html', body: '<html>504 Gateway Time-out</html>' }, 'Serwer nie odpowiedział na czas. Spróbuj ponownie za chwilę.'],
+    [{ status: 413, contentType: 'text/html', body: '<html>413</html>' }, 'Plik jest za duży dla serwera. Wybierz mniejszy plik.'],
+    ['abort', 'Nie udało się połączyć z serwerem. Spróbuj ponownie.'],
+  ]
+  for (const [response, expected] of responses) {
+    await page.route('**/api/forms', (route) => (response === 'abort' ? route.abort('failed') : route.fulfill(response)))
+    await analyze.click()
+    await alert.waitFor()
+    const text = (await alert.textContent()) ?? ''
+    check(`${label}: ${response === 'abort' ? 'brak sieci' : response.status} daje „${expected}”`, text === expected, text)
+    check(`${label}: po błędzie API zostaje karta pliku`, ((await card.textContent()) ?? '').includes(source.name))
+    await page.unroute('**/api/forms')
+  }
+  await shot(page, '03-blad-serwera')
+
+  // Token: prawdziwe API z JWT_ENABLED=true. 401 odsłania pole tokenu, zły token daje znów 401.
+  await page.route('**/api/forms', (route) => route.continue({ url: `${jwtApi}/api/forms` }))
+  await analyze.click()
+  const tokenField = page.getByLabel('Token dostępu')
+  await tokenField.waitFor()
+  const unauthorized = (await alert.textContent()) ?? ''
+  check(`${label}: 401 pokazuje detail z API`, unauthorized === 'Brak tokenu dostępu albo token jest nieważny.', unauthorized)
+  check(`${label}: po 401 fokus stoi na komunikacie`, await focused('#plik-blad'))
+  await shot(page, '04-token')
+  await analyze.click()
+  check(`${label}: pusty token zatrzymuje wysłanie`, ((await alert.textContent()) ?? '').includes('Wklej token'))
+  await tokenField.fill('zly.token.jwt')
+  await analyze.click()
+  await page.waitForFunction(() => document.querySelector('#plik-blad')?.textContent?.startsWith('Brak tokenu'))
+  check(`${label}: zły token daje 401`, ((await alert.textContent()) ?? '').startsWith('Brak tokenu'))
+  let header = ''
+  page.on('request', (request) => {
+    if (request.url().endsWith('/api/forms')) header = request.headers().authorization ?? ''
+  })
+  await tokenField.fill(jwtToken)
+  await analyze.click()
+  await page.getByRole('heading', { level: 1, name: 'Podgląd eUsługi' }).waitFor({ timeout: 20_000 })
+  check(`${label}: dobry token daje wynik`, header === `Bearer ${jwtToken}`)
+  await page.unroute('**/api/forms')
+
+  check(`${label}: brak błędów JavaScript na stronie`, errors.length === 0, errors.join(' | '))
+  await context.close()
+}
+
+// F3b: panel JSON wybranego elementu, kontrola techniczna i oznaczenie danych przykładowych.
+async function jsonPanelChecks(page, width) {
+  const label = `json ${width}`
+  const narrow = width < PAPER_BESIDE_FROM
+  const content = page.locator('#json-tresc')
+  if (narrow && !(await content.isVisible())) await page.getByRole('button', { name: 'JSON wybranego elementu' }).click()
+  check(`${label}: kontrola techniczna bez błędów`, await page.getByText('Kontrola techniczna: 0 błędów').isVisible())
+  check(`${label}: podgląd mówi, że dane są przykładowe`, await page.getByText('Dane z rejestru i słowniki w podglądzie są przykładowe.').isVisible())
+  const element = async () => JSON.parse((await page.locator('#panel-json').textContent()) ?? 'null')
+  const first = await element()
+  check(`${label}: na starcie panel pokazuje pierwszą sekcję`, first?.field?.type === 'SECTION' && (await page.locator('[data-wybrany="true"]').count()) === 1, first?.field?.techName)
+  check(`${label}: JSON jest podświetlony`, (await page.locator('#panel-json .json-klucz').count()) > 0)
+  const showJson = page.getByRole('button', { name: 'Pokaż JSON' })
+  await showJson.click()
+  await page.getByRole('region', { name: 'Adres zamieszkania', exact: true }).getByRole('combobox').first().focus()
+  check(`${label}: fokus w sekcji nie wyłącza „Pokaż JSON”`, (await showJson.getAttribute('aria-pressed')) === 'true')
+  await page.getByRole('region', { name: 'Adres zamieszkania', exact: true }).getByRole('heading').click()
+  check(`${label}: klik w sekcję wraca do JSON-u elementu`, (await showJson.getAttribute('aria-pressed')) === 'false')
+  await page.getByRole('region', { name: 'Twoje dane' }).click()
+  check(`${label}: klik w sekcję pokazuje jej JSON`, (await element())?.field?.techName === 'twoje_dane')
+  check(`${label}: opis mówi, który to element`, ((await page.locator('.inspektor-co').textContent()) ?? '').includes('„Twoje dane”'))
+  await page.getByRole('region', { name: 'Adres zamieszkania', exact: true }).getByRole('combobox').first().focus()
+  check(`${label}: fokus z klawiatury też wybiera sekcję`, (await element())?.field?.techName === 'adres_zamieszkania')
+  await page.screenshot({ path: join(shots, `f3-05-json-elementu-${width}.png`), fullPage: true })
+  // Fokus z klawiatury: Tab z ostatniego przycisku podglądu prowadzi do kodu JSON.
+  await page.getByRole('button', { name: 'Dalej' }).focus()
+  await page.keyboard.press('Tab')
+  // Na telefonie między nimi stoi przełącznik zwiniętego panelu.
+  if (narrow) await page.keyboard.press('Tab')
+  const panelRing = await page.evaluate(() => {
+    const active = document.activeElement
+    return active?.id === 'panel-json' ? getComputedStyle(active).outlineStyle : `fokus na ${active?.tagName}`
+  })
+  check(`${label}: kod JSON jest osiągalny z klawiatury i ma obrys`, panelRing === 'solid', panelRing)
+}
+
+// Odpowiedź dla pól oznaczonych jako błędne, według typu pola i podpowiedzi formatu.
+async function fillInvalid(page) {
+  const ids = await page.locator('.eu [aria-invalid="true"]').evaluateAll((elements) => elements.map((element) => element.id))
+  const groups = new Set()
+  for (const id of ids) {
+    const field = page.locator(`[id="${id}"]`)
+    const info = await field.evaluate((element) => ({
+      tag: element.tagName,
+      type: element.getAttribute('type') ?? '',
+      name: element.getAttribute('name') ?? '',
+      inputMode: element.inputMode,
+      hint: element.closest('.eu-field')?.querySelector('[id$="-format"]')?.textContent ?? '',
+    }))
+    if (info.type === 'radio') {
+      if (groups.has(info.name)) continue
+      groups.add(info.name)
+      await field.check()
+    } else if (info.type === 'checkbox') await field.check()
+    else if (info.tag === 'SELECT') await field.selectOption({ index: 1 })
+    else if (info.type === 'file') await field.setInputFiles({ name: 'zalacznik.pdf', mimeType: 'application/pdf', buffer: samplePdf() })
+    else if (info.type === 'date') await field.fill('2026-01-15')
+    else if (info.type === 'email') await field.fill('anna@example.com')
+    else if (info.tag === 'TEXTAREA') await field.fill('Przykładowy opis.')
+    else {
+      const value = info.hint.includes('11 cyfr')
+        ? '85071201244'
+        : info.hint.includes('10 cyfr')
+          ? '1234563218'
+          : info.hint.includes('9 albo 14')
+            ? '123456785'
+            : info.hint.includes('00-000')
+              ? '00-950'
+              : info.hint.includes('3 litery')
+                ? 'ABA300000'
+                : info.inputMode === 'decimal'
+                  ? '12'
+                  : 'Przykład'
+      await field.fill(value)
+    }
+  }
+  return ids.length
+}
+
+// „Dalej” aż do następnej strony. Błędy walidacji poprawia fillInvalid, najwyżej trzy razy.
+async function nextPage(page) {
+  const title = page.locator('.eu-page')
+  const before = await title.textContent()
+  for (let attempt = 0; attempt < 4; attempt++) {
+    await page.getByRole('button', { name: 'Dalej' }).click()
+    await page.waitForFunction(
+      (old) => document.querySelector('.eu-summary') || document.querySelector('.eu-page')?.textContent !== old,
+      before,
+    )
+    if ((await title.textContent()) !== before) return true
+    if ((await fillInvalid(page)) === 0) return false
+  }
+  return false
+}
+
+// Wynik z dowolnego JSON-a: każda strona do końca, z poprawnymi odpowiedziami na wymagane pola.
+async function walkToFinish(page, form, label, from = 1) {
+  for (let step = from; step < form.tabs.length; step++) {
+    if (!(await nextPage(page))) {
+      check(`${label}: przejście do kroku ${step + 1}`, false, (await page.locator('.eu-summary').textContent()) ?? '')
+      return false
+    }
+  }
+  const last = `Krok ${form.tabs.length} z ${form.tabs.length}`
+  check(`${label}: wszystkie ${form.tabs.length} strony do strony końcowej`, await page.getByText(last, { exact: true }).isVisible())
+  check(`${label}: strona końcowa nie ma „Dalej”`, (await page.getByRole('button', { name: 'Dalej' }).count()) === 0)
+  return true
+}
+
+// Formularz 9: jeden plik, jeden JSON, wiele stron i zależności między stronami.
+async function form9Checks(page, width) {
+  const label = `p9 ${width}`
+  const region = (name) => page.getByRole('region', { name, exact: true })
+  const visible = async (name) => (await region(name).count()) > 0
+  const form = JSON.parse(bodiesFor(page).at(-1) ?? 'null')
+  check(`${label}: jedna odpowiedź API dla jednego pliku`, bodiesFor(page).length === 1, String(bodiesFor(page).length))
+
+  check(`${label}: bez wyboru nie ma sekcji pełnomocnictwa`, !(await visible('Pełnomocnictwo')))
+  await page.getByRole('radio', { name: 'Pełnomocnik' }).check()
+  await region('Pełnomocnictwo').waitFor()
+  check(`${label}: „Pełnomocnik” pokazuje pełnomocnictwo i opłatę`, (await visible('Pełnomocnictwo')) && (await visible('Opłata skarbowa za pełnomocnictwo')))
+  check(`${label}: „Reprezentant” zostaje ukryty`, !(await visible('Potwierdzenie, że jesteś reprezentantem')))
+  if (!(await nextPage(page))) return check(`${label}: przejście na stronę „Kandydat”`, false)
+
+  check(`${label}: dyscypliny ukryte przed wyborem wniosku`, !(await visible('Dyscypliny sportowe kandydata')))
+  await page.getByRole('radio', { name: 'Stypendium' }).check()
+  await region('Dyscypliny sportowe kandydata').waitFor()
+  check(`${label}: „Stypendium” pokazuje dyscypliny`, await visible('Dyscypliny sportowe kandydata'))
+  await page.getByRole('radio', { name: 'Wyróżnienie' }).check()
+  await region('Dyscypliny sportowe kandydata').waitFor({ state: 'detached' })
+  check(`${label}: „Wyróżnienie” chowa dyscypliny`, !(await visible('Dyscypliny sportowe kandydata')))
+  await shot9(page, width, '06-kandydat')
+  if (!(await nextPage(page))) return check(`${label}: przejście na stronę „Osiągnięcia”`, false)
+
+  check(`${label}: wybór ze strony 2 steruje stroną 3`, (await visible('Podopieczni trenera')) && !(await visible('Osiągnięcia sportowca')))
+  check(`${label}: przed wyborem liczby jest tylko podopieczny 1`, (await visible('Dane podopiecznego 1')) && !(await visible('Dane podopiecznego 2')))
+  await page.getByRole('radio', { name: '2', exact: true }).check()
+  await region('Dane podopiecznego 2').waitFor()
+  check(`${label}: „2” pokazuje drugiego podopiecznego, ale nie trzeciego`, (await visible('Dane podopiecznego 2')) && !(await visible('Dane podopiecznego 3')))
+  await page.getByRole('group', { name: /^Czy podopieczny 2 jest pełnoletni/ }).getByRole('radio', { name: 'Nie' }).check()
+  await shot9(page, width, '07-osiagniecia')
+  if (!(await nextPage(page))) return check(`${label}: przejście na stronę „Zgody”`, false)
+
+  check(`${label}: zgody idą za wyborem „Wyróżnienie”`, (await visible('Zgoda trenera')) && !(await visible('Zgoda pełnoletniego kandydata do stypendium')))
+  check(
+    `${label}: niepełnoletni podopieczny 2 daje zgodę opiekuna, a nie własną`,
+    (await visible('Zgoda opiekuna podopiecznego 2')) && !(await visible('Zgoda pełnoletniego podopiecznego 2')),
+  )
+  check(
+    `${label}: przy liczbie 2 nie ma zgód podopiecznego 3`,
+    !(await visible('Zgoda opiekuna podopiecznego 3')) && !(await visible('Zgoda pełnoletniego podopiecznego 3')),
+  )
+  await page.getByRole('button', { name: 'Wstecz' }).click()
+  await page.getByRole('heading', { level: 3, name: 'Osiągnięcia' }).waitFor()
+  check(`${label}: „Wstecz” zachowuje wybór liczby podopiecznych`, await page.getByRole('radio', { name: '2', exact: true }).isChecked())
+  if (!(await walkToFinish(page, form, label, 3))) return
+  const review = (await page.locator('.eu-review').textContent()) ?? ''
+  check(`${label}: przegląd pokazuje wybory z wielu stron`, review.includes('Pełnomocnik') && review.includes('Wyróżnienie'))
+  await shot9(page, width, '08-strona-koncowa')
+}
+
+const responseBodies = new WeakMap()
+function bodiesFor(page) {
+  return responseBodies.get(page) ?? []
+}
+function recordBodies(page) {
+  const bodies = []
+  responseBodies.set(page, bodies)
+  page.on('response', async (response) => {
+    if (response.url().endsWith('/api/forms') && response.ok()) bodies.push(await response.text())
+  })
+}
+
+async function shot9(page, width, name) {
+  await page.screenshot({ path: join(shots, `p9-${name}-${width}.png`), fullPage: true })
+  const result = await new AxeBuilder({ page }).withTags(axeTags).analyze()
+  const found = result.violations.map((violation) => `${violation.id} (${violation.nodes[0].target.join(' ')})`)
+  check(`p9 ${width}: axe ${name}`, found.length === 0, found.join(', '))
+}
+
+// Dowolny poprawny JSON COI: wzorce z folderów 1 i 5 oraz zapisane wyniki API (np. Eden AI).
+// Przeglądarka dostaje plik jako odpowiedź API, więc podgląd nie wie, skąd przyszedł.
+async function anyJsonChecks(browser, files) {
+  for (const path of files) {
+    const name = basename(path)
+    const label = `JSON ${name}`
+    const raw = await readFile(path, 'utf-8')
+    const form = JSON.parse(raw)
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'pl-PL' })
+    const page = await context.newPage()
+    const errors = watch(page)
+    await page.route('**/api/forms', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: raw }))
+    await page.goto(web)
+    await page.getByLabel('Plik formularza').setInputFiles({ name: 'wniosek.pdf', mimeType: 'application/pdf', buffer: samplePdf() })
+    await page.getByRole('button', { name: 'Analizuj formularz' }).click()
+    await page.getByRole('heading', { level: 1, name: 'Podgląd eUsługi' }).waitFor({ timeout: 20_000 })
+    check(`${label}: tytuł z pliku`, await page.getByRole('heading', { level: 2, name: form.title, exact: true }).isVisible(), form.title)
+    const problems = await page.locator('.kontrola').textContent()
+    check(`${label}: kontrola techniczna bez błędów`, problems?.includes('0 błędów') ?? false, problems ?? '')
+    await walkToFinish(page, form, label)
+    check(`${label}: brak błędów JavaScript`, errors.length === 0, errors.join(' | '))
+    await context.close()
+  }
+  if (files.length > 0) await brokenJsonCheck(browser, files.at(-1))
+}
+
+// Plik bez `id` w jednym polu: podgląd działa na kopii, ale znak kontroli mówi o pliku z API,
+// a panel JSON pokazuje element z pliku, nie z kopii.
+async function brokenJsonCheck(browser, path) {
+  const label = `JSON bez id (${basename(path)})`
+  const form = JSON.parse(await readFile(path, 'utf-8'))
+  const section = form.tabs[0].questions[0].field
+  delete section.repeatingSectionGrid[0].field.id
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'pl-PL' })
+  const page = await context.newPage()
+  const errors = watch(page)
+  await page.route('**/api/forms', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(form) }))
+  await page.goto(web)
+  await page.getByLabel('Plik formularza').setInputFiles({ name: 'wniosek.pdf', mimeType: 'application/pdf', buffer: samplePdf() })
+  await page.getByRole('button', { name: 'Analizuj formularz' }).click()
+  await page.getByRole('heading', { level: 1, name: 'Podgląd eUsługi' }).waitFor({ timeout: 20_000 })
+  const badge = (await page.locator('.kontrola').textContent()) ?? ''
+  check(`${label}: kontrola mówi o braku w pliku`, badge.includes('1 błąd') && badge.includes('1 pole nie ma identyfikatora albo typu.'), badge)
+  const shown = JSON.parse((await page.locator('#panel-json').textContent()) ?? 'null')
+  check(`${label}: panel pokazuje sekcję z pliku, bez dopisanego id`, shown?.field?.techName === section.techName && !('id' in (shown?.field?.repeatingSectionGrid?.[0]?.field ?? {})))
+  check(`${label}: brak błędów JavaScript`, errors.length === 0, errors.join(' | '))
+  await context.close()
+}
+
 // Krótki przepływ na drugim pliku: wielostronicowy PDF pokazuje miniatury i przyklejony papier.
 async function walkShort(browser, source, [width, height], prefix) {
   const label = `${prefix} ${width}`
@@ -297,6 +677,7 @@ async function walkShort(browser, source, [width, height], prefix) {
   const page = await context.newPage()
   const errors = watch(page)
   const shot = shooter(prefix, width, label)
+  recordBodies(page)
   await page.clock.install()
   await toResult(page, source, width, shot, label, secondApi)
   const form = await sameDocument(page, source, label)
@@ -305,7 +686,7 @@ async function walkShort(browser, source, [width, height], prefix) {
     const thumbnails = page.getByRole('group', { name: 'Strony oryginału' }).getByRole('button')
     if ((await thumbnails.count()) > 1) {
       await thumbnails.nth(1).click()
-      await page.getByText(/^Strona 2 z \d+$/).waitFor()
+      await page.getByText(/^Strona 2 z \d+\.$/).waitFor()
       check(`${label}: miniatura przełącza stronę papieru`, (await thumbnails.nth(1).getAttribute('aria-pressed')) === 'true')
       await page.getByRole('button', { name: 'Dalej' }).scrollIntoViewIfNeeded()
       const top = await page.getByRole('region', { name: 'Oryginał' }).evaluate((element) => element.getBoundingClientRect().top)
@@ -313,6 +694,8 @@ async function walkShort(browser, source, [width, height], prefix) {
       await page.screenshot({ path: join(shots, `${prefix}-05-przewiniete-${width}.png`) })
     }
   }
+  await page.evaluate(() => window.scrollTo(0, 0))
+  await form9Checks(page, width)
   check(`${label}: brak błędów JavaScript na stronie`, errors.length === 0, errors.join(' | '))
   await context.close()
 }
@@ -323,6 +706,10 @@ async function walk(browser, source, [width, height]) {
   const errors = watch(page)
   const shot = shooter('f1', width, String(width))
 
+  const bodies = []
+  page.on('response', async (response) => {
+    if (response.url().endsWith('/api/forms') && response.ok()) bodies.push(await response.text())
+  })
   // Zegar Playwrighta pozwala pokazać licznik po ponad minucie bez czekania minuty.
   await page.clock.install()
   await toResult(page, source, width, shot, String(width))
@@ -345,12 +732,15 @@ async function walk(browser, source, [width, height]) {
     page.getByRole('button', { name: 'Pobierz JSON' }).click(),
   ])
   const name = download.suggestedFilename()
-  const form = JSON.parse(await readFile(await download.path(), 'utf-8'))
+  const downloaded = await readFile(await download.path(), 'utf-8')
+  check(`${width}: pobrany plik to odpowiedź API bajt w bajt`, bodies.length > 0 && downloaded === bodies.at(-1), `${downloaded.length} i ${bodies.at(-1)?.length}`)
+  const form = JSON.parse(downloaded)
   check(`${width}: „Pobierz JSON” daje plik .json`, name.endsWith('.json'), name)
   check(`${width}: pierwsza strona to „Dane”, ostatnia to FINISH`, form.tabs[0].title === 'Dane' && form.tabs.at(-1).type === 'FINISH')
 
   await showJson.click()
-  check(`${width}: drugi klik wraca do karty`, await page.getByRole('tab', { name: 'Karta' }).getAttribute('aria-selected') === 'true')
+  check(`${width}: drugi klik wraca do JSON-u wybranego elementu`, (await showJson.getAttribute('aria-pressed')) === 'false')
+  await jsonPanelChecks(page, width)
   await preview(page, width, (name) => shot(page, name, 'f2'))
 
   // Krok 8 z "Demo flow": nazwa .pdf, treść nie jest PDF-em.
@@ -382,6 +772,7 @@ async function main() {
   for (const [url, label] of [
     [`${api}/health`, `port ${apiPort}`],
     [`${secondApi}/health`, `port ${apiPort + 1}`],
+    [`${jwtApi}/health`, `port ${apiPort + 2}`],
     [web, `port ${webPort}`],
   ]) {
     if (await responds(url)) throw new Error(`${label} jest zajęty. Ustaw LOOK_API_PORT albo LOOK_WEB_PORT.`)
@@ -403,6 +794,16 @@ async function main() {
     cwd: frontend,
     env: { ...process.env, API_URL: api },
   })
+  start(
+    join(root, 'backend', '.venv', 'bin', 'python'),
+    ['-m', 'uvicorn', 'app.main:app', '--app-dir', join(root, 'backend'), '--port', String(apiPort + 2), '--log-level', 'warning'],
+    { cwd: root, env: { ...process.env, LLM_FIXTURE: fixture, JWT_ENABLED: 'true', JWT_SECRET: jwtSecret } },
+  )
+  jwtToken = execFileSync(join(root, 'backend', '.venv', 'bin', 'python'), ['-m', 'app.auth', 'token', '--hours', '1'], {
+    cwd: join(root, 'backend'),
+    env: { ...process.env, JWT_SECRET: jwtSecret },
+    encoding: 'utf-8',
+  }).trim()
   if (second) {
     start(
       join(root, 'backend', '.venv', 'bin', 'python'),
@@ -412,12 +813,17 @@ async function main() {
     await waitFor(`${secondApi}/health`, 'drugie API')
   }
   await waitFor(`${api}/health`, 'API')
+  await waitFor(`${jwtApi}/health`, 'API z tokenem')
   await waitFor(web, 'Vite')
 
   const browser = await chromium.launch()
   try {
+    for (const viewport of viewports) await uploadChecks(browser, source, viewport)
     for (const viewport of viewports) await walk(browser, source, viewport)
     if (second) for (const viewport of viewports) await walkShort(browser, second, viewport, 'p9')
+    const jsonFiles = await anyJsonFiles()
+    await anyJsonChecks(browser, jsonFiles)
+    console.log(`dowolny JSON: ${jsonFiles.length} plików (${jsonFiles.map((path) => basename(path)).join(', ')})`)
   } finally {
     await browser.close()
   }

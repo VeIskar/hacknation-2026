@@ -20,6 +20,7 @@ const FORMAT_HINTS: Record<string, string> = {
   NIP: '10 cyfr',
   REGON: '9 albo 14 cyfr',
   ZIP_CODE: 'Format: 00-000',
+  SERIAL_NUMBER_ID_CARD: '3 litery i 6 cyfr',
 }
 
 // Dane z rejestru mówią, czym jest pole, więc przeglądarka może je podpowiedzieć.
@@ -49,7 +50,7 @@ type FieldSize = 'kod' | 'numer'
 function sizeOf(field: CoiField): FieldSize | undefined {
   const names = validatorNames(field)
   if (names.includes('ZIP_CODE') || field.defaultValue === 'MLPZ.postCode') return 'kod'
-  if (['PESEL', 'NIP', 'REGON'].some((name) => names.includes(name)) || field.defaultValue === 'MLPZ.pesel') return 'numer'
+  if (['PESEL', 'NIP', 'REGON', 'SERIAL_NUMBER_ID_CARD'].some((name) => names.includes(name)) || field.defaultValue === 'MLPZ.pesel') return 'numer'
   return undefined
 }
 
